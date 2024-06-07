@@ -14,10 +14,8 @@ import (
 	"time"
 
 	"github.com/coder/coder/v2/codersdk"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +25,7 @@ import (
 // For each directory containing a `main.tf` under `/integration`, performs the following:
 // - Creates a temporary Coder instance running in Docker
 // - Runs the `main.tf` specified in the given test directory against the Coder deployment
-// - Asserts the state of the deployment via `codersdk`
+// - Asserts the state of the deployment via `codersdk`.
 func TestIntegration(t *testing.T) {
 	if os.Getenv("TF_ACC") == "1" {
 		t.Skip("Skipping integration tests during tf acceptance tests")
@@ -188,34 +186,6 @@ func startCoder(ctx context.Context, t *testing.T, name string) *codersdk.Client
 	require.NoError(t, err, "login to coder instance with password")
 	client.SetSessionToken(resp.SessionToken)
 	return client
-}
-
-// execContainer executes the given command in the given container and returns
-// the output and the exit code of the command.
-func execContainer(ctx context.Context, t testing.TB, containerID, command string) (string, int) {
-	t.Helper()
-	t.Logf("exec container cmd: %q", command)
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	require.NoError(t, err, "connect to docker")
-	defer cli.Close()
-	execConfig := types.ExecConfig{
-		AttachStdout: true,
-		AttachStderr: true,
-		Cmd:          []string{"/bin/sh", "-c", command},
-	}
-	ex, err := cli.ContainerExecCreate(ctx, containerID, execConfig)
-	require.NoError(t, err, "create container exec")
-	resp, err := cli.ContainerExecAttach(ctx, ex.ID, types.ExecStartCheck{})
-	require.NoError(t, err, "attach to container exec")
-	defer resp.Close()
-	var buf bytes.Buffer
-	_, err = stdcopy.StdCopy(&buf, &buf, resp.Reader)
-	require.NoError(t, err, "read stdout")
-	out := buf.String()
-	t.Log("exec container output:\n" + out)
-	execResp, err := cli.ContainerExecInspect(ctx, ex.ID)
-	require.NoError(t, err, "get exec exit code")
-	return out, execResp.ExitCode
 }
 
 // randomPort is a helper function to find a free random port.
