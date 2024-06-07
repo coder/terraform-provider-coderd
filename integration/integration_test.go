@@ -4,18 +4,21 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,13 +28,12 @@ import (
 // - Creates a temporary Coder instance running in Docker
 // - Runs the `main.tf` specified in the given test directory against the Coder deployment
 // - Asserts the state of the deployment via `codersdk`
-//
-// TODO: currently all interfaces to this Coder deployment are currently performed using the CLI
-// without github.com/coder/coder/v2/codersdk.
-// We will need to be able to import codersdk in order for this provider to function.
 func TestIntegration(t *testing.T) {
 	if os.Getenv("TF_ACC") == "1" {
 		t.Skip("Skipping integration tests during tf acceptance tests")
+	}
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
 	}
 
 	timeoutStr := os.Getenv("TIMEOUT_MINS")
@@ -43,67 +45,42 @@ func TestIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMins)*time.Minute)
 	t.Cleanup(cancel)
 
-	tfrcPath := setupProvider(ctx, t)
+	tfrcPath := setupProvider(t)
 
 	for _, tt := range []struct {
-		name string
-		cmds map[string]string
+		name    string
+		assertF func(testing.TB, *codersdk.Client)
 	}{
 		{
 			name: "example-test",
-			// TODO: replace this with a func(codersdk.Client)
-			cmds: map[string]string{
-				"coder_users_show_me": `coder users show me -o json`,
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				me, err := c.User(ctx, codersdk.Me)
+				assert.NoError(t, err)
+				assert.NotEmpty(t, me)
 			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ctrID := startCoder(ctx, t, tt.name)
+			client := startCoder(ctx, t, tt.name)
 			wd, err := os.Getwd()
 			require.NoError(t, err)
 			srcDir := filepath.Join(wd, tt.name)
 			tfCmd := exec.CommandContext(ctx, "terraform", "-chdir="+srcDir, "apply", "-auto-approve")
 			tfCmd.Env = append(tfCmd.Env, "TF_CLI_CONFIG_FILE="+tfrcPath)
+			tfCmd.Env = append(tfCmd.Env, "CODER_URL="+client.URL.String())
+			tfCmd.Env = append(tfCmd.Env, "CODER_SESSION_TOKEN="+client.SessionToken())
 			var buf bytes.Buffer
 			tfCmd.Stdout = &buf
 			tfCmd.Stderr = &buf
 			if err := tfCmd.Run(); !assert.NoError(t, err) {
 				t.Logf(buf.String())
 			}
-			for cmdKey, cmdVal := range tt.cmds {
-				out, rc := execContainer(ctx, t, ctrID, cmdVal)
-				require.Zero(t, rc)
-				compareGoldenJSON(t, filepath.Join(wd, tt.name, cmdKey+"_golden.json"), out)
-			}
+			tt.assertF(t, client)
 		})
 	}
 }
 
-// compareGoldenJSON reads the content of goldenFile, replaces variable strings
-// in both the golden and actual content (like UUIDs and times) with placeholders
-// before comparing the two as JSON.
-func compareGoldenJSON(t testing.TB, goldenFile string, actual string) {
-	goldenBytes, err := os.ReadFile(goldenFile)
-	require.NoError(t, err)
-	golden := replaceVariants(string(goldenBytes))
-	actual = replaceVariants(actual)
-	require.JSONEq(t, golden, actual)
-}
-
-var (
-	exprUUID            = regexp.MustCompile(`[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}`)
-	placeholderUUID     = "c0dec0dec0de-c0de-c0de-c0de-c0dec0dec0dec0de"
-	exprDateTime        = regexp.MustCompile(`[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+Z?`)
-	placeholderDateTime = "1234-56-78T12:34:56:7890Z"
-)
-
-func replaceVariants(s string) string {
-	s = exprUUID.ReplaceAllString(s, placeholderUUID)
-	s = exprDateTime.ReplaceAllString(s, placeholderDateTime)
-	return s
-}
-
-func setupProvider(ctx context.Context, t testing.TB) string {
+func setupProvider(t testing.TB) string {
 	// Ensure the binary is built
 	binPath, err := filepath.Abs("../terraform-provider-coderd")
 	require.NoError(t, err)
@@ -130,11 +107,7 @@ dev_overrides {
 	return tfrcPath
 }
 
-func startCoder(ctx context.Context, t testing.TB, name string) string {
-	var (
-		localURL = "http://localhost:3000"
-	)
-
+func startCoder(ctx context.Context, t *testing.T, name string) *codersdk.Client {
 	coderImg := os.Getenv("CODER_IMAGE")
 	if coderImg == "" {
 		coderImg = "ghcr.io/coder/coder"
@@ -150,16 +123,24 @@ func startCoder(ctx context.Context, t testing.TB, name string) string {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	require.NoError(t, err, "init docker client")
 
+	p := randomPort(t)
+	t.Logf("random port is %d", p)
 	// Stand up a temporary Coder instance
 	ctr, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: coderImg + ":" + coderVersion,
 		Env: []string{
-			"CODER_ACCESS_URL=" + localURL, // Set explicitly to avoid creating try.coder.app URLs.
-			"CODER_IN_MEMORY=true",         // We don't necessarily care about real persistence here.
-			"CODER_TELEMETRY_ENABLE=false", // Avoid creating noise.
+			"CODER_HTTP_ADDRESS=0.0.0.0:3000",        // Listen on all interfaces inside the container
+			"CODER_ACCESS_URL=http://localhost:3000", // Set explicitly to avoid creating try.coder.app URLs.
+			"CODER_IN_MEMORY=true",                   // We don't necessarily care about real persistence here.
+			"CODER_TELEMETRY_ENABLE=false",           // Avoid creating noise.
 		},
-		Labels: map[string]string{},
-	}, nil, nil, nil, "terraform-provider-coderd-"+name)
+		Labels:       map[string]string{},
+		ExposedPorts: map[nat.Port]struct{}{nat.Port("3000/tcp"): {}},
+	}, &container.HostConfig{
+		PortBindings: map[nat.Port][]nat.PortBinding{
+			nat.Port("3000/tcp"): {{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", p)}},
+		},
+	}, nil, nil, "terraform-provider-coderd-"+name)
 	require.NoError(t, err, "create test deployment")
 
 	t.Logf("created container %s\n", ctr.ID)
@@ -182,20 +163,31 @@ func startCoder(ctx context.Context, t testing.TB, name string) string {
 		testUsername = "testing"
 	)
 
+	// Perform first time setup
+	coderURL, err := url.Parse(fmt.Sprintf("http://localhost:%d", p))
+	require.NoError(t, err, "parse coder URL")
+	client := codersdk.New(coderURL)
 	// Wait for container to come up
 	require.Eventually(t, func() bool {
-		_, rc := execContainer(ctx, t, ctr.ID, fmt.Sprintf(`curl -s --fail %s/api/v2/buildinfo`, localURL))
-		if rc == 0 {
-			return true
+		_, err := client.BuildInfo(ctx)
+		if err != nil {
+			t.Logf("not ready yet: %s", err.Error())
 		}
-		t.Logf("not ready yet...")
-		return false
+		return err == nil
 	}, 10*time.Second, time.Second, "coder failed to become ready in time")
-
-	// Perform first time setup
-	_, rc := execContainer(ctx, t, ctr.ID, fmt.Sprintf(`coder login %s --first-user-email=%q --first-user-password=%q --first-user-trial=false --first-user-username=%q`, localURL, testEmail, testPassword, testUsername))
-	require.Equal(t, 0, rc, "failed to perform first-time setup")
-	return ctr.ID
+	_, err = client.CreateFirstUser(ctx, codersdk.CreateFirstUserRequest{
+		Email:    testEmail,
+		Username: testUsername,
+		Password: testPassword,
+	})
+	require.NoError(t, err, "create first user")
+	resp, err := client.LoginWithPassword(ctx, codersdk.LoginWithPasswordRequest{
+		Email:    testEmail,
+		Password: testPassword,
+	})
+	require.NoError(t, err, "login to coder instance with password")
+	client.SetSessionToken(resp.SessionToken)
+	return client
 }
 
 // execContainer executes the given command in the given container and returns
@@ -224,4 +216,16 @@ func execContainer(ctx context.Context, t testing.TB, containerID, command strin
 	execResp, err := cli.ContainerExecInspect(ctx, ex.ID)
 	require.NoError(t, err, "get exec exit code")
 	return out, execResp.ExitCode
+}
+
+// randomPort is a helper function to find a free random port.
+// Note that the OS may reallocate the port very quickly, so
+// this is not _guaranteed_.
+func randomPort(t *testing.T) int {
+	random, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err, "failed to listen on localhost")
+	_ = random.Close()
+	tcpAddr, valid := random.Addr().(*net.TCPAddr)
+	require.True(t, valid, "random port address is not a *net.TCPAddr?!")
+	return tcpAddr.Port
 }
