@@ -34,3 +34,6 @@ website/vendor
 # Keep windows files with windows line endings
 *.winfile eol=crlf
 terraform-provider-coderd
+
+# Needs to be written on each invocation
+integration/integration.tfrc
