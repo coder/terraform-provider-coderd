@@ -3,7 +3,7 @@ module github.com/coder/terraform-provider-coderd
 go 1.22.3
 
 require (
-	github.com/coder/coder/v2 v2.12.1
+	github.com/coder/coder/v2 v2.12.2
 	github.com/docker/docker v26.1.4+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/hashicorp/terraform-plugin-docs v0.19.4
