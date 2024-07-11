@@ -37,3 +37,5 @@ terraform-provider-coderd
 
 # Needs to be written on each invocation
 integration/integration.tfrc
+
+*.tfstate
