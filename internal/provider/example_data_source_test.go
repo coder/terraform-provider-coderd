@@ -26,6 +26,11 @@ func TestAccExampleDataSource(t *testing.T) {
 }
 
 const testAccExampleDataSourceConfig = `
+provider coderd {
+	url = "https://dev.coder.com"
+	token = "iamnotarealtoken"
+}
+
 data "coderd_example" "test" {
   configurable_attribute = "example"
 }
