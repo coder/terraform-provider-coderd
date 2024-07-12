@@ -16,3 +16,7 @@ resource "coderd_user" "dean" {
   password   = "SomeSecurePassword!"
   suspended  = false
 }
+
+data "coderd_user" "ethan" {
+  username = "ethan"
+}

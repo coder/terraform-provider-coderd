@@ -112,7 +112,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 
 func (p *CoderdProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		NewExampleDataSource,
+		NewUserDataSource,
 	}
 }
 
