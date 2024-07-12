@@ -115,7 +115,7 @@ resource "coderd_user" "test" {
 				if value == nil {
 					return "null"
 				}
-				return fmt.Sprintf(`"%s"`, *value)
+				return fmt.Sprintf("%q", *value)
 			case *bool:
 				if value == nil {
 					return "null"
