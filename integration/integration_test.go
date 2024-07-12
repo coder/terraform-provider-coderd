@@ -56,8 +56,8 @@ func TestIntegration(t *testing.T) {
 			name: "user-test",
 			preF: func(t testing.TB, c *codersdk.Client) {
 				me, err := c.User(ctx, codersdk.Me)
-				require.NoError(t, err)
-				c.CreateUser(ctx, codersdk.CreateUserRequest{
+				assert.NoError(t, err)
+				_, err = c.CreateUser(ctx, codersdk.CreateUserRequest{
 					Email:          "test2@coder.com",
 					Username:       "ethan",
 					Password:       "SomeSecurePassword!",
@@ -65,6 +65,7 @@ func TestIntegration(t *testing.T) {
 					DisableLogin:   false,
 					OrganizationID: me.OrganizationIDs[0],
 				})
+				assert.NoError(t, err)
 			},
 			assertF: func(t testing.TB, c *codersdk.Client) {
 				// Check user fields.
