@@ -6,17 +6,18 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -46,7 +47,7 @@ type UserResourceModel struct {
 	Username  types.String `tfsdk:"username"`
 	Name      types.String `tfsdk:"name"`
 	Email     types.String `tfsdk:"email"`
-	Roles     types.List   `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
+	Roles     types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
 	LoginType types.String `tfsdk:"login_type"` // none, password, github, oidc
 	Password  types.String `tfsdk:"password"`   // only when login_type is password
 	Suspended types.Bool   `tfsdk:"suspended"`
@@ -83,19 +84,18 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				MarkdownDescription: "Email address of the user.",
 				Required:            true,
 			},
-			"roles": schema.ListAttribute{
+			"roles": schema.SetAttribute{
 				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
 				Required:            false,
 				Optional:            true,
 				Computed:            true,
 				ElementType:         types.StringType,
-				Validators: []validator.List{
-					listvalidator.UniqueValues(),
-					listvalidator.ValueStringsAre(
+				Validators: []validator.Set{
+					setvalidator.ValueStringsAre(
 						stringvalidator.OneOf("owner", "template-admin", "user-admin", "auditor"),
 					),
 				},
-				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
+				Default: setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 			},
 			"login_type": schema.StringAttribute{
 				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
@@ -215,6 +215,13 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 	tflog.Trace(ctx, "successfully updated user roles")
 
+	if data.Suspended.ValueBool() {
+		_, err = r.client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
+	}
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user status, got error: %s", err))
+		return
+	}
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -241,11 +248,12 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	data.Email = types.StringValue(user.Email)
 	data.Name = types.StringValue(user.Name)
+	data.Username = types.StringValue(user.Username)
 	roles := make([]attr.Value, 0, len(user.Roles))
 	for _, role := range user.Roles {
 		roles = append(roles, types.StringValue(role.Name))
 	}
-	data.Roles = types.ListValueMust(types.StringType, roles)
+	data.Roles = types.SetValueMust(types.StringType, roles)
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
 
@@ -307,11 +315,23 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	err = r.client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
 		Password: data.Password.ValueString(),
 	})
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "New password cannot match old password.") {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update password, got error: %s", err))
 		return
 	}
 	tflog.Trace(ctx, "successfully updated password")
+
+	var statusErr error
+	if data.Suspended.ValueBool() {
+		_, statusErr = r.client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
+	}
+	if !data.Suspended.ValueBool() && user.Status == codersdk.UserStatusSuspended {
+		_, statusErr = r.client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("active"))
+	}
+	if statusErr != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user status, got error: %s", err))
+		return
+	}
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

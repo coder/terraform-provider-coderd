@@ -20,24 +20,23 @@ func TestAccUserResource(t *testing.T) {
 			// Create and Read testing
 			{
 				Config: testAccUserResourceConfig{
-					Username: "example",
-					Name:     "Example User",
-					Email:    "example@coder.com",
-					Roles:    []string{"owner", "auditor"},
+					Username:  "example",
+					Name:      "Example User",
+					Email:     "example@coder.com",
+					Roles:     []string{"owner", "auditor"},
 					LoginType: "password",
-					Password: "example-password",
-					Suspended: true,
+					Password:  "SomeSecurePassword!",
 				}.String(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "example"),
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User"),
 					resource.TestCheckResourceAttr("coderd_user.test", "email", "example@coder.com"),
 					resource.TestCheckResourceAttr("coderd_user.test", "roles.#", "2"),
-					resource.TestCheckResourceAttr("coderd_user.test", "roles.0", "owner"),
-					resource.TestCheckResourceAttr("coderd_user.test", "roles.1", "auditor"),
+					resource.TestCheckResourceAttr("coderd_user.test", "roles.0", "auditor"),
+					resource.TestCheckResourceAttr("coderd_user.test", "roles.1", "owner"),
 					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "password"),
-					resource.TestCheckResourceAttr("coderd_user.test", "password", "example-password"),
-					resource.TestCheckResourceAttr("coderd_user.test", "suspended", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "password", "SomeSecurePassword!"),
+					resource.TestCheckResourceAttr("coderd_user.test", "suspended", "false"),
 				),
 			},
 			// ImportState testing
@@ -49,13 +48,21 @@ func TestAccUserResource(t *testing.T) {
 				// example code does not have an actual upstream service.
 				// Once the Read method is able to refresh information from
 				// the upstream service, this can be removed.
-				ImportStateVerifyIgnore: []string{"configurable_attribute", "defaulted"},
+				ImportStateVerifyIgnore: []string{"configurable_attribute", "defaulted", "password"},
 			},
 			// Update and Read testing
 			{
-				Config: testAccUserResourceConfig{}
+				Config: testAccUserResourceConfig{
+					Username:  "exampleNew",
+					Name:      "Example User New",
+					Email:     "example@coder.com",
+					Roles:     []string{"owner", "auditor"},
+					LoginType: "password",
+					Password:  "SomeSecurePassword!",
+				}.String(),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_example.test", "configurable_attribute", "two"),
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User New"),
 				),
 			},
 			// Delete testing automatically occurs in TestCase
@@ -89,10 +96,10 @@ func (c testAccUserResourceConfig) String() string {
 		sb.WriteString(fmt.Sprintf("  roles = [%s]\n", strings.Join(rolesQuoted, ", ")))
 	}
 	if c.LoginType != "" {
-		sb.WriteString(fmt.Sprintf("  login_type = %q", c.LoginType))
+		sb.WriteString(fmt.Sprintf("  login_type = %q\n", c.LoginType))
 	}
 	if c.Password != "" {
-		sb.WriteString(fmt.Sprintf("  password = %q", c.Password))
+		sb.WriteString(fmt.Sprintf("  password = %q\n", c.Password))
 	}
 	if c.Suspended {
 		sb.WriteString("  suspended = true\n")
