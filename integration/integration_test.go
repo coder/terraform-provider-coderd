@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
@@ -50,11 +52,33 @@ func TestIntegration(t *testing.T) {
 		assertF func(testing.TB, *codersdk.Client)
 	}{
 		{
-			name: "example-test",
+			name: "user-test",
 			assertF: func(t testing.TB, c *codersdk.Client) {
-				me, err := c.User(ctx, codersdk.Me)
+				// Check user fields.
+				user, err := c.User(ctx, "dean")
 				assert.NoError(t, err)
-				assert.NotEmpty(t, me)
+				assert.Equal(t, "dean", user.Username)
+				assert.Equal(t, "Dean Coolguy", user.Name)
+				assert.Equal(t, "test@coder.com", user.Email)
+				roles := make([]string, len(user.Roles))
+				for i, role := range user.Roles {
+					roles[i] = role.Name
+				}
+				assert.ElementsMatch(t, []string{"owner", "template-admin"}, roles)
+				assert.Equal(t, codersdk.LoginTypePassword, user.LoginType)
+				assert.Contains(t, []codersdk.UserStatus{codersdk.UserStatusActive, codersdk.UserStatusDormant}, user.Status)
+
+				// Test password.
+				newClient := codersdk.New(c.URL)
+				res, err := newClient.LoginWithPassword(ctx, codersdk.LoginWithPasswordRequest{
+					Email:    "test@coder.com",
+					Password: "SomeSecurePassword!",
+				})
+				assert.NoError(t, err)
+				newClient.SetSessionToken(res.SessionToken)
+				user, err = newClient.User(ctx, codersdk.Me)
+				assert.NoError(t, err)
+				assert.Equal(t, "dean", user.Username)
 			},
 		},
 	} {
@@ -63,6 +87,14 @@ func TestIntegration(t *testing.T) {
 			wd, err := os.Getwd()
 			require.NoError(t, err)
 			srcDir := filepath.Join(wd, tt.name)
+			// Delete all .tfstate files
+			err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+				if filepath.Ext(path) == ".tfstate" {
+					return os.Remove(path)
+				}
+				return nil
+			})
+			require.NoError(t, err)
 			tfCmd := exec.CommandContext(ctx, "terraform", "-chdir="+srcDir, "apply", "-auto-approve")
 			tfCmd.Env = append(tfCmd.Env, "TF_CLI_CONFIG_FILE="+tfrcPath)
 			tfCmd.Env = append(tfCmd.Env, "CODER_URL="+client.URL.String())
@@ -124,6 +156,11 @@ func startCoder(ctx context.Context, t *testing.T, name string) *codersdk.Client
 	p := randomPort(t)
 	t.Logf("random port is %d", p)
 	// Stand up a temporary Coder instance
+	puller, err := cli.ImagePull(ctx, coderImg+":"+coderVersion, image.PullOptions{})
+	require.NoError(t, err, "pull coder image")
+	defer puller.Close()
+	_, err = io.Copy(os.Stderr, puller)
+	require.NoError(t, err, "pull coder image")
 	ctr, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: coderImg + ":" + coderVersion,
 		Env: []string{

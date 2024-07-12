@@ -23,4 +23,5 @@ provider "coderd" {
 
 ### Optional
 
-- `endpoint` (String) Example provider attribute
+- `token` (String) API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to $CODER_SESSION_TOKEN.
+- `url` (String) URL to the Coder deployment. Defaults to $CODER_URL.

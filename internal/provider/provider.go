@@ -5,14 +5,20 @@ package provider
 
 import (
 	"context"
-	"net/http"
+	"net/url"
+	"os"
+	"strings"
 
+	"cdr.dev/slog"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"github.com/coder/coder/v2/codersdk"
 )
 
 // Ensure CoderdProvider satisfies various provider interfaces.
@@ -27,9 +33,14 @@ type CoderdProvider struct {
 	version string
 }
 
+type CoderdProviderData struct {
+	Client *codersdk.Client
+}
+
 // CoderdProviderModel describes the provider data model.
 type CoderdProviderModel struct {
-	Endpoint types.String `tfsdk:"endpoint"`
+	URL   types.String `tfsdk:"url"`
+	Token types.String `tfsdk:"token"`
 }
 
 func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -40,8 +51,12 @@ func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"endpoint": schema.StringAttribute{
-				MarkdownDescription: "Example provider attribute",
+			"url": schema.StringAttribute{
+				MarkdownDescription: "URL to the Coder deployment. Defaults to $CODER_URL.",
+				Optional:            true,
+			},
+			"token": schema.StringAttribute{
+				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to $CODER_SESSION_TOKEN.",
 				Optional:            true,
 			},
 		},
@@ -57,18 +72,41 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		return
 	}
 
-	// Configuration values are now available.
-	// if data.Endpoint.IsNull() { /* ... */ }
+	if data.URL.ValueString() == "" {
+		urlEnv, ok := os.LookupEnv("CODER_URL")
+		if !ok {
+			resp.Diagnostics.AddError("url", "url or $CODER_URL is required")
+			return
+		}
+		data.URL = types.StringValue(urlEnv)
+	}
+	if data.Token.ValueString() == "" {
+		tokenEnv, ok := os.LookupEnv("CODER_SESSION_TOKEN")
+		if !ok {
+			resp.Diagnostics.AddError("token", "token or $CODER_SESSION_TOKEN is required")
+			return
+		}
+		data.Token = types.StringValue(tokenEnv)
+	}
 
-	// Example client configuration for data sources and resources
-	client := http.DefaultClient
-	resp.DataSourceData = client
-	resp.ResourceData = client
+	url, err := url.Parse(data.URL.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("url", "url is not a valid URL: "+err.Error())
+		return
+	}
+	client := codersdk.New(url)
+	client.SetLogger(slog.Make(tfslog{}).Leveled(slog.LevelDebug))
+	client.SetSessionToken(data.Token.ValueString())
+	providerData := &CoderdProviderData{
+		Client: client,
+	}
+	resp.DataSourceData = providerData
+	resp.ResourceData = providerData
 }
 
 func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewExampleResource,
+		NewUserResource,
 	}
 }
 
@@ -79,9 +117,7 @@ func (p *CoderdProvider) DataSources(ctx context.Context) []func() datasource.Da
 }
 
 func (p *CoderdProvider) Functions(ctx context.Context) []func() function.Function {
-	return []func() function.Function{
-		NewExampleFunction,
-	}
+	return []func() function.Function{}
 }
 
 func New(version string) func() provider.Provider {
@@ -91,3 +127,40 @@ func New(version string) func() provider.Provider {
 		}
 	}
 }
+
+// tfslog redirects slog entries to tflog.
+type tfslog struct{}
+
+var _ slog.Sink = tfslog{}
+
+// LogEntry implements slog.Sink.
+func (t tfslog) LogEntry(ctx context.Context, e slog.SinkEntry) {
+	m := map[string]any{
+		"time": e.Time.Unix(),
+		"func": e.Func,
+		"file": e.File,
+		"line": e.Line,
+	}
+	for _, f := range e.Fields {
+		m[f.Name] = f.Value
+	}
+
+	msg := e.Message
+	if len(e.LoggerNames) > 0 {
+		msg = "[" + strings.Join(e.LoggerNames, ".") + "] " + msg
+	}
+
+	switch e.Level {
+	case slog.LevelDebug:
+		tflog.Debug(ctx, msg, m)
+	case slog.LevelInfo:
+		tflog.Info(ctx, msg, m)
+	case slog.LevelWarn:
+		tflog.Warn(ctx, msg, m)
+	case slog.LevelError, slog.LevelFatal:
+		tflog.Error(ctx, msg, m)
+	}
+}
+
+// Sync implements slog.Sink.
+func (t tfslog) Sync() {}
