@@ -33,6 +33,10 @@ type CoderdProvider struct {
 	version string
 }
 
+type CoderdProviderData struct {
+	Client *codersdk.Client
+}
+
 // CoderdProviderModel describes the provider data model.
 type CoderdProviderModel struct {
 	URL   types.String `tfsdk:"url"`
@@ -93,8 +97,11 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	client := codersdk.New(url)
 	client.SetLogger(slog.Make(tfslog{}).Leveled(slog.LevelDebug))
 	client.SetSessionToken(data.Token.ValueString())
-	resp.DataSourceData = client
-	resp.ResourceData = client
+	providerData := &CoderdProviderData{
+		Client: client,
+	}
+	resp.DataSourceData = providerData
+	resp.ResourceData = providerData
 }
 
 func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resource {

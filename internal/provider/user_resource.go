@@ -37,7 +37,7 @@ func NewUserResource() resource.Resource {
 
 // UserResource defines the resource implementation.
 type UserResource struct {
-	client *codersdk.Client
+	data *CoderdProviderData
 }
 
 // UserResourceModel describes the resource data model.
@@ -130,7 +130,7 @@ func (r *UserResource) Configure(ctx context.Context, req resource.ConfigureRequ
 		return
 	}
 
-	client, ok := req.ProviderData.(*codersdk.Client)
+	client, ok := req.ProviderData.(*CoderdProviderData)
 
 	if !ok {
 		resp.Diagnostics.AddError(
@@ -141,7 +141,7 @@ func (r *UserResource) Configure(ctx context.Context, req resource.ConfigureRequ
 		return
 	}
 
-	r.client = client
+	r.data = client
 }
 
 func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -153,7 +153,9 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	me, err := r.client.User(ctx, codersdk.Me)
+	client := r.data.Client
+
+	me, err := client.User(ctx, codersdk.Me)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 		return
@@ -168,7 +170,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if data.LoginType.ValueString() != "" {
 		loginType = codersdk.LoginType(data.LoginType.ValueString())
 	}
-	user, err := r.client.CreateUser(ctx, codersdk.CreateUserRequest{
+	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
 		Email:          data.Email.ValueString(),
 		Username:       data.Username.ValueString(),
 		Password:       data.Password.ValueString(),
@@ -189,7 +191,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if data.Name.ValueString() != "" {
 		name = data.Name.ValueString()
 	}
-	user, err = r.client.UpdateUserProfile(ctx, user.ID.String(), codersdk.UpdateUserProfileRequest{
+	user, err = client.UpdateUserProfile(ctx, user.ID.String(), codersdk.UpdateUserProfileRequest{
 		Username: data.Username.ValueString(),
 		Name:     name,
 	})
@@ -206,7 +208,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	tflog.Trace(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
-	user, err = r.client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
 		Roles: roles,
 	})
 	if err != nil {
@@ -216,7 +218,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	tflog.Trace(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
-		_, err = r.client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
+		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
 	}
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user status, got error: %s", err))
@@ -236,7 +238,9 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	user, err := r.client.User(ctx, data.ID.ValueString())
+	client := r.data.Client
+
+	user, err := client.User(ctx, data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 		return
@@ -271,7 +275,9 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	user, err := r.client.User(ctx, data.ID.ValueString())
+	client := r.data.Client
+
+	user, err := client.User(ctx, data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 		return
@@ -285,7 +291,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		"new_username": data.Username.ValueString(),
 		"new_name":     data.Name.ValueString(),
 	})
-	_, err = r.client.UpdateUserProfile(ctx, user.ID.String(), codersdk.UpdateUserProfileRequest{
+	_, err = client.UpdateUserProfile(ctx, user.ID.String(), codersdk.UpdateUserProfileRequest{
 		Username: data.Username.ValueString(),
 		Name:     data.Name.ValueString(),
 	})
@@ -302,7 +308,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	tflog.Trace(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
-	_, err = r.client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
 		Roles: roles,
 	})
 	if err != nil {
@@ -312,7 +318,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	tflog.Trace(ctx, "successfully updated user roles")
 
 	tflog.Trace(ctx, "updating password")
-	err = r.client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
+	err = client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
 		Password: data.Password.ValueString(),
 	})
 	if err != nil && !strings.Contains(err.Error(), "New password cannot match old password.") {
@@ -323,10 +329,10 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	var statusErr error
 	if data.Suspended.ValueBool() {
-		_, statusErr = r.client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
+		_, statusErr = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
 	}
 	if !data.Suspended.ValueBool() && user.Status == codersdk.UserStatusSuspended {
-		_, statusErr = r.client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("active"))
+		_, statusErr = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("active"))
 	}
 	if statusErr != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user status, got error: %s", err))
@@ -347,13 +353,15 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
+	client := r.data.Client
+
 	id, err := uuid.Parse(data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Data Error", fmt.Sprintf("Unable to parse user ID, got error: %s", err))
 		return
 	}
 	tflog.Trace(ctx, "deleting user")
-	err = r.client.DeleteUser(ctx, id)
+	err = client.DeleteUser(ctx, id)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete user, got error: %s", err))
 		return
