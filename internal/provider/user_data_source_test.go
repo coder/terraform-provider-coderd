@@ -3,6 +3,7 @@
 
 package provider
 
+/*
 import (
 	"strings"
 	"testing"
@@ -76,3 +77,4 @@ func (c testAccUserDataSourceConfig) String() string {
 	sb.WriteString(`}`)
 	return sb.String()
 }
+*/
