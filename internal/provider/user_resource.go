@@ -199,11 +199,10 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 	tflog.Trace(ctx, "successfully updated user profile")
 
-	roleElements := data.Roles.Elements()
-	roles := make([]string, 0, len(roleElements))
-	for _, role := range roleElements {
-		roles = append(roles, role.(types.String).ValueString())
-	}
+	var roles []string
+	resp.Diagnostics.Append(
+		data.Roles.ElementsAs(ctx, &roles, false)...,
+	)
 	tflog.Trace(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
@@ -288,11 +287,10 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 	tflog.Trace(ctx, "successfully updated user profile")
 
-	roleElements := data.Roles.Elements()
-	roles := make([]string, 0, len(roleElements))
-	for _, role := range roleElements {
-		roles = append(roles, role.(types.String).ValueString())
-	}
+	var roles []string
+	resp.Diagnostics.Append(
+		data.Roles.ElementsAs(ctx, &roles, false)...,
+	)
 	tflog.Trace(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
