@@ -53,11 +53,11 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 		// Validation handled by ConfigValidators
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username is supplied",
+				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username is supplied.",
 				Optional:            true,
 			},
 			"username": schema.StringAttribute{
-				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID is supplied",
+				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID is supplied.",
 				Optional:            true,
 			},
 			"email": schema.StringAttribute{
@@ -72,18 +72,10 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
 				Computed:            true,
 				ElementType:         types.StringType,
-				// Validators: []validator.Set{
-				// 	setvalidator.ValueStringsAre(
-				// 		stringvalidator.OneOf("owner", "template-admin", "user-admin", "auditor"),
-				// 	),
-				// },
 			},
 			"login_type": schema.StringAttribute{
 				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
 				Computed:            true,
-				// Validators: []validator.String{
-				// 	stringvalidator.OneOf("none", "password", "github", "oidc"),
-				// },
 			},
 			"suspended": schema.BoolAttribute{
 				MarkdownDescription: "Whether the user is suspended.",
