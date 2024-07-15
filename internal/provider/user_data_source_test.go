@@ -15,7 +15,7 @@ import (
 
 func TestAccUserDataSource(t *testing.T) {
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "user_acc")
+	client := integration.StartCoder(ctx, t, "user_data_acc")
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
