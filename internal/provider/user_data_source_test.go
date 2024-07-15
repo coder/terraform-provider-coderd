@@ -59,12 +59,20 @@ func TestAccUserDataSource(t *testing.T) {
 }
 
 type testAccUserDataSourceConfig struct {
+	URL      string
+	Token    string
+
 	ID       string
 	Username string
 }
 
 func (c testAccUserDataSourceConfig) String(t *testing.T) string {
 	tpl := `
+provider coderd {
+	url = "{{.URL}}"
+	token = "{{.Token}}"
+}
+
 data "coderd_user" "test" {
 {{- if .ID }}
   id = "{{ .ID }}"
