@@ -35,63 +35,74 @@ func TestAccUserDataSource(t *testing.T) {
 		Name:     "Example User",
 	})
 	require.NoError(t, err)
-	cfg := testAccUserDataSourceConfig{
-		URL:   client.URL.String(),
-		Token: client.SessionToken(),
-	}
-	// User by Username
-	cfg.Username = user.Username
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: cfg.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
-				),
+	t.Run("UserByUsername", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:      client.URL.String(),
+			Token:    client.SessionToken(),
+			Username: user.Username,
+		}
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
+					),
+				},
 			},
-		},
+		})
 	})
-	cfg.Username = ""
-	cfg.ID = user.ID.String()
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		// User by ID
-		Steps: []resource.TestStep{
-			{
-				Config: cfg.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
-					resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
-				),
+
+	t.Run("UserByID", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:      client.URL.String(),
+			Token:    client.SessionToken(),
+			Username: user.ID.String(),
+		}
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			// User by ID
+			Steps: []resource.TestStep{
+				{
+					Config: cfg.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
+						resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
+					),
+				},
 			},
-		},
+		})
 	})
-	cfg.ID = ""
-	resource.Test(t, resource.TestCase{
-		IsUnitTest:               true,
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		// Neither ID nor Username
-		Steps: []resource.TestStep{
-			{
-				Config:      cfg.String(t),
-				ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username\]`),
+	t.Run("NeitherIDNorUsername", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+		}
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			// Neither ID nor Username
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg.String(t),
+					ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username\]`),
+				},
 			},
-		},
+		})
 	})
 
 }
