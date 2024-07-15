@@ -63,7 +63,7 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				Optional:            true,
 			},
 			"name": schema.StringAttribute{
-				MarkdownDescription: "Display name of the user. Defaults to username.",
+				MarkdownDescription: "Display name of the user.",
 				Computed:            true,
 			},
 			"email": schema.StringAttribute{
