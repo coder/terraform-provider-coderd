@@ -42,10 +42,24 @@ func TestIntegration(t *testing.T) {
 
 	for _, tt := range []struct {
 		name    string
+		preF    func(testing.TB, *codersdk.Client)
 		assertF func(testing.TB, *codersdk.Client)
 	}{
 		{
 			name: "user-test",
+			preF: func(t testing.TB, c *codersdk.Client) {
+				me, err := c.User(ctx, codersdk.Me)
+				assert.NoError(t, err)
+				_, err = c.CreateUser(ctx, codersdk.CreateUserRequest{
+					Email:          "test2@coder.com",
+					Username:       "ethan",
+					Password:       "SomeSecurePassword!",
+					UserLoginType:  "password",
+					DisableLogin:   false,
+					OrganizationID: me.OrganizationIDs[0],
+				})
+				assert.NoError(t, err)
+			},
 			assertF: func(t testing.TB, c *codersdk.Client) {
 				// Check user fields.
 				user, err := c.User(ctx, "dean")
@@ -95,6 +109,7 @@ func TestIntegration(t *testing.T) {
 			var buf bytes.Buffer
 			tfCmd.Stdout = &buf
 			tfCmd.Stderr = &buf
+			tt.preF(t, client)
 			if err := tfCmd.Run(); !assert.NoError(t, err) {
 				t.Logf(buf.String())
 			}
