@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"html/template"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -79,6 +80,20 @@ func TestAccUserDataSource(t *testing.T) {
 			},
 		},
 	})
+	cfg.ID = ""
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// Neither ID nor Username
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg.String(t),
+				ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username\]`),
+			},
+		},
+	})
+
 }
 
 type testAccUserDataSourceConfig struct {
