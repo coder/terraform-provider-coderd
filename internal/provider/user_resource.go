@@ -76,6 +76,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				MarkdownDescription: "Display name of the user. Defaults to username.",
 				Required:            false,
 				Optional:            true,
+				// Defaulted in Create
 			},
 			"email": schema.StringAttribute{
 				MarkdownDescription: "Email address of the user.",
@@ -167,6 +168,10 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if data.LoginType.ValueString() != "" {
 		loginType = codersdk.LoginType(data.LoginType.ValueString())
 	}
+	if loginType == codersdk.LoginTypePassword && data.Password.ValueString() == "" {
+		resp.Diagnostics.AddError("Data Error", "Password is required when login_type is 'password'")
+		return
+	}
 	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
 		Email:          data.Email.ValueString(),
 		Username:       data.Username.ValueString(),
@@ -197,6 +202,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 	tflog.Trace(ctx, "successfully updated user profile")
+	data.Name = types.StringValue(user.Name)
 
 	var roles []string
 	resp.Diagnostics.Append(
