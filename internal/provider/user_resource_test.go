@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"text/template"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestAccUserResource(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 	ctx := context.Background()
 	client := integration.StartCoder(ctx, t, "user_acc")
 
