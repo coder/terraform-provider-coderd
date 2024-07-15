@@ -25,7 +25,6 @@ resource "coderd_user" "ethan2" {
   username = "${data.coderd_user.ethan.username}2"
   name = "${data.coderd_user.ethan.name}2"
   email = "${data.coderd_user.ethan.email}.au"
-  login_type = "${data.coderd_user.ethan.login_type}"
   roles = data.coderd_user.ethan.roles
   suspended = data.coderd_user.ethan.suspended
 }
