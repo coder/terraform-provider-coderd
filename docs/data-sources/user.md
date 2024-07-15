@@ -17,8 +17,8 @@ An existing user on the coder deployment
 
 ### Optional
 
-- `id` (String) The ID of the user to retrieve. This field will be populated if a username is supplied
-- `username` (String) The username of the user to retrieve. This field will be populated if an ID is supplied
+- `id` (String) The ID of the user to retrieve. This field will be populated if a username is supplied.
+- `username` (String) The username of the user to retrieve. This field will be populated if an ID is supplied.
 
 ### Read-Only
 

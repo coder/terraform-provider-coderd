@@ -1,10 +1,8 @@
-// Copyright (c) HashiCorp, Inc.
-// SPDX-License-Identifier: MPL-2.0
-
 package provider
 
 /*
 import (
+	"html/template"
 	"strings"
 	"testing"
 
@@ -20,7 +18,7 @@ func TestAccUserDataSource(t *testing.T) {
 			{
 				Config: testAccUserDataSourceConfig{
 					Username: "example",
-				}.String(),
+				}.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "example"),
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User"),
@@ -43,7 +41,7 @@ func TestAccUserDataSource(t *testing.T) {
 			{
 				Config: testAccUserDataSourceConfig{
 					ID: "example",
-				}.String(),
+				}.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "example"),
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User"),
@@ -65,16 +63,25 @@ type testAccUserDataSourceConfig struct {
 	Username string
 }
 
-func (c testAccUserDataSourceConfig) String() string {
-	sb := strings.Builder{}
-	sb.WriteString(`data "coderd_user" "test" {` + "\n")
-	if c.ID != "" {
-		sb.WriteString(`  id = "` + c.ID + `"` + "\n")
+func (c testAccUserDataSourceConfig) String(t *testing.T) string {
+	tpl := `
+data "coderd_user" "test" {
+{{- if .ID }}
+  id = "{{ .ID }}"
+{{- end }}
+{{- if .Username }}
+  username = "{{ .Username }}"
+{{- end }}
+}`
+
+	tmpl := template.Must(template.New("userDataSource").Parse(tpl))
+
+	buf := strings.Builder{}
+	err := tmpl.Execute(&buf, c)
+	if err != nil {
+		panic(err)
 	}
-	if c.Username != "" {
-		sb.WriteString(`  username = "` + c.Username + `"` + "\n")
-	}
-	sb.WriteString(`}`)
-	return sb.String()
+
+	return buf.String()
 }
 */
