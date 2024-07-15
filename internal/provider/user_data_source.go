@@ -32,11 +32,16 @@ type UserDataSourceModel struct {
 	ID       types.String `tfsdk:"id"`
 	Username types.String `tfsdk:"username"`
 
-	Name      types.String `tfsdk:"name"`
-	Email     types.String `tfsdk:"email"`
-	Roles     types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
-	LoginType types.String `tfsdk:"login_type"` // none, password, github, oidc
-	Suspended types.Bool   `tfsdk:"suspended"`
+	Name            types.String `tfsdk:"name"`
+	Email           types.String `tfsdk:"email"`
+	Roles           types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
+	LoginType       types.String `tfsdk:"login_type"` // none, password, github, oidc
+	Suspended       types.Bool   `tfsdk:"suspended"`
+	AvatarURL       types.String `tfsdk:"avatar_url"`
+	OrganizationIDs types.Set    `tfsdk:"organization_ids"`
+	CreatedAt       types.Int64  `tfsdk:"created_at"` // Unix timestamp
+	LastSeenAt      types.Int64  `tfsdk:"last_seen_at"`
+	ThemePreference types.String `tfsdk:"theme_preference"`
 }
 
 func (d *UserDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -57,12 +62,12 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID is supplied.",
 				Optional:            true,
 			},
-			"email": schema.StringAttribute{
-				MarkdownDescription: "Email of the user.",
-				Computed:            true,
-			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: "Display name of the user. Defaults to username.",
+				Computed:            true,
+			},
+			"email": schema.StringAttribute{
+				MarkdownDescription: "Email of the user.",
 				Computed:            true,
 			},
 			"roles": schema.SetAttribute{
@@ -76,6 +81,27 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"suspended": schema.BoolAttribute{
 				MarkdownDescription: "Whether the user is suspended.",
+				Computed:            true,
+			},
+			"avatar_url": schema.StringAttribute{
+				MarkdownDescription: "URL of the user's avatar.",
+				Computed:            true,
+			},
+			"organization_ids": schema.SetAttribute{
+				MarkdownDescription: "IDs of organizations the user is associated with.",
+				Computed:            true,
+				ElementType:         types.StringType,
+			},
+			"created_at": schema.Int64Attribute{
+				MarkdownDescription: "Unix timestamp of when the user was created.",
+				Computed:            true,
+			},
+			"last_seen_at": schema.Int64Attribute{
+				MarkdownDescription: "Unix timestamp of when the user was last seen.",
+				Computed:            true,
+			},
+			"theme_preference": schema.StringAttribute{
+				MarkdownDescription: "The user's preferred theme.",
 				Computed:            true,
 			},
 		},
@@ -131,9 +157,9 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 
 	data.ID = types.StringValue(user.ID.String())
-	data.Email = types.StringValue(user.Email)
 	data.Username = types.StringValue(user.Username)
 	data.Name = types.StringValue(user.Name)
+	data.Email = types.StringValue(user.Email)
 	roles := make([]attr.Value, 0, len(user.Roles))
 	for _, role := range user.Roles {
 		roles = append(roles, types.StringValue(role.Name))
@@ -141,6 +167,15 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	data.Roles = types.SetValueMust(types.StringType, roles)
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
+
+	orgIDs := make([]attr.Value, 0, len(user.OrganizationIDs))
+	for _, orgID := range user.OrganizationIDs {
+		orgIDs = append(orgIDs, types.StringValue(orgID.String()))
+	}
+	data.OrganizationIDs = types.SetValueMust(types.StringType, orgIDs)
+	data.CreatedAt = types.Int64Value(user.CreatedAt.Unix())
+	data.LastSeenAt = types.Int64Value(user.LastSeenAt.Unix())
+	data.ThemePreference = types.StringValue(user.ThemePreference)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
