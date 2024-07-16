@@ -28,4 +28,3 @@ resource "coderd_user" "ethan2" {
   roles     = data.coderd_user.ethan.roles
   suspended = data.coderd_user.ethan.suspended
 }
-
