@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,6 +36,10 @@ func TestAccUserResource(t *testing.T) {
 	cfg2.Username = PtrTo("exampleNew")
 	cfg2.Name = PtrTo("Example User New")
 
+	cfg3 := cfg1
+	cfg3.Email = PtrTo("example2@coder.com")
+
+	var userId string
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
@@ -68,6 +73,15 @@ func TestAccUserResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User New"),
+					testAccIdChanged("coderd_user.test", &userId),
+				),
+			},
+			// Replace testing
+			{
+				Config: cfg3.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "email", "example2@coder.com"),
+					testAccIdChanged("coderd_user.test", &userId),
 				),
 			},
 			// Delete testing automatically occurs in TestCase
@@ -150,4 +164,25 @@ resource "coderd_user" "test" {
 	require.NoError(t, err)
 
 	return buf.String()
+}
+
+// Check if the id has changed since the last time this check function was run.
+func testAccIdChanged(resourceName string, id *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("Resource %s not found", resourceName)
+		}
+		if rs.Primary.ID == "" {
+			return fmt.Errorf("No ID is set")
+		}
+		if *id == "" {
+			*id = rs.Primary.ID
+			return nil
+		}
+		if rs.Primary.ID == *id {
+			return fmt.Errorf("ID did not change from %s", rs.Primary.ID)
+		}
+		return nil
+	}
 }

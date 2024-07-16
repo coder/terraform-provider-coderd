@@ -81,6 +81,9 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"email": schema.StringAttribute{
 				MarkdownDescription: "Email address of the user.",
 				Required:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"roles": schema.SetAttribute{
 				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
