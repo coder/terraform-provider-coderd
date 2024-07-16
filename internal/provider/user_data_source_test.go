@@ -67,9 +67,9 @@ func TestAccUserDataSource(t *testing.T) {
 
 	t.Run("UserByID", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
-			URL:      client.URL.String(),
-			Token:    client.SessionToken(),
-			Username: user.ID.String(),
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			ID:    user.ID.String(),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },

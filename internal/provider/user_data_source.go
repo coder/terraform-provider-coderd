@@ -155,6 +155,13 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		resp.Diagnostics.AddError("Client Error", "User is not associated with any organizations")
 		return
 	}
+	if !data.ID.IsNull() && user.ID.String() != data.ID.ValueString() {
+		resp.Diagnostics.AddError("Client Error", "Retrieved User's ID does not match the provided ID")
+		return
+	} else if !data.Username.IsNull() && user.Username != data.Username.ValueString() {
+		resp.Diagnostics.AddError("Client Error", "Retrieved User's username does not match the provided username")
+		return
+	}
 
 	data.ID = types.StringValue(user.ID.String())
 	data.Username = types.StringValue(user.Username)
