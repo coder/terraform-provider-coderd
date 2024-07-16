@@ -32,12 +32,17 @@ type CoderdProvider struct {
 
 type CoderdProviderData struct {
 	Client *codersdk.Client
+	// TODO(ethanndickson): We should use a custom TFPF type for UUIDs everywhere
+	// possible, instead of `string` and `types.String`.
+	DefaultOrganizationID string
 }
 
 // CoderdProviderModel describes the provider data model.
 type CoderdProviderModel struct {
 	URL   types.String `tfsdk:"url"`
 	Token types.String `tfsdk:"token"`
+
+	DefaultOrganizationID types.String `tfsdk:"default_organization_id"`
 }
 
 func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -54,6 +59,10 @@ func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 			},
 			"token": schema.StringAttribute{
 				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to $CODER_SESSION_TOKEN.",
+				Optional:            true,
+			},
+			"default_organization_id": schema.StringAttribute{
+				MarkdownDescription: "Default organization ID to use when creating resources. Defaults to the first organization the token has access to.",
 				Optional:            true,
 			},
 		},
@@ -94,8 +103,17 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	client := codersdk.New(url)
 	client.SetLogger(slog.Make(tfslog{}).Leveled(slog.LevelDebug))
 	client.SetSessionToken(data.Token.ValueString())
+	if data.DefaultOrganizationID.IsNull() {
+		user, err := client.User(ctx, codersdk.Me)
+		if err != nil {
+			resp.Diagnostics.AddError("default_organization_id", "failed to get default organization ID: "+err.Error())
+			return
+		}
+		data.DefaultOrganizationID = types.StringValue(user.OrganizationIDs[0].String())
+	}
 	providerData := &CoderdProviderData{
-		Client: client,
+		Client:                client,
+		DefaultOrganizationID: data.DefaultOrganizationID.ValueString(),
 	}
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
@@ -104,6 +122,7 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewUserResource,
+		NewGroupResource,
 	}
 }
 

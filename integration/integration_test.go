@@ -90,7 +90,7 @@ func TestIntegration(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			client := StartCoder(ctx, t, tt.name)
+			client := StartCoder(ctx, t, tt.name, true)
 			wd, err := os.Getwd()
 			require.NoError(t, err)
 			srcDir := filepath.Join(wd, tt.name)

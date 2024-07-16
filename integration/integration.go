@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func StartCoder(ctx context.Context, t *testing.T, name string) *codersdk.Client {
+func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *codersdk.Client {
 	coderImg := os.Getenv("CODER_IMAGE")
 	if coderImg == "" {
 		coderImg = "ghcr.io/coder/coder"
@@ -75,9 +75,9 @@ func StartCoder(ctx context.Context, t *testing.T, name string) *codersdk.Client
 
 	// nolint:gosec // For testing only.
 	var (
-		testEmail    = "testing@coder.com"
+		testEmail    = "admin@coder.com"
 		testPassword = "InsecurePassw0rd!"
-		testUsername = "testing"
+		testUsername = "admin"
 	)
 
 	// Perform first time setup
@@ -96,6 +96,7 @@ func StartCoder(ctx context.Context, t *testing.T, name string) *codersdk.Client
 		Email:    testEmail,
 		Username: testUsername,
 		Password: testPassword,
+		Trial:    useTrial,
 	})
 	require.NoError(t, err, "create first user")
 	resp, err := client.LoginWithPassword(ctx, codersdk.LoginWithPasswordRequest{
