@@ -22,11 +22,12 @@ An existing user on the coder deployment
 
 ### Read-Only
 
+- `avatar_url` (String) URL of the user's avatar.
 - `created_at` (Number) Unix timestamp of when the user was created.
 - `email` (String) Email of the user.
 - `last_seen_at` (Number) Unix timestamp of when the user was last seen.
 - `login_type` (String) Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.
-- `name` (String) Display name of the user. Defaults to username.
+- `name` (String) Display name of the user.
 - `organization_ids` (Set of String) IDs of organizations the user is associated with.
 - `roles` (Set of String) Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.
 - `suspended` (Boolean) Whether the user is suspended.
