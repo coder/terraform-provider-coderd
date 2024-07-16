@@ -41,13 +41,14 @@ type UserResource struct {
 type UserResourceModel struct {
 	ID types.String `tfsdk:"id"`
 
-	Username  types.String `tfsdk:"username"`
-	Name      types.String `tfsdk:"name"`
-	Email     types.String `tfsdk:"email"`
-	Roles     types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
-	LoginType types.String `tfsdk:"login_type"` // none, password, github, oidc
-	Password  types.String `tfsdk:"password"`   // only when login_type is password
-	Suspended types.Bool   `tfsdk:"suspended"`
+	Username      types.String `tfsdk:"username"`
+	Name          types.String `tfsdk:"name"`
+	Email         types.String `tfsdk:"email"`
+	Roles         types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
+	LoginType     types.String `tfsdk:"login_type"` // none, password, github, oidc
+	Password      types.String `tfsdk:"password"`   // only when login_type is password
+	Suspended     types.Bool   `tfsdk:"suspended"`
+	CascadeDelete types.Bool   `tfsdk:"cascade_delete"`
 }
 
 func (r *UserResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -79,7 +80,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				// Defaulted in Create
 			},
 			"email": schema.StringAttribute{
-				MarkdownDescription: "Email address of the user.",
+				MarkdownDescription: "Email address of the user. Modifying this field will trigger a resource replacement.",
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -117,6 +118,13 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"suspended": schema.BoolAttribute{
 				Computed:            true,
 				MarkdownDescription: "Whether the user is suspended.",
+				Required:            false,
+				Optional:            true,
+				Default:             booldefault.StaticBool(false),
+			},
+			"cascade_delete": schema.BoolAttribute{
+				Computed:            true,
+				MarkdownDescription: "Whether to delete owned workspaces when this resource is deleted or replaced.",
 				Required:            false,
 				Optional:            true,
 				Default:             booldefault.StaticBool(false),
@@ -366,6 +374,29 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		resp.Diagnostics.AddError("Data Error", fmt.Sprintf("Unable to parse user ID, got error: %s", err))
 		return
 	}
+
+	if data.CascadeDelete.ValueBool() {
+		tflog.Trace(ctx, "deleting user workspaces")
+		workspaces, err := client.Workspaces(ctx, codersdk.WorkspaceFilter{
+			Owner: data.Username.ValueString(),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get user workspaces, got error: %s", err))
+			return
+		}
+		for _, workspace := range workspaces.Workspaces {
+			_, err := client.CreateWorkspaceBuild(ctx, workspace.ID, codersdk.CreateWorkspaceBuildRequest{
+				Transition: codersdk.WorkspaceTransitionDelete,
+			})
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete user workspace, got error: %s", err))
+				return
+			}
+		}
+		//TODO: Wait for builds to finish
+		tflog.Trace(ctx, "successfully deleted user workspaces")
+	}
+
 	tflog.Trace(ctx, "deleting user")
 	err = client.DeleteUser(ctx, id)
 	if err != nil {
