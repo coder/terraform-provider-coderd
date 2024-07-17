@@ -50,13 +50,22 @@ func TestIntegration(t *testing.T) {
 			preF: func(t testing.TB, c *codersdk.Client) {
 				me, err := c.User(ctx, codersdk.Me)
 				assert.NoError(t, err)
-				_, err = c.CreateUser(ctx, codersdk.CreateUserRequest{
+				user1, err := c.CreateUser(ctx, codersdk.CreateUserRequest{
 					Email:          "test2@coder.com",
 					Username:       "ethan",
 					Password:       "SomeSecurePassword!",
 					UserLoginType:  "password",
 					DisableLogin:   false,
 					OrganizationID: me.OrganizationIDs[0],
+				})
+				assert.NoError(t, err)
+				group, err := c.CreateGroup(ctx, me.OrganizationIDs[0], codersdk.CreateGroupRequest{
+					Name:           "bosses",
+					QuotaAllowance: 200,
+				})
+				assert.NoError(t, err)
+				_, err = c.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
+					AddUsers: []string{user1.ID.String()},
 				})
 				assert.NoError(t, err)
 			},
@@ -86,6 +95,14 @@ func TestIntegration(t *testing.T) {
 				user, err = newClient.User(ctx, codersdk.Me)
 				assert.NoError(t, err)
 				assert.Equal(t, "dean", user.Username)
+
+				// Check group
+				defaultOrg, err := c.OrganizationByName(ctx, "first-organization")
+				assert.NoError(t, err)
+				group, err := c.GroupByOrgAndName(ctx, defaultOrg.ID, "employees")
+				assert.NoError(t, err)
+				assert.Len(t, group.Members, 3)
+				assert.Equal(t, group.QuotaAllowance, 100)
 			},
 		},
 	} {
@@ -112,6 +129,7 @@ func TestIntegration(t *testing.T) {
 			tt.preF(t, client)
 			if err := tfCmd.Run(); !assert.NoError(t, err) {
 				t.Logf(buf.String())
+				t.FailNow()
 			}
 			tt.assertF(t, client)
 		})

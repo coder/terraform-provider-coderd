@@ -28,3 +28,26 @@ resource "coderd_user" "ethan2" {
   roles     = data.coderd_user.ethan.roles
   suspended = data.coderd_user.ethan.suspended
 }
+
+data "coderd_organization" "default" {
+  is_default = true
+}
+
+data "coderd_group" "bosses" {
+  name            = "bosses"
+  organization_id = data.coderd_organization.default.id
+}
+
+resource "coderd_group" "employees" {
+  name            = "employees"
+  organization_id = data.coderd_organization.default.id
+  quota_allowance = 100
+  members = concat([
+    resource.coderd_user.dean.id,
+    resource.coderd_user.ethan2.id,
+  ], data.coderd_group.bosses.members[*].id)
+}
+
+data "coderd_group" "employees" {
+  id = resource.coderd_group.employees.id
+}
