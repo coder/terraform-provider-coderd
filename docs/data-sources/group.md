@@ -19,7 +19,7 @@ An existing group on the coder deployment.
 
 - `id` (String) The ID of the group to retrieve. This field will be populated if a name and organization ID is supplied.
 - `name` (String) The name of the group to retrieve. This field will be populated if an ID is supplied.
-- `organization_id` (String) The organization ID that the group belongs to. This field will be populated if an ID is supplied.
+- `organization_id` (String) The organization ID that the group belongs to. This field will be populated if an ID is supplied. Defaults to the provider default organization ID.
 
 ### Read-Only
 
