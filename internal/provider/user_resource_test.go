@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ func TestAccUserResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "user_acc")
+	client := integration.StartCoder(ctx, t, "user_acc", false)
 
 	cfg1 := testAccUserResourceConfig{
 		URL:       client.URL.String(),
@@ -47,8 +46,8 @@ func TestAccUserResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User"),
 					resource.TestCheckResourceAttr("coderd_user.test", "email", "example@coder.com"),
 					resource.TestCheckResourceAttr("coderd_user.test", "roles.#", "2"),
-					resource.TestCheckResourceAttr("coderd_user.test", "roles.0", "auditor"),
-					resource.TestCheckResourceAttr("coderd_user.test", "roles.1", "owner"),
+					resource.TestCheckTypeSetElemAttr("coderd_user.test", "roles.*", "auditor"),
+					resource.TestCheckTypeSetElemAttr("coderd_user.test", "roles.*", "owner"),
 					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "password"),
 					resource.TestCheckResourceAttr("coderd_user.test", "password", "SomeSecurePassword!"),
 					resource.TestCheckResourceAttr("coderd_user.test", "suspended", "false"),
@@ -89,6 +88,7 @@ type testAccUserResourceConfig struct {
 }
 
 func (c testAccUserResourceConfig) String(t *testing.T) string {
+	t.Helper()
 	tpl := `
 provider coderd {
 	url = "{{.URL}}"
@@ -107,39 +107,7 @@ resource "coderd_user" "test" {
 `
 	// Define template functions
 	funcMap := template.FuncMap{
-		"orNull": func(v interface{}) string {
-			if v == nil {
-				return "null"
-			}
-			switch value := v.(type) {
-			case *string:
-				if value == nil {
-					return "null"
-				}
-				return fmt.Sprintf("%q", *value)
-			case *bool:
-				if value == nil {
-					return "null"
-				}
-				return fmt.Sprintf(`%t`, *value)
-			case *[]string:
-				if value == nil {
-					return "null"
-				}
-				var result string
-				for i, role := range *value {
-					if i > 0 {
-						result += ", "
-					}
-					result += fmt.Sprintf("%q", role)
-				}
-				return fmt.Sprintf("[%s]", result)
-
-			default:
-				require.NoError(t, fmt.Errorf("unknown type in template: %T", value))
-				return ""
-			}
-		},
+		"orNull": PrintOrNull,
 	}
 
 	buf := strings.Builder{}

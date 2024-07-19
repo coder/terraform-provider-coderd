@@ -2,11 +2,11 @@ package provider
 
 import (
 	"context"
-	"html/template"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
+	"text/template"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
@@ -19,7 +19,7 @@ func TestAccUserDataSource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "user_data_acc")
+	client := integration.StartCoder(ctx, t, "user_data_acc", false)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
@@ -39,11 +39,21 @@ func TestAccUserDataSource(t *testing.T) {
 		Name:     "Example User",
 	})
 	require.NoError(t, err)
-	t.Run("UserByUsername", func(t *testing.T) {
+
+	checkFn := resource.ComposeAggregateTestCheckFunc(
+		resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
+	)
+	t.Run("UserByUsernameOk", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:      client.URL.String(),
 			Token:    client.SessionToken(),
-			Username: user.Username,
+			Username: PtrTo(user.Username),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -51,25 +61,17 @@ func TestAccUserDataSource(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config: cfg.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
-					),
+					Check:  checkFn,
 				},
 			},
 		})
 	})
 
-	t.Run("UserByID", func(t *testing.T) {
+	t.Run("UserByIDOk", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    user.ID.String(),
+			ID:    PtrTo(user.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -78,20 +80,12 @@ func TestAccUserDataSource(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config: cfg.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckResourceAttr("data.coderd_user.test", "username", "example"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "name", "Example User"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "email", "example@coder.com"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.#", "1"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
-						resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
-					),
+					Check:  checkFn,
 				},
 			},
 		})
 	})
-	t.Run("NeitherIDNorUsername", func(t *testing.T) {
+	t.Run("NeitherIDNorUsernameError", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
@@ -115,11 +109,12 @@ type testAccUserDataSourceConfig struct {
 	URL   string
 	Token string
 
-	ID       string
-	Username string
+	ID       *string
+	Username *string
 }
 
 func (c testAccUserDataSourceConfig) String(t *testing.T) string {
+	t.Helper()
 	tpl := `
 provider coderd {
 	url = "{{.URL}}"
@@ -127,21 +122,19 @@ provider coderd {
 }
 
 data "coderd_user" "test" {
-{{- if .ID }}
-  id = "{{ .ID }}"
-{{- end }}
-{{- if .Username }}
-  username = "{{ .Username }}"
-{{- end }}
+	id       = {{orNull .ID}}
+	username = {{orNull .Username}}
 }`
 
-	tmpl := template.Must(template.New("userDataSource").Parse(tpl))
-
-	buf := strings.Builder{}
-	err := tmpl.Execute(&buf, c)
-	if err != nil {
-		panic(err)
+	funcMap := template.FuncMap{
+		"orNull": PrintOrNull,
 	}
 
+	buf := strings.Builder{}
+	tmpl, err := template.New("userDataSource").Funcs(funcMap).Parse(tpl)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&buf, c)
+	require.NoError(t, err)
 	return buf.String()
 }
