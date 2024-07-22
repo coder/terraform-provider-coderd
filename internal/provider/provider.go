@@ -130,6 +130,7 @@ func (p *CoderdProvider) DataSources(ctx context.Context) []func() datasource.Da
 	return []func() datasource.DataSource{
 		NewGroupDataSource,
 		NewUserDataSource,
+		NewOrganizationDataSource,
 	}
 }
 
