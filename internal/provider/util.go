@@ -1,7 +1,11 @@
 package provider
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 func PtrTo[T any](v T) *T {
@@ -45,4 +49,30 @@ func PrintOrNull(v any) string {
 	default:
 		panic(fmt.Errorf("unknown type in template: %T", value))
 	}
+}
+
+func computeDirectoryHash(directory string) (string, error) {
+	var files []string
+	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	hash := sha256.New()
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", err
+		}
+		hash.Write(data)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

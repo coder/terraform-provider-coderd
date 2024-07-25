@@ -123,6 +123,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 	return []func() resource.Resource{
 		NewUserResource,
 		NewGroupResource,
+		NewTemplateResource,
 	}
 }
 

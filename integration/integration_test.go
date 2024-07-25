@@ -105,6 +105,45 @@ func TestIntegration(t *testing.T) {
 				assert.Equal(t, group.QuotaAllowance, 100)
 			},
 		},
+		{
+			name: "template-test",
+			preF: func(t testing.TB, c *codersdk.Client) {},
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				defaultOrg, err := c.OrganizationByName(ctx, "first-organization")
+				assert.NoError(t, err)
+				user, err := c.User(ctx, "ethan")
+				require.NoError(t, err)
+
+				// Check template metadata
+				templates, err := c.Templates(ctx)
+				require.NoError(t, err)
+				require.Len(t, templates, 1)
+				require.Equal(t, "example-template", templates[0].Name)
+				require.False(t, templates[0].AllowUserAutostart)
+				require.False(t, templates[0].AllowUserAutostop)
+
+				// Check versions
+				versions, err := c.TemplateVersionsByTemplate(ctx, codersdk.TemplateVersionsByTemplateRequest{
+					TemplateID: templates[0].ID,
+				})
+				require.NoError(t, err)
+				require.Len(t, versions, 2)
+				require.Equal(t, "latest", versions[0].Name)
+				require.NotEmpty(t, versions[0].ID)
+				require.Equal(t, templates[0].ID, *versions[0].TemplateID)
+				require.Equal(t, templates[0].ActiveVersionID, versions[0].ID)
+
+				// Check ACL
+				acl, err := c.TemplateACL(ctx, templates[0].ID)
+				require.NoError(t, err)
+				require.Len(t, acl.Groups, 1)
+				require.Equal(t, codersdk.TemplateRoleUse, acl.Groups[0].Role)
+				require.Equal(t, defaultOrg.ID, acl.Groups[0].ID)
+				require.Len(t, acl.Users, 1)
+				require.Equal(t, codersdk.TemplateRoleAdmin, acl.Users[0].Role)
+				require.Equal(t, user.ID, acl.Users[0].ID)
+			},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			client := StartCoder(ctx, t, tt.name, true)
