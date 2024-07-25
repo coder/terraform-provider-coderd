@@ -41,12 +41,12 @@ type TemplateResource struct {
 
 // TemplateResourceModel describes the resource data model.
 type TemplateResourceModel struct {
-	ID types.String `tfsdk:"id"`
+	ID UUID `tfsdk:"id"`
 
 	Name               types.String `tfsdk:"name"`
 	DisplayName        types.String `tfsdk:"display_name"`
 	Description        types.String `tfsdk:"description"`
-	OrganizationID     types.String `tfsdk:"organization_id"`
+	OrganizationID     UUID         `tfsdk:"organization_id"`
 	Icon               types.String `tfsdk:"icon"`
 	AllowUserAutoStart types.Bool   `tfsdk:"allow_user_auto_start"`
 	AllowUserAutoStop  types.Bool   `tfsdk:"allow_user_auto_stop"`
@@ -68,7 +68,7 @@ func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel
 }
 
 type TemplateVersion struct {
-	ID                 types.String `tfsdk:"id"`
+	ID                 UUID         `tfsdk:"id"`
 	Name               types.String `tfsdk:"name"`
 	Message            types.String `tfsdk:"message"`
 	Directory          types.String `tfsdk:"directory"`
@@ -80,7 +80,7 @@ type TemplateVersion struct {
 
 type Versions []TemplateVersion
 
-func (v Versions) ByID(id types.String) *TemplateVersion {
+func (v Versions) ByID(id UUID) *TemplateVersion {
 	for _, m := range v {
 		if m.ID.Equal(id) {
 			return &m
@@ -145,6 +145,8 @@ func (a *ACL) Equal(other *ACL) bool {
 }
 
 type Permission struct {
+	// Purposefully left as a string so we can later support an `everyone` shortcut
+	// identifier for the Everyone group.
 	ID   types.String `tfsdk:"id"`
 	Role types.String `tfsdk:"role"`
 }
@@ -182,6 +184,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the template.",
+				CustomType:          UUIDType,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -207,6 +210,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
+				CustomType:          UUIDType,
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -246,7 +250,8 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
-							Computed: true,
+							CustomType: UUIDType,
+							Computed:   true,
 						},
 						"name": schema.StringAttribute{
 							MarkdownDescription: "The name of the template version. Automatically generated if not provided.",
@@ -323,7 +328,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = types.StringValue(r.data.DefaultOrganizationID)
+		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	if data.DisplayName.IsUnknown() {
@@ -331,11 +336,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	client := r.data.Client
-	orgID, err := uuid.Parse(data.OrganizationID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied organization ID as UUID, got error: %s", err))
-		return
-	}
+	orgID := data.OrganizationID.ValueUUID()
 	var templateResp codersdk.Template
 	for idx, version := range data.Versions {
 		newVersionRequest := newVersionRequest{
@@ -381,10 +382,10 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				return
 			}
 		}
-		data.Versions[idx].ID = types.StringValue(versionResp.ID.String())
+		data.Versions[idx].ID = UUIDValue(versionResp.ID)
 		data.Versions[idx].Name = types.StringValue(versionResp.Name)
 	}
-	data.ID = types.StringValue(templateResp.ID.String())
+	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
 
 	// Save data into Terraform state
@@ -402,11 +403,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	client := r.data.Client
 
-	templateID, err := uuid.Parse(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied template ID as UUID, got error: %s", err))
-		return
-	}
+	templateID := data.ID.ValueUUID()
 
 	template, err := client.Template(ctx, templateID)
 	if err != nil {
@@ -417,7 +414,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 	data.Name = types.StringValue(template.Name)
 	data.DisplayName = types.StringValue(template.DisplayName)
 	data.Description = types.StringValue(template.Description)
-	data.OrganizationID = types.StringValue(template.OrganizationID.String())
+	data.OrganizationID = UUIDValue(template.OrganizationID)
 	data.Icon = types.StringValue(template.Icon)
 	data.AllowUserAutoStart = types.BoolValue(template.AllowUserAutostart)
 	data.AllowUserAutoStop = types.BoolValue(template.AllowUserAutostop)
@@ -430,11 +427,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 	data.ACL = convertResponseToACL(acl)
 
 	for idx, version := range data.Versions {
-		versionID, err := uuid.Parse(version.ID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied version ID as UUID, got error: %s", err))
-			return
-		}
+		versionID := version.ID.ValueUUID()
 		versionResp, err := client.TemplateVersion(ctx, versionID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
@@ -471,24 +464,16 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	if planState.OrganizationID.IsUnknown() {
-		planState.OrganizationID = types.StringValue(r.data.DefaultOrganizationID)
+		planState.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	if planState.DisplayName.IsUnknown() {
 		planState.DisplayName = planState.Name
 	}
 
-	orgID, err := uuid.Parse(planState.OrganizationID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied organization ID as UUID, got error: %s", err))
-		return
-	}
+	orgID := planState.OrganizationID.ValueUUID()
 
-	templateID, err := uuid.Parse(planState.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied template ID as UUID, got error: %s", err))
-		return
-	}
+	templateID := planState.ID.ValueUUID()
 
 	client := r.data.Client
 
@@ -531,11 +516,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			curVersionID = versionResp.ID
 		} else {
 			// Or if it's an existing version, get the ID
-			curVersionID, err = uuid.Parse(plannedVersion.ID.ValueString())
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse version ID stored in state as UUID, got error: %s", err))
-				return
-			}
+			curVersionID = plannedVersion.ID.ValueUUID()
 		}
 		versionResp, err := client.TemplateVersion(ctx, curVersionID)
 		if err != nil {
@@ -551,7 +532,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				return
 			}
 		}
-		planState.Versions[idx].ID = types.StringValue(versionResp.ID.String())
+		planState.Versions[idx].ID = UUIDValue(versionResp.ID)
 	}
 
 	// Save updated data into Terraform state
@@ -570,13 +551,9 @@ func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	client := r.data.Client
 
-	templateID, err := uuid.Parse(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied template ID as UUID, got error: %s", err))
-		return
-	}
+	templateID := data.ID.ValueUUID()
 
-	err = client.DeleteTemplate(ctx, templateID)
+	err := client.DeleteTemplate(ctx, templateID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete template: %s", err))
 		return

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -39,7 +38,7 @@ type UserResource struct {
 
 // UserResourceModel describes the resource data model.
 type UserResourceModel struct {
-	ID types.String `tfsdk:"id"`
+	ID UUID `tfsdk:"id"`
 
 	Username  types.String `tfsdk:"username"`
 	Name      types.String `tfsdk:"name"`
@@ -60,6 +59,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
+				CustomType:          UUIDType,
 				Computed:            true,
 				MarkdownDescription: "User ID",
 				PlanModifiers: []planmodifier.String{
@@ -186,7 +186,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	tflog.Trace(ctx, "successfully created user", map[string]any{
 		"id": user.ID.String(),
 	})
-	data.ID = types.StringValue(user.ID.String())
+	data.ID = UUIDValue(user.ID)
 
 	tflog.Trace(ctx, "updating user profile")
 	name := data.Username.ValueString()
@@ -358,13 +358,8 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	client := r.data.Client
 
-	id, err := uuid.Parse(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Data Error", fmt.Sprintf("Unable to parse user ID, got error: %s", err))
-		return
-	}
 	tflog.Trace(ctx, "deleting user")
-	err = client.DeleteUser(ctx, id)
+	err := client.DeleteUser(ctx, data.ID.ValueUUID())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete user, got error: %s", err))
 		return

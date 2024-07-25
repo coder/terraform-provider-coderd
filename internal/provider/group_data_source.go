@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/coder/coder/v2/codersdk"
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -29,9 +28,9 @@ type GroupDataSource struct {
 // GroupDataSourceModel describes the data source data model.
 type GroupDataSourceModel struct {
 	// ID or name and organization ID must be set
-	ID             types.String `tfsdk:"id"`
+	ID             UUID         `tfsdk:"id"`
 	Name           types.String `tfsdk:"name"`
-	OrganizationID types.String `tfsdk:"organization_id"`
+	OrganizationID UUID         `tfsdk:"organization_id"`
 
 	DisplayName    types.String `tfsdk:"display_name"`
 	AvatarURL      types.String `tfsdk:"avatar_url"`
@@ -41,7 +40,7 @@ type GroupDataSourceModel struct {
 }
 
 type Member struct {
-	ID              types.String `tfsdk:"id"`
+	ID              UUID         `tfsdk:"id"`
 	Username        types.String `tfsdk:"username"`
 	Email           types.String `tfsdk:"email"`
 	CreatedAt       types.Int64  `tfsdk:"created_at"`
@@ -64,6 +63,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 				MarkdownDescription: "The ID of the group to retrieve. This field will be populated if a name and organization ID is supplied.",
 				Optional:            true,
 				Computed:            true,
+				CustomType:          UUIDType,
 				Validators: []validator.String{
 					stringvalidator.AtLeastOneOf(path.Expressions{
 						path.MatchRoot("name"),
@@ -78,6 +78,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The organization ID that the group belongs to. This field will be populated if an ID is supplied. Defaults to the provider default organization ID.",
+				CustomType:          UUIDType,
 				Optional:            true,
 				Computed:            true,
 			},
@@ -101,7 +102,8 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
-							Computed: true,
+							CustomType: UUIDType,
+							Computed:   true,
 						},
 						"username": schema.StringAttribute{
 							Computed: true,
@@ -169,36 +171,27 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	client := d.data.Client
 
 	if data.OrganizationID.IsNull() {
-		data.OrganizationID = types.StringValue(d.data.DefaultOrganizationID)
+		data.OrganizationID = UUIDValue(d.data.DefaultOrganizationID)
 	}
 
 	var group codersdk.Group
+	var err error
 	if !data.ID.IsNull() {
-		groupID, err := uuid.Parse(data.ID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied group ID as UUID, got error: %s", err))
-			return
-		}
-
+		groupID := data.ID.ValueUUID()
 		group, err = client.Group(ctx, groupID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group by ID, got error: %s", err))
 			return
 		}
 		data.Name = types.StringValue(group.Name)
-		data.OrganizationID = types.StringValue(group.OrganizationID.String())
+		data.OrganizationID = UUIDValue(group.OrganizationID)
 	} else {
-		orgID, err := uuid.Parse(data.OrganizationID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied organization ID as UUID, got error: %s", err))
-			return
-		}
-		group, err = client.GroupByOrgAndName(ctx, orgID, data.Name.ValueString())
+		group, err = client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Failed to get group by name and org ID", err.Error())
 			return
 		}
-		data.ID = types.StringValue(group.ID.String())
+		data.ID = UUIDValue(group.ID)
 	}
 
 	data.DisplayName = types.StringValue(group.DisplayName)
@@ -207,7 +200,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	members := make([]Member, 0, len(group.Members))
 	for _, member := range group.Members {
 		members = append(members, Member{
-			ID:              types.StringValue(member.ID.String()),
+			ID:              UUIDValue(member.ID),
 			Username:        types.StringValue(member.Username),
 			Email:           types.StringValue(member.Email),
 			CreatedAt:       types.Int64Value(member.CreatedAt.Unix()),

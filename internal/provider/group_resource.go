@@ -35,13 +35,13 @@ type GroupResource struct {
 
 // GroupResourceModel describes the resource data model.
 type GroupResourceModel struct {
-	ID types.String `tfsdk:"id"`
+	ID UUID `tfsdk:"id"`
 
 	Name           types.String `tfsdk:"name"`
 	DisplayName    types.String `tfsdk:"display_name"`
 	AvatarURL      types.String `tfsdk:"avatar_url"`
 	QuotaAllowance types.Int32  `tfsdk:"quota_allowance"`
-	OrganizationID types.String `tfsdk:"organization_id"`
+	OrganizationID UUID         `tfsdk:"organization_id"`
 	Members        types.Set    `tfsdk:"members"`
 }
 
@@ -56,6 +56,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Group ID.",
+				CustomType:          UUIDType,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -84,6 +85,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The organization ID that the group belongs to. Defaults to the provider default organization ID.",
+				CustomType:          UUIDType,
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -92,7 +94,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			},
 			"members": schema.SetAttribute{
 				MarkdownDescription: "Members of the group, by ID. If null, members will not be added or removed.",
-				ElementType:         types.StringType,
+				ElementType:         UUIDType,
 				Optional:            true,
 			},
 		},
@@ -132,14 +134,10 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	client := r.data.Client
 
 	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = types.StringValue(r.data.DefaultOrganizationID)
+		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
-	orgID, err := uuid.Parse(data.OrganizationID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied organization ID as UUID, got error: %s", err))
-		return
-	}
+	orgID := data.OrganizationID.ValueUUID()
 
 	displayName := data.Name.ValueString()
 	if data.DisplayName.ValueString() != "" {
@@ -160,7 +158,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tflog.Trace(ctx, "successfully created group", map[string]any{
 		"id": group.ID.String(),
 	})
-	data.ID = types.StringValue(group.ID.String())
+	data.ID = UUIDValue(group.ID)
 	data.DisplayName = types.StringValue(group.DisplayName)
 
 	tflog.Trace(ctx, "setting group members")
@@ -196,11 +194,7 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	client := r.data.Client
 
-	groupID, err := uuid.Parse(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied group ID as UUID, got error: %s", err))
-		return
-	}
+	groupID := data.ID.ValueUUID()
 
 	group, err := client.Group(ctx, groupID)
 	if err != nil {
@@ -212,13 +206,13 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	data.DisplayName = types.StringValue(group.DisplayName)
 	data.AvatarURL = types.StringValue(group.AvatarURL)
 	data.QuotaAllowance = types.Int32Value(int32(group.QuotaAllowance))
-	data.OrganizationID = types.StringValue(group.OrganizationID.String())
+	data.OrganizationID = UUIDValue(group.OrganizationID)
 	if !data.Members.IsNull() {
 		members := make([]attr.Value, 0, len(group.Members))
 		for _, member := range group.Members {
-			members = append(members, types.StringValue(member.ID.String()))
+			members = append(members, UUIDValue(member.ID))
 		}
-		data.Members = types.SetValueMust(types.StringType, members)
+		data.Members = types.SetValueMust(UUIDType, members)
 	}
 
 	// Save updated data into Terraform state
@@ -237,13 +231,9 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	client := r.data.Client
 	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = types.StringValue(r.data.DefaultOrganizationID)
+		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
-	groupID, err := uuid.Parse(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied group ID as UUID, got error: %s", err))
-		return
-	}
+	groupID := data.ID.ValueUUID()
 
 	group, err := client.Group(ctx, groupID)
 	if err != nil {
@@ -301,14 +291,10 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	client := r.data.Client
-	groupID, err := uuid.Parse(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied group ID as UUID, got error: %s", err))
-		return
-	}
+	groupID := data.ID.ValueUUID()
 
 	tflog.Trace(ctx, "deleting group")
-	err = client.DeleteGroup(ctx, groupID)
+	err := client.DeleteGroup(ctx, groupID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete group, got error: %s", err))
 		return
