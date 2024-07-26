@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,6 +16,9 @@ import (
 )
 
 func TestAccTemplateResource(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 	ctx := context.Background()
 	client := integration.StartCoder(ctx, t, "template_acc", true)
 	firstUser, err := client.User(ctx, codersdk.Me)
@@ -84,7 +88,6 @@ func TestAccTemplateResource(t *testing.T) {
 	cfg6.Versions = slices.Clone(cfg6.Versions[1:])
 
 	resource.Test(t, resource.TestCase{
-		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{

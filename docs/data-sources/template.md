@@ -3,12 +3,12 @@
 page_title: "coderd_template Data Source - coderd"
 subcategory: ""
 description: |-
-  An existing template on the coder deployment
+  An existing template on the Coder deployment.
 ---
 
 # coderd_template (Data Source)
 
-An existing template on the coder deployment
+An existing template on the Coder deployment.
 
 
 
@@ -19,7 +19,7 @@ An existing template on the coder deployment
 
 - `id` (String) The ID of the template to retrieve. This field will be populated if a template name is supplied.
 - `name` (String) The name of the template to retrieve. This field will be populated if an ID is supplied.
-- `organization_id` (String) ID of the organization the template is associated with.
+- `organization_id` (String) ID of the organization the template is associated with. This field will be populated if an ID is supplied. Defaults to the provider default organization ID.
 
 ### Read-Only
 
@@ -38,7 +38,7 @@ An existing template on the coder deployment
 - `display_name` (String) Display name of the template.
 - `failure_ttl_ms` (Number) Automatic cleanup TTL for failed workspace builds.
 - `icon` (String) URL of the template's icon.
-- `require_active_version` (Boolean) Whether workspaces created from the template must be up-to-datae on the latest active version.
+- `require_active_version` (Boolean) Whether workspaces created from the template must be up-to-date on the latest active version.
 - `time_til_dormant_autodelete_ms` (Number) Duration of inactivity after the workspace becomes dormant before a workspace is automatically deleted.
 - `time_til_dormant_ms` (Number) Duration of inactivity before a workspace is considered dormant.
 - `updated_at` (Number) Unix timestamp of when the template was last updated.
