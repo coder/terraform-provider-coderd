@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/coder/coder/v2/codersdk"
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -30,7 +29,7 @@ type OrganizationDataSource struct {
 // OrganizationDataSourceModel describes the data source data model.
 type OrganizationDataSourceModel struct {
 	// Exactly one of ID, IsDefault, or Name must be set.
-	ID        types.String `tfsdk:"id"`
+	ID        UUID         `tfsdk:"id"`
 	IsDefault types.Bool   `tfsdk:"is_default"`
 	Name      types.String `tfsdk:"name"`
 
@@ -52,6 +51,7 @@ func (d *OrganizationDataSource) Schema(ctx context.Context, req datasource.Sche
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the organization to retrieve. This field will be populated if the organization is found by name, or if the default organization is requested.",
+				CustomType:          UUIDType,
 				Optional:            true,
 				Computed:            true,
 			},
@@ -77,7 +77,7 @@ func (d *OrganizationDataSource) Schema(ctx context.Context, req datasource.Sche
 			"members": schema.SetAttribute{
 				MarkdownDescription: "Members of the organization, by ID",
 				Computed:            true,
-				ElementType:         types.StringType,
+				ElementType:         UUIDType,
 			},
 		},
 	}
@@ -116,23 +116,19 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	client := d.data.Client
 
 	var org codersdk.Organization
+	var err error
 	if !data.ID.IsNull() { // By ID
-		orgID, err := uuid.Parse(data.ID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse supplied ID as UUID, got error: %s", err))
-			return
-		}
+		orgID := data.ID.ValueUUID()
 		org, err = client.Organization(ctx, orgID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by ID, got error: %s", err))
 			return
 		}
-		if org.ID.String() != data.ID.ValueString() {
+		if org.ID != data.ID.ValueUUID() {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Organization ID %s does not match requested ID %s", org.ID, data.ID))
 			return
 		}
 	} else if data.IsDefault.ValueBool() { // Get Default
-		var err error
 		org, err = client.OrganizationByName(ctx, "default")
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get default organization, got error: %s", err))
@@ -143,7 +139,6 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 			return
 		}
 	} else { // By Name
-		var err error
 		org, err = client.OrganizationByName(ctx, data.Name.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by name, got error: %s", err))
@@ -154,7 +149,7 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 			return
 		}
 	}
-	data.ID = types.StringValue(org.ID.String())
+	data.ID = UUIDValue(org.ID)
 	data.Name = types.StringValue(org.Name)
 	data.IsDefault = types.BoolValue(org.IsDefault)
 	data.CreatedAt = types.Int64Value(org.CreatedAt.Unix())
@@ -166,9 +161,9 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	}
 	memberIDs := make([]attr.Value, 0, len(members))
 	for _, member := range members {
-		memberIDs = append(memberIDs, types.StringValue(member.UserID.String()))
+		memberIDs = append(memberIDs, UUIDValue(member.UserID))
 	}
-	data.Members = types.SetValueMust(types.StringType, memberIDs)
+	data.Members = types.SetValueMust(UUIDType, memberIDs)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

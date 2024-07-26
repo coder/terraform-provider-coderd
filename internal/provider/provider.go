@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"cdr.dev/slog"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -31,10 +32,8 @@ type CoderdProvider struct {
 }
 
 type CoderdProviderData struct {
-	Client *codersdk.Client
-	// TODO(ethanndickson): We should use a custom TFPF type for UUIDs everywhere
-	// possible, instead of `string` and `types.String`.
-	DefaultOrganizationID string
+	Client                *codersdk.Client
+	DefaultOrganizationID uuid.UUID
 }
 
 // CoderdProviderModel describes the provider data model.
@@ -42,7 +41,7 @@ type CoderdProviderModel struct {
 	URL   types.String `tfsdk:"url"`
 	Token types.String `tfsdk:"token"`
 
-	DefaultOrganizationID types.String `tfsdk:"default_organization_id"`
+	DefaultOrganizationID UUID `tfsdk:"default_organization_id"`
 }
 
 func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -63,6 +62,7 @@ func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 			},
 			"default_organization_id": schema.StringAttribute{
 				MarkdownDescription: "Default organization ID to use when creating resources. Defaults to the first organization the token has access to.",
+				CustomType:          UUIDType,
 				Optional:            true,
 			},
 		},
@@ -109,11 +109,11 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 			resp.Diagnostics.AddError("default_organization_id", "failed to get default organization ID: "+err.Error())
 			return
 		}
-		data.DefaultOrganizationID = types.StringValue(user.OrganizationIDs[0].String())
+		data.DefaultOrganizationID = UUIDValue(user.OrganizationIDs[0])
 	}
 	providerData := &CoderdProviderData{
 		Client:                client,
-		DefaultOrganizationID: data.DefaultOrganizationID.ValueString(),
+		DefaultOrganizationID: data.DefaultOrganizationID.ValueUUID(),
 	}
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
