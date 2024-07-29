@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -22,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -51,11 +53,11 @@ type TemplateResourceModel struct {
 	AllowUserAutoStart types.Bool   `tfsdk:"allow_user_auto_start"`
 	AllowUserAutoStop  types.Bool   `tfsdk:"allow_user_auto_stop"`
 
-	ACL      *ACL     `tfsdk:"acl"`
-	Versions Versions `tfsdk:"versions"`
+	ACL      types.Object `tfsdk:"acl"`
+	Versions Versions     `tfsdk:"versions"`
 }
 
-// EqualTemplateMetadata returns true if two templates have identical metadata & ACL.
+// EqualTemplateMetadata returns true if two templates have identical metadata (excluding ACL).
 func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel) bool {
 	return m.Name.Equal(other.Name) &&
 		m.DisplayName.Equal(other.DisplayName) &&
@@ -63,8 +65,7 @@ func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel
 		m.OrganizationID.Equal(other.OrganizationID) &&
 		m.Icon.Equal(other.Icon) &&
 		m.AllowUserAutoStart.Equal(other.AllowUserAutoStart) &&
-		m.AllowUserAutoStop.Equal(other.AllowUserAutoStop) &&
-		m.ACL.Equal(other.ACL)
+		m.AllowUserAutoStop.Equal(other.AllowUserAutoStop)
 }
 
 type TemplateVersion struct {
@@ -110,38 +111,10 @@ type ACL struct {
 	GroupPermissions []Permission `tfsdk:"groups"`
 }
 
-func (a *ACL) Equal(other *ACL) bool {
-	if len(a.UserPermissions) != len(other.UserPermissions) {
-		return false
-	}
-	if len(a.GroupPermissions) != len(other.GroupPermissions) {
-		return false
-	}
-	for _, e1 := range a.UserPermissions {
-		found := false
-		for _, e2 := range other.UserPermissions {
-			if e1.Equal(&e2) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	for _, e1 := range a.GroupPermissions {
-		found := false
-		for _, e2 := range other.GroupPermissions {
-			if e1.Equal(&e2) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+// aclTypeAttr is the type schema for an instance of `ACL`.
+var aclTypeAttr = map[string]attr.Type{
+	"users":  permissionTypeAttr,
+	"groups": permissionTypeAttr,
 }
 
 type Permission struct {
@@ -151,12 +124,8 @@ type Permission struct {
 	Role types.String `tfsdk:"role"`
 }
 
-func (p *Permission) Equal(other *Permission) bool {
-	return p.ID.Equal(other.ID) && p.Role.Equal(other.Role)
-}
-
-// permissionsAttribute is the attribute schema for an instance of `[]Permission`.
-var permissionsAttribute = schema.SetNestedAttribute{
+// permissionAttribute is the attribute schema for an instance of `[]Permission`.
+var permissionAttribute = schema.SetNestedAttribute{
 	Required: true,
 	NestedObject: schema.NestedAttributeObject{
 		Attributes: map[string]schema.Attribute{
@@ -165,13 +134,18 @@ var permissionsAttribute = schema.SetNestedAttribute{
 			},
 			"role": schema.StringAttribute{
 				Required: true,
-				Validators: []validator.String{
-					stringvalidator.OneOf("admin", "use", ""),
-				},
 			},
 		},
 	},
 }
+
+// permissionTypeAttr is the type schema for an instance of `[]Permission`.
+var permissionTypeAttr = basetypes.SetType{ElemType: types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"id":   basetypes.StringType{},
+		"role": basetypes.StringType{},
+	},
+}}
 
 func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_template"
@@ -234,11 +208,11 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:  booldefault.StaticBool(true),
 			},
 			"acl": schema.SingleNestedAttribute{
-				MarkdownDescription: "Access control list for the template.",
-				Required:            true,
+				MarkdownDescription: "Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform.",
+				Optional:            true,
 				Attributes: map[string]schema.Attribute{
-					"users":  permissionsAttribute,
-					"groups": permissionsAttribute,
+					"users":  permissionAttribute,
+					"groups": permissionAttribute,
 				},
 			},
 			"versions": schema.ListNestedAttribute{
@@ -371,13 +345,22 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				"id": templateResp.ID,
 			})
 
-			tflog.Trace(ctx, "updating template ACL")
-			err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(data.ACL))
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
-				return
+			if !data.ACL.IsNull() {
+				tflog.Trace(ctx, "updating template ACL")
+				var acl ACL
+				resp.Diagnostics.Append(
+					data.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...,
+				)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(acl))
+				if err != nil {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template ACL: %s", err))
+					return
+				}
+				tflog.Trace(ctx, "successfully updated template ACL")
 			}
-			tflog.Trace(ctx, "successfully updated template ACL")
 		}
 		if version.Active.ValueBool() {
 			tflog.Trace(ctx, "marking template version as active", map[string]any{
@@ -430,12 +413,22 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 	data.AllowUserAutoStart = types.BoolValue(template.AllowUserAutostart)
 	data.AllowUserAutoStop = types.BoolValue(template.AllowUserAutostop)
 
-	acl, err := client.TemplateACL(ctx, templateID)
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
-		return
+	if !data.ACL.IsNull() {
+		tflog.Trace(ctx, "reading template ACL")
+		acl, err := client.TemplateACL(ctx, templateID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
+			return
+		}
+		tfACL := convertResponseToACL(acl)
+		aclObj, diag := types.ObjectValueFrom(ctx, aclTypeAttr, tfACL)
+		diag.Append(diag...)
+		if diag.HasError() {
+			return
+		}
+		data.ACL = aclObj
+		tflog.Trace(ctx, "read template ACL")
 	}
-	data.ACL = convertResponseToACL(acl)
 
 	for idx, version := range data.Versions {
 		versionID := version.ID.ValueUUID()
@@ -500,11 +493,20 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			DisableEveryoneGroupAccess: true,
 		})
 		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template: %s", err))
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template metadata: %s", err))
 			return
 		}
 		tflog.Trace(ctx, "successfully updated template metadata")
-		err = client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(planState.ACL))
+	}
+
+	// If there's a change, and we're still managing ACL
+	if !planState.ACL.Equal(curState.ACL) && !planState.ACL.IsNull() {
+		var acl ACL
+		resp.Diagnostics.Append(planState.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		err := client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(acl))
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
 			return
@@ -784,10 +786,7 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	return &versionResp, nil
 }
 
-func convertACLToRequest(permissions *ACL) codersdk.UpdateTemplateACL {
-	if permissions == nil {
-		return codersdk.UpdateTemplateACL{}
-	}
+func convertACLToRequest(permissions ACL) codersdk.UpdateTemplateACL {
 	var userPerms = make(map[string]codersdk.TemplateRole)
 	for _, perm := range permissions.UserPermissions {
 		userPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
@@ -802,7 +801,7 @@ func convertACLToRequest(permissions *ACL) codersdk.UpdateTemplateACL {
 	}
 }
 
-func convertResponseToACL(acl codersdk.TemplateACL) *ACL {
+func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	userPerms := make([]Permission, 0, len(acl.Users))
 	for _, user := range acl.Users {
 		userPerms = append(userPerms, Permission{
@@ -817,7 +816,7 @@ func convertResponseToACL(acl codersdk.TemplateACL) *ACL {
 			Role: types.StringValue(string(group.Role)),
 		})
 	}
-	return &ACL{
+	return ACL{
 		UserPermissions:  userPerms,
 		GroupPermissions: groupPerms,
 	}

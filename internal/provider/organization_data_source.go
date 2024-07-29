@@ -115,8 +115,10 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 
 	client := d.data.Client
 
-	var org codersdk.Organization
-	var err error
+	var (
+		org codersdk.Organization
+		err error
+	)
 	if !data.ID.IsNull() { // By ID
 		orgID := data.ID.ValueUUID()
 		org, err = client.Organization(ctx, orgID)

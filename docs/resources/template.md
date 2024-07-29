@@ -17,12 +17,12 @@ A Coder template
 
 ### Required
 
-- `acl` (Attributes) Access control list for the template. (see [below for nested schema](#nestedatt--acl))
 - `name` (String) The name of the template.
 - `versions` (Attributes List) (see [below for nested schema](#nestedatt--versions))
 
 ### Optional
 
+- `acl` (Attributes) Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform. (see [below for nested schema](#nestedatt--acl))
 - `allow_user_auto_start` (Boolean)
 - `allow_user_auto_stop` (Boolean)
 - `description` (String) A description of the template.
@@ -33,33 +33,6 @@ A Coder template
 ### Read-Only
 
 - `id` (String) The ID of the template.
-
-<a id="nestedatt--acl"></a>
-### Nested Schema for `acl`
-
-Required:
-
-- `groups` (Attributes Set) (see [below for nested schema](#nestedatt--acl--groups))
-- `users` (Attributes Set) (see [below for nested schema](#nestedatt--acl--users))
-
-<a id="nestedatt--acl--groups"></a>
-### Nested Schema for `acl.groups`
-
-Required:
-
-- `id` (String)
-- `role` (String)
-
-
-<a id="nestedatt--acl--users"></a>
-### Nested Schema for `acl.users`
-
-Required:
-
-- `id` (String)
-- `role` (String)
-
-
 
 <a id="nestedatt--versions"></a>
 ### Nested Schema for `versions`
@@ -97,3 +70,30 @@ Required:
 
 - `name` (String)
 - `value` (String)
+
+
+
+<a id="nestedatt--acl"></a>
+### Nested Schema for `acl`
+
+Required:
+
+- `groups` (Attributes Set) (see [below for nested schema](#nestedatt--acl--groups))
+- `users` (Attributes Set) (see [below for nested schema](#nestedatt--acl--users))
+
+<a id="nestedatt--acl--groups"></a>
+### Nested Schema for `acl.groups`
+
+Required:
+
+- `id` (String)
+- `role` (String)
+
+
+<a id="nestedatt--acl--users"></a>
+### Nested Schema for `acl.users`
+
+Required:
+
+- `id` (String)
+- `role` (String)

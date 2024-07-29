@@ -93,7 +93,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 			"members": schema.SetAttribute{
-				MarkdownDescription: "Members of the group, by ID. If null, members will not be added or removed.",
+				MarkdownDescription: "Members of the group, by ID. If null, members will not be added or removed by Terraform.",
 				ElementType:         UUIDType,
 				Optional:            true,
 			},

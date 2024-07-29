@@ -23,7 +23,7 @@ A group on the Coder deployment. If you want to have a group resource with unman
 
 - `avatar_url` (String) The URL of the group's avatar.
 - `display_name` (String) The display name of the group. Defaults to the group name.
-- `members` (Set of String) Members of the group, by ID. If null, members will not be added or removed.
+- `members` (Set of String) Members of the group, by ID. If null, members will not be added or removed by Terraform.
 - `organization_id` (String) The organization ID that the group belongs to. Defaults to the provider default organization ID.
 - `quota_allowance` (Number) The number of quota credits to allocate to each user in the group.
 

@@ -174,8 +174,10 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		data.OrganizationID = UUIDValue(d.data.DefaultOrganizationID)
 	}
 
-	var group codersdk.Group
-	var err error
+	var (
+		group codersdk.Group
+		err   error
+	)
 	if !data.ID.IsNull() {
 		groupID := data.ID.ValueUUID()
 		group, err = client.Group(ctx, groupID)
