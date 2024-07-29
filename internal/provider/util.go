@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/google/uuid"
 )
 
 func PtrTo[T any](v T) *T {
@@ -75,4 +77,27 @@ func computeDirectoryHash(directory string) (string, error) {
 		hash.Write(data)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// memberDiff returns the members to add and remove from the group, given the current members and the planned members.
+// plannedMembers is deliberately our custom type, as Terraform cannot automatically produce `[]uuid.UUID` from a set.
+func memberDiff(curMembers []uuid.UUID, plannedMembers []UUID) (add, remove []string) {
+	curSet := make(map[uuid.UUID]struct{}, len(curMembers))
+	planSet := make(map[uuid.UUID]struct{}, len(plannedMembers))
+
+	for _, userID := range curMembers {
+		curSet[userID] = struct{}{}
+	}
+	for _, plannedUserID := range plannedMembers {
+		planSet[plannedUserID.ValueUUID()] = struct{}{}
+		if _, exists := curSet[plannedUserID.ValueUUID()]; !exists {
+			add = append(add, plannedUserID.ValueString())
+		}
+	}
+	for _, curUserID := range curMembers {
+		if _, exists := planSet[curUserID]; !exists {
+			remove = append(remove, curUserID.String())
+		}
+	}
+	return add, remove
 }
