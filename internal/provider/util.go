@@ -24,6 +24,11 @@ func PrintOrNull(v any) string {
 			return "null"
 		}
 		return fmt.Sprintf("%d", *value)
+	case *int64:
+		if value == nil {
+			return "null"
+		}
+		return fmt.Sprintf("%d", *value)
 	case *string:
 		if value == nil {
 			return "null"

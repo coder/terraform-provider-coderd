@@ -54,6 +54,7 @@ func TestAccTemplateResource(t *testing.T) {
 	cfg2 := cfg1
 	cfg2.Versions = slices.Clone(cfg2.Versions)
 	cfg2.Name = PtrTo("example-template-new")
+	cfg2.AllowUserAutostart = PtrTo(false)
 	cfg2.Versions[0].Directory = PtrTo("../../integration/template-test/example-template-2/")
 	cfg2.Versions[0].Name = PtrTo("new")
 	cfg2.ACL.UserACL = []testAccTemplateKeyValueConfig{
@@ -61,6 +62,10 @@ func TestAccTemplateResource(t *testing.T) {
 			Key:   PtrTo(firstUser.ID.String()),
 			Value: PtrTo("admin"),
 		},
+	}
+	cfg2.AutostopRequirement = testAccAutostopRequirementConfig{
+		DaysOfWeek: PtrTo([]string{"monday", "tuesday"}),
+		Weeks:      PtrTo(int64(2)),
 	}
 
 	cfg3 := cfg2
@@ -104,6 +109,19 @@ func TestAccTemplateResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_template.test", "display_name", "example-template"),
 					resource.TestCheckResourceAttr("coderd_template.test", "description", ""),
 					resource.TestCheckResourceAttr("coderd_template.test", "organization_id", firstUser.OrganizationIDs[0].String()),
+					resource.TestCheckResourceAttr("coderd_template.test", "icon", ""),
+					resource.TestCheckResourceAttr("coderd_template.test", "default_ttl_ms", "0"),
+					resource.TestCheckResourceAttr("coderd_template.test", "activity_bump_ms", "3600000"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "0"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "1"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_start_permitted_days_of_week.#", "7"),
+					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_cancel_workspace_jobs", "true"),
+					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "true"),
+					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_stop", "true"),
+					resource.TestCheckResourceAttr("coderd_template.test", "failure_ttl_ms", "0"),
+					resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_ms", "0"),
+					resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_autodelete_ms", "0"),
+					resource.TestCheckResourceAttr("coderd_template.test", "require_active_version", "false"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 						"name":           regexp.MustCompile("main"),
 						"id":             regexp.MustCompile(".*"),
@@ -127,6 +145,9 @@ func TestAccTemplateResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
 					resource.TestCheckResourceAttr("coderd_template.test", "name", "example-template-new"),
+					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 						"name": regexp.MustCompile("new"),
 					}),
@@ -201,12 +222,26 @@ type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string
 
-	Name           *string
-	DisplayName    *string
-	Description    *string
-	OrganizationID *string
-	Versions       []testAccTemplateVersionConfig
-	ACL            testAccTemplateACLConfig
+	Name                         *string
+	DisplayName                  *string
+	Description                  *string
+	OrganizationID               *string
+	Icon                         *string
+	DefaultTTL                   *int64
+	ActivityBump                 *int64
+	AutostopRequirement          testAccAutostopRequirementConfig
+	AutostartRequirement         *[]string
+	AllowUserCancelWorkspaceJobs *bool
+	AllowUserAutostart           *bool
+	AllowUserAutostop            *bool
+	FailureTTL                   *int64
+	TimeTilDormant               *int64
+	TimeTilDormantAutodelete     *int64
+	RequireActiveVersion         *bool
+	DeprecationMessage           *string
+
+	Versions []testAccTemplateVersionConfig
+	ACL      testAccTemplateACLConfig
 }
 
 type testAccTemplateACLConfig struct {
@@ -216,10 +251,10 @@ type testAccTemplateACLConfig struct {
 }
 
 func (c testAccTemplateACLConfig) String(t *testing.T) string {
+	t.Helper()
 	if c.null == true {
 		return "null"
 	}
-	t.Helper()
 	tpl := `{
 		groups = [
 			{{- range .GroupACL}}
@@ -254,6 +289,36 @@ func (c testAccTemplateACLConfig) String(t *testing.T) string {
 	return buf.String()
 }
 
+type testAccAutostopRequirementConfig struct {
+	null       bool
+	DaysOfWeek *[]string
+	Weeks      *int64
+}
+
+func (c testAccAutostopRequirementConfig) String(t *testing.T) string {
+	t.Helper()
+	if c.null == true {
+		return "null"
+	}
+	tpl := `{
+		days_of_week = {{orNull .DaysOfWeek}}
+		weeks        = {{orNull .Weeks}}
+	}
+	`
+	funcMap := template.FuncMap{
+		"orNull": PrintOrNull,
+	}
+
+	buf := strings.Builder{}
+	tmpl, err := template.New("test").Funcs(funcMap).Parse(tpl)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&buf, c)
+	require.NoError(t, err)
+
+	return buf.String()
+}
+
 func (c testAccTemplateResourceConfig) String(t *testing.T) string {
 	t.Helper()
 	tpl := `
@@ -263,10 +328,23 @@ provider coderd {
 }
 
 resource "coderd_template" "test" {
-	name            = {{orNull .Name}}
-	display_name    = {{orNull .DisplayName}}
-	description     = {{orNull .Description}}
-	organization_id = {{orNull .OrganizationID}}
+	name                              = {{orNull .Name}}
+	display_name                      = {{orNull .DisplayName}}
+	description                       = {{orNull .Description}}
+	organization_id                   = {{orNull .OrganizationID}}
+	icon                              = {{orNull .Icon}}
+	default_ttl_ms                    = {{orNull .DefaultTTL}}
+	activity_bump_ms                  = {{orNull .ActivityBump}}
+	auto_stop_requirement             = ` + c.AutostopRequirement.String(t) + `
+	auto_start_permitted_days_of_week = {{orNull .AutostartRequirement}}
+	allow_user_cancel_workspace_jobs  = {{orNull .AllowUserCancelWorkspaceJobs}}
+	allow_user_auto_start             = {{orNull .AllowUserAutostart}}
+	allow_user_auto_stop              = {{orNull .AllowUserAutostop}}
+	failure_ttl_ms                    = {{orNull .FailureTTL}}
+	time_til_dormant_ms               = {{orNull .TimeTilDormant}}
+	time_til_dormant_autodelete_ms    = {{orNull .TimeTilDormantAutodelete}}
+	require_active_version            = {{orNull .RequireActiveVersion}}
+	deprecation_message               = {{orNull .DeprecationMessage}}
 
 	acl = ` + c.ACL.String(t) + `
 
