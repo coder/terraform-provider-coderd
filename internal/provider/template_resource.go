@@ -352,6 +352,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			return
 		}
 		if idx == 0 {
+			tflog.Trace(ctx, "creating template")
 			templateResp, err = client.CreateTemplate(ctx, orgID, codersdk.CreateTemplateRequest{
 				Name:                       data.Name.ValueString(),
 				DisplayName:                data.DisplayName.ValueString(),
@@ -366,14 +367,23 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template: %s", err))
 				return
 			}
+			tflog.Trace(ctx, "successfully created template", map[string]any{
+				"id": templateResp.ID,
+			})
 
+			tflog.Trace(ctx, "updating template ACL")
 			err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(data.ACL))
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
 				return
 			}
+			tflog.Trace(ctx, "successfully updated template ACL")
 		}
 		if version.Active.ValueBool() {
+			tflog.Trace(ctx, "marking template version as active", map[string]any{
+				"version_id":  versionResp.ID,
+				"template_id": templateResp.ID,
+			})
 			err := client.UpdateActiveTemplateVersion(ctx, templateResp.ID, codersdk.UpdateActiveTemplateVersion{
 				ID: versionResp.ID,
 			})
@@ -381,6 +391,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set active template version: %s", err))
 				return
 			}
+			tflog.Trace(ctx, "marked template version as active")
 		}
 		data.Versions[idx].ID = UUIDValue(versionResp.ID)
 		data.Versions[idx].Name = types.StringValue(versionResp.Name)
@@ -478,6 +489,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	client := r.data.Client
 
 	if !planState.EqualTemplateMetadata(curState) {
+		tflog.Trace(ctx, "change in template metadata detected, updating.")
 		_, err := client.UpdateTemplateMeta(ctx, templateID, codersdk.UpdateTemplateMeta{
 			Name:                       planState.Name.ValueString(),
 			DisplayName:                planState.DisplayName.ValueString(),
@@ -491,11 +503,13 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template: %s", err))
 			return
 		}
+		tflog.Trace(ctx, "successfully updated template metadata")
 		err = client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(planState.ACL))
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
 			return
 		}
+		tflog.Trace(ctx, "successfully updated template ACL")
 	}
 
 	for idx, plannedVersion := range planState.Versions {
@@ -504,6 +518,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		foundVersion := curState.Versions.ByID(plannedVersion.ID)
 		// If the version is new, or if the directory hash has changed, create a new version
 		if foundVersion == nil || foundVersion.DirectoryHash != plannedVersion.DirectoryHash {
+			tflog.Trace(ctx, "discovered a new or modified template version")
 			versionResp, err := newVersion(ctx, client, newVersionRequest{
 				Version:        &plannedVersion,
 				OrganizationID: orgID,
@@ -524,6 +539,10 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			return
 		}
 		if plannedVersion.Active.ValueBool() {
+			tflog.Trace(ctx, "marking template version as active", map[string]any{
+				"version_id":  versionResp.ID,
+				"template_id": templateID,
+			})
 			err := client.UpdateActiveTemplateVersion(ctx, templateID, codersdk.UpdateActiveTemplateVersion{
 				ID: versionResp.ID,
 			})
@@ -531,6 +550,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update active template version: %s", err))
 				return
 			}
+			tflog.Trace(ctx, "marked template version as active")
 		}
 		planState.Versions[idx].ID = UUIDValue(versionResp.ID)
 	}
@@ -553,6 +573,7 @@ func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	templateID := data.ID.ValueUUID()
 
+	tflog.Trace(ctx, "deleting template")
 	err := client.DeleteTemplate(ctx, templateID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete template: %s", err))
@@ -712,11 +733,14 @@ type newVersionRequest struct {
 
 func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error) {
 	directory := req.Version.Directory.ValueString()
+	tflog.Trace(ctx, "uploading directory")
 	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload directory: %s", err)
 	}
+	tflog.Trace(ctx, "successfully uploaded directory")
 	// TODO(ethanndickson): Uncomment when a released `codersdk` exports template variable parsing
+	// tflog.Trace(ctx,"discovering and parsing vars files")
 	// varFiles, err := codersdk.DiscoverVarsFiles(directory)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("failed to discover vars files: %s", err)
@@ -725,6 +749,9 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	// if err != nil {
 	// 	return nil, fmt.Errorf("failed to parse user variable values: %s", err)
 	// }
+	// tflog.Trace(ctx,"discovered and parsed vars files", map[string]any{
+	// 	"vars": vars,
+	// })
 	vars := make([]codersdk.VariableValue, 0, len(req.Version.TerraformVariables))
 	for _, variable := range req.Version.TerraformVariables {
 		vars = append(vars, codersdk.VariableValue{
@@ -743,14 +770,17 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	if req.TemplateID != nil {
 		tmplVerReq.TemplateID = *req.TemplateID
 	}
+	tflog.Trace(ctx, "creating template version")
 	versionResp, err := client.CreateTemplateVersion(ctx, req.OrganizationID, tmplVerReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create template version: %s", err)
 	}
+	tflog.Trace(ctx, "waiting for template version import job.")
 	err = waitForJob(ctx, client, &versionResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to wait for job: %s", err)
 	}
+	tflog.Trace(ctx, "successfully created template version")
 	return &versionResp, nil
 }
 
