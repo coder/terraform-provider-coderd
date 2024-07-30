@@ -175,7 +175,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config:      cfg.String(t),
-					ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,name\]`),
+					ExpectError: regexp.MustCompile(`At least one attribute out of \[name,id\] must be specified`),
 				},
 			},
 		})

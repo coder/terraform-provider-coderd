@@ -6,7 +6,6 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -17,7 +16,6 @@ import (
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ datasource.DataSource = &TemplateDataSource{}
-var _ datasource.DataSourceWithConfigValidators = &TemplateDataSource{}
 
 func NewTemplateDataSource() datasource.DataSource {
 	return &TemplateDataSource{}
@@ -73,11 +71,11 @@ func (d *TemplateDataSource) Metadata(ctx context.Context, req datasource.Metada
 
 func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing template on the coder deployment",
+		MarkdownDescription: "An existing template on the Coder deployment.",
 
 		Attributes: map[string]schema.Attribute{
 			"organization_id": schema.StringAttribute{
-				MarkdownDescription: "ID of the organization the template is associated with.",
+				MarkdownDescription: "ID of the organization the template is associated with. This field will be populated if an ID is supplied. Defaults to the provider default organization ID.",
 				CustomType:          UUIDType,
 				Optional:            true,
 				Computed:            true,
@@ -161,7 +159,7 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Computed:            true,
 			},
 			"require_active_version": schema.BoolAttribute{
-				MarkdownDescription: "Whether workspaces created from the template must be up-to-datae on the latest active version.",
+				MarkdownDescription: "Whether workspaces created from the template must be up-to-date on the latest active version.",
 				Computed:            true,
 			},
 			"created_by_user_id": schema.StringAttribute{
@@ -271,13 +269,4 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-}
-
-func (d *TemplateDataSource) ConfigValidators(context.Context) []datasource.ConfigValidator {
-	return []datasource.ConfigValidator{
-		datasourcevalidator.AtLeastOneOf(
-			path.MatchRoot("id"),
-			path.MatchRoot("name"),
-		),
-	}
 }
