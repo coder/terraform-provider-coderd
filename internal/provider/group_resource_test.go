@@ -62,49 +62,66 @@ func TestAccGroupResource(t *testing.T) {
 	cfg3 := cfg2
 	cfg3.Members = nil
 
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Create and Read
-			{
-				Config: cfg1.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_group.test", "name", "example-group"),
-					resource.TestCheckResourceAttr("coderd_group.test", "display_name", "Example Group"),
-					resource.TestCheckResourceAttr("coderd_group.test", "avatar_url", "https://google.com"),
-					resource.TestCheckResourceAttr("coderd_group.test", "quota_allowance", "100"),
-					resource.TestCheckResourceAttr("coderd_group.test", "organization_id", firstUser.OrganizationIDs[0].String()),
-					resource.TestCheckResourceAttr("coderd_group.test", "members.#", "1"),
-					resource.TestCheckResourceAttr("coderd_group.test", "members.0", user1.ID.String()),
-				),
+	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				// Create and Read
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_group.test", "name", "example-group"),
+						resource.TestCheckResourceAttr("coderd_group.test", "display_name", "Example Group"),
+						resource.TestCheckResourceAttr("coderd_group.test", "avatar_url", "https://google.com"),
+						resource.TestCheckResourceAttr("coderd_group.test", "quota_allowance", "100"),
+						resource.TestCheckResourceAttr("coderd_group.test", "organization_id", firstUser.OrganizationIDs[0].String()),
+						resource.TestCheckResourceAttr("coderd_group.test", "members.#", "1"),
+						resource.TestCheckResourceAttr("coderd_group.test", "members.0", user1.ID.String()),
+					),
+				},
+				// Import
+				{
+					Config:                  cfg1.String(t),
+					ResourceName:            "coderd_group.test",
+					ImportState:             true,
+					ImportStateVerify:       true,
+					ImportStateVerifyIgnore: []string{"members"},
+				},
+				// Update and Read
+				{
+					Config: cfg2.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_group.test", "name", "example-group-new"),
+						resource.TestCheckResourceAttr("coderd_group.test", "display_name", "Example Group New"),
+						resource.TestCheckResourceAttr("coderd_group.test", "members.#", "1"),
+						resource.TestCheckResourceAttr("coderd_group.test", "members.0", user2.ID.String()),
+					),
+				},
+				// Unmanaged members
+				{
+					Config: cfg3.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_group.test", "members"),
+					),
+				},
 			},
-			// Import
-			{
-				Config:                  cfg1.String(t),
-				ResourceName:            "coderd_group.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"members"},
+		})
+	})
+
+	t.Run("CreateUnmanagedMembersOk", func(t *testing.T) {
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg3.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_group.test", "members"),
+					),
+				},
 			},
-			// Update and Read
-			{
-				Config: cfg2.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_group.test", "name", "example-group-new"),
-					resource.TestCheckResourceAttr("coderd_group.test", "display_name", "Example Group New"),
-					resource.TestCheckResourceAttr("coderd_group.test", "members.#", "1"),
-					resource.TestCheckResourceAttr("coderd_group.test", "members.0", user2.ID.String()),
-				),
-			},
-			// Unmanaged members
-			{
-				Config: cfg3.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckNoResourceAttr("coderd_group.test", "members"),
-				),
-			},
-		},
+		})
 	})
 }
 

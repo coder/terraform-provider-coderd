@@ -240,19 +240,24 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group, got error: %s", err))
 		return
 	}
-	var newMembers []string
-	resp.Diagnostics.Append(
-		data.Members.ElementsAs(ctx, &newMembers, false)...,
-	)
-	if resp.Diagnostics.HasError() {
-		return
-	}
 	var add []string
 	var remove []string
 	if !data.Members.IsNull() {
-		add, remove = memberDiff(group.Members, newMembers)
+		var plannedMembers []UUID
+		resp.Diagnostics.Append(
+			data.Members.ElementsAs(ctx, &plannedMembers, false)...,
+		)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		curMembers := make([]uuid.UUID, 0, len(group.Members))
+		for _, member := range group.Members {
+			curMembers = append(curMembers, member.ID)
+		}
+		add, remove = memberDiff(curMembers, plannedMembers)
 	}
 	tflog.Trace(ctx, "updating group", map[string]any{
+		"id":              groupID,
 		"new_members":     add,
 		"removed_members": remove,
 		"new_name":        data.Name,
@@ -293,7 +298,9 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	client := r.data.Client
 	groupID := data.ID.ValueUUID()
 
-	tflog.Trace(ctx, "deleting group")
+	tflog.Trace(ctx, "deleting group", map[string]any{
+		"id": groupID,
+	})
 	err := client.DeleteGroup(ctx, groupID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete group, got error: %s", err))
@@ -319,25 +326,4 @@ func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStat
 		return
 	}
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
-}
-
-func memberDiff(curMembers []codersdk.ReducedUser, newMembers []string) (add, remove []string) {
-	curSet := make(map[string]struct{}, len(curMembers))
-	newSet := make(map[string]struct{}, len(newMembers))
-
-	for _, user := range curMembers {
-		curSet[user.ID.String()] = struct{}{}
-	}
-	for _, userID := range newMembers {
-		newSet[userID] = struct{}{}
-		if _, exists := curSet[userID]; !exists {
-			add = append(add, userID)
-		}
-	}
-	for _, user := range curMembers {
-		if _, exists := newSet[user.ID.String()]; !exists {
-			remove = append(remove, user.ID.String())
-		}
-	}
-	return add, remove
 }
