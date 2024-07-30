@@ -29,9 +29,9 @@ func TestAccTemplateResource(t *testing.T) {
 		Name:  PtrTo("example-template"),
 		Versions: []testAccTemplateVersionConfig{
 			{
-				Name:      PtrTo("main"),
-				Directory: PtrTo("../../integration/template-test/example-template/"),
-				Active:    PtrTo(true),
+				NamePrefix: PtrTo("version-one"),
+				Directory:  PtrTo("../../integration/template-test/version-one/"),
+				Active:     PtrTo(true),
 				// TODO(ethanndickson): Remove this when we add in `*.tfvars` parsing
 				TerraformVariables: []testAccTemplateKeyValueConfig{
 					{
@@ -53,9 +53,7 @@ func TestAccTemplateResource(t *testing.T) {
 
 	cfg2 := cfg1
 	cfg2.Versions = slices.Clone(cfg2.Versions)
-	cfg2.Name = PtrTo("example-template-new")
-	cfg2.Versions[0].Directory = PtrTo("../../integration/template-test/example-template-2/")
-	cfg2.Versions[0].Name = PtrTo("new")
+	cfg2.Versions[0].Directory = PtrTo("../../integration/template-test/version-two/")
 	cfg2.ACL.UserACL = []testAccTemplateKeyValueConfig{
 		{
 			Key:   PtrTo(firstUser.ID.String()),
@@ -66,9 +64,9 @@ func TestAccTemplateResource(t *testing.T) {
 	cfg3 := cfg2
 	cfg3.Versions = slices.Clone(cfg3.Versions)
 	cfg3.Versions = append(cfg3.Versions, testAccTemplateVersionConfig{
-		Name:      PtrTo("legacy-template"),
-		Directory: PtrTo("../../integration/template-test/example-template/"),
-		Active:    PtrTo(false),
+		NamePrefix: PtrTo("version-two"),
+		Directory:  PtrTo("../../integration/template-test/version-two/"),
+		Active:     PtrTo(false),
 		TerraformVariables: []testAccTemplateKeyValueConfig{
 			{
 				Key:   PtrTo("name"),
@@ -86,11 +84,19 @@ func TestAccTemplateResource(t *testing.T) {
 	cfg5.Versions = slices.Clone(cfg5.Versions)
 	cfg5.Versions[0], cfg5.Versions[1] = cfg5.Versions[1], cfg5.Versions[0]
 
-	cfg6 := cfg4
+	cfg6 := cfg5
 	cfg6.Versions = slices.Clone(cfg6.Versions[1:])
+	cfg6.Versions[0].Active = PtrTo(true)
 
 	cfg7 := cfg6
-	cfg7.ACL.null = true
+	cfg7.Versions = slices.Clone(cfg7.Versions)
+	cfg7.Versions[0].NamePrefix = PtrTo("version-one-new")
+
+	cfg8 := cfg7
+	cfg8.Name = PtrTo("example-template-new")
+
+	cfg9 := cfg8
+	cfg9.ACL.null = true
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -105,10 +111,11 @@ func TestAccTemplateResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_template.test", "description", ""),
 					resource.TestCheckResourceAttr("coderd_template.test", "organization_id", firstUser.OrganizationIDs[0].String()),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"name":           regexp.MustCompile("main"),
-						"id":             regexp.MustCompile(".*"),
+						"name_prefix":    regexp.MustCompile("^version-one$"),
+						"id":             regexp.MustCompile(".+"),
 						"directory_hash": regexp.MustCompile(".+"),
 						"message":        regexp.MustCompile(""),
+						"revision_num":   regexp.MustCompile("0"),
 					}),
 				),
 			},
@@ -121,14 +128,15 @@ func TestAccTemplateResource(t *testing.T) {
 				// In the real world, `versions` needs to be added to the configuration after importing
 				ImportStateVerifyIgnore: []string{"versions", "acl"},
 			},
-			// Update existing version & metadata
+			// Update existing version
 			{
 				Config: cfg2.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
-					resource.TestCheckResourceAttr("coderd_template.test", "name", "example-template-new"),
+					resource.TestCheckResourceAttr("coderd_template.test", "name", "example-template"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"name": regexp.MustCompile("new"),
+						"name_prefix":  regexp.MustCompile("^version-one$"),
+						"revision_num": regexp.MustCompile("1"),
 					}),
 				),
 			},
@@ -138,10 +146,12 @@ func TestAccTemplateResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "2"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"name": regexp.MustCompile("legacy-template"),
+						"name_prefix":  regexp.MustCompile("^version-one$"),
+						"revision_num": regexp.MustCompile("1"),
 					}),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"name": regexp.MustCompile("new"),
+						"name_prefix":  regexp.MustCompile("^version-two$"),
+						"revision_num": regexp.MustCompile("0"),
 					}),
 				),
 			},
@@ -151,12 +161,14 @@ func TestAccTemplateResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "2"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"active": regexp.MustCompile("true"),
-						"name":   regexp.MustCompile("legacy-template"),
+						"active":       regexp.MustCompile("false"),
+						"name_prefix":  regexp.MustCompile("^version-one$"),
+						"revision_num": regexp.MustCompile("1"),
 					}),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"active": regexp.MustCompile("false"),
-						"name":   regexp.MustCompile("new"),
+						"active":       regexp.MustCompile("true"),
+						"name_prefix":  regexp.MustCompile("^version-two$"),
+						"revision_num": regexp.MustCompile("0"),
 					}),
 				),
 			},
@@ -166,29 +178,57 @@ func TestAccTemplateResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "2"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"active": regexp.MustCompile("true"),
-						"name":   regexp.MustCompile("legacy-template"),
+						"active":       regexp.MustCompile("false"),
+						"name_prefix":  regexp.MustCompile("^version-one$"),
+						"revision_num": regexp.MustCompile("1"),
 					}),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"active": regexp.MustCompile("false"),
-						"name":   regexp.MustCompile("new"),
+						"active":       regexp.MustCompile("true"),
+						"name_prefix":  regexp.MustCompile("^version-two$"),
+						"revision_num": regexp.MustCompile("0"),
 					}),
 				),
 			},
-			// Delete version at index 0
+			// Delete version-two
 			{
 				Config: cfg6.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
-						"active": regexp.MustCompile("true"),
-						"name":   regexp.MustCompile("legacy-template"),
+						"active":       regexp.MustCompile("true"),
+						"name_prefix":  regexp.MustCompile("^version-one$"),
+						"revision_num": regexp.MustCompile("1"),
+					}),
+				),
+			},
+			// Update version-one name_prefix
+			{
+				Config: cfg7.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+						"active":       regexp.MustCompile("true"),
+						"name_prefix":  regexp.MustCompile("^version-one-new$"),
+						"revision_num": regexp.MustCompile("0"),
+					}),
+				),
+			},
+			// Update template metadata
+			{
+				Config: cfg8.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestCheckResourceAttr("coderd_template.test", "name", "example-template-new"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+						"active":       regexp.MustCompile("true"),
+						"name_prefix":  regexp.MustCompile("^version-one-new$"),
+						"revision_num": regexp.MustCompile("0"),
 					}),
 				),
 			},
 			// Unmanaged ACL
 			{
-				Config: cfg7.String(t),
+				Config: cfg9.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
 				),
@@ -273,9 +313,9 @@ resource "coderd_template" "test" {
 	versions = [
 	{{- range .Versions }}
 	{
-		name      = {{orNull .Name}}
-		directory = {{orNull .Directory}}
-		active    = {{orNull .Active}}
+		name_prefix      = {{orNull .NamePrefix}}
+		directory        = {{orNull .Directory}}
+		active           = {{orNull .Active}}
 
 		tf_vars = [
 			{{- range .TerraformVariables }}
@@ -306,7 +346,7 @@ resource "coderd_template" "test" {
 }
 
 type testAccTemplateVersionConfig struct {
-	Name               *string
+	NamePrefix         *string
 	Message            *string
 	Directory          *string
 	Active             *bool

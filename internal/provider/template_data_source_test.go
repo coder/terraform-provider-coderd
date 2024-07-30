@@ -31,9 +31,9 @@ func TestAccTemplateDataSource(t *testing.T) {
 	version, err := newVersion(ctx, client, newVersionRequest{
 		OrganizationID: orgID,
 		Version: &TemplateVersion{
-			Name:      types.StringValue("main"),
-			Message:   types.StringValue("Initial commit"),
-			Directory: types.StringValue("../../integration/template-test/example-template/"),
+			NamePrefix: types.StringValue("version-one"),
+			Message:    types.StringValue("Initial commit"),
+			Directory:  types.StringValue("../../integration/template-test/version-one/"),
 			TerraformVariables: []Variable{
 				{
 					Name:  types.StringValue("name"),

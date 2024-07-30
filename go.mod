@@ -6,6 +6,7 @@ toolchain go1.22.5
 
 require (
 	cdr.dev/slog v1.6.2-0.20240126064726-20367d4aede6
+	github.com/coder/coder v0.27.3
 	github.com/coder/coder/v2 v2.13.1
 	github.com/docker/docker v27.0.3+incompatible
 	github.com/docker/go-connections v0.4.0

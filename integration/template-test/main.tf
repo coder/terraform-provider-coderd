@@ -41,9 +41,9 @@ resource "coderd_template" "sample" {
   }
   versions = [
     {
-      name      = "latest"
-      directory = "./example-template"
-      active    = true
+      name_prefix = "latest"
+      directory   = "./version-one"
+      active      = true
       tf_vars = [
         {
           name  = "name"
@@ -52,9 +52,9 @@ resource "coderd_template" "sample" {
       ]
     },
     {
-      name      = "legacy"
-      directory = "./example-template-2"
-      active    = false
+      name_prefix = "legacy"
+      directory   = "./version-two"
+      active      = false
       tf_vars = [
         {
           name  = "name"

@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"cdr.dev/slog"
+	"github.com/coder/coder/cryptorand"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/google/uuid"
@@ -53,6 +54,7 @@ type TemplateResourceModel struct {
 	AllowUserAutoStart types.Bool   `tfsdk:"allow_user_auto_start"`
 	AllowUserAutoStop  types.Bool   `tfsdk:"allow_user_auto_stop"`
 
+	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
 	Versions Versions     `tfsdk:"versions"`
 }
@@ -69,21 +71,25 @@ func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel
 }
 
 type TemplateVersion struct {
-	ID                 UUID         `tfsdk:"id"`
-	Name               types.String `tfsdk:"name"`
+	ID UUID `tfsdk:"id"`
+
+	NamePrefix         types.String `tfsdk:"name_prefix"`
 	Message            types.String `tfsdk:"message"`
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
 	TerraformVariables []Variable   `tfsdk:"tf_vars"`
 	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
+
+	RevisionNum types.Int64  `tfsdk:"revision_num"`
+	FullName    types.String `tfsdk:"full_name"`
 }
 
 type Versions []TemplateVersion
 
-func (v Versions) ByID(id UUID) *TemplateVersion {
+func (v Versions) ByNamePrefix(namePrefix types.String) *TemplateVersion {
 	for _, m := range v {
-		if m.ID.Equal(id) {
+		if m.NamePrefix.Equal(namePrefix) {
 			return &m
 		}
 	}
@@ -219,18 +225,23 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Required: true,
 				Validators: []validator.List{
 					listvalidator.SizeAtLeast(1),
-					NewActiveVersionValidator(),
+					NewVersionsValidator(),
 				},
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
 							CustomType: UUIDType,
 							Computed:   true,
+							// This ID may change as the version is re-created.
 						},
-						"name": schema.StringAttribute{
-							MarkdownDescription: "The name of the template version. Automatically generated if not provided.",
+						"name_prefix": schema.StringAttribute{
+							MarkdownDescription: "A prefix for the name of the template version. Must be unique within the list of versions.",
 							Optional:            true,
 							Computed:            true,
+							Default:             stringdefault.StaticString(""),
+							PlanModifiers: []planmodifier.String{
+								stringplanmodifier.UseStateForUnknown(),
+							},
 						},
 						"message": schema.StringAttribute{
 							MarkdownDescription: "A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.",
@@ -260,6 +271,14 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							MarkdownDescription: "Provisioner tags for the template version.",
 							Optional:            true,
 							NestedObject:        variableNestedObject,
+						},
+						"revision_num": schema.Int64Attribute{
+							MarkdownDescription: "The ordinal appended to the name_prefix to generate a unique name for the template version.",
+							Computed:            true,
+						},
+						"full_name": schema.StringAttribute{
+							MarkdownDescription: "The full name of the template version, as on the Coder deployment.",
+							Computed:            true,
 						},
 					},
 					PlanModifiers: []planmodifier.Object{
@@ -316,6 +335,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		newVersionRequest := newVersionRequest{
 			Version:        &version,
 			OrganizationID: orgID,
+			RevisionNum:    0,
 		}
 		if idx > 0 {
 			newVersionRequest.TemplateID = &templateResp.ID
@@ -376,8 +396,9 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			}
 			tflog.Trace(ctx, "marked template version as active")
 		}
+		data.Versions[idx].FullName = types.StringValue(versionResp.Name)
 		data.Versions[idx].ID = UUIDValue(versionResp.ID)
-		data.Versions[idx].Name = types.StringValue(versionResp.Name)
+		data.Versions[idx].RevisionNum = types.Int64Value(newVersionRequest.RevisionNum)
 	}
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
@@ -437,7 +458,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
 			return
 		}
-		data.Versions[idx].Name = types.StringValue(versionResp.Name)
+		data.Versions[idx].FullName = types.StringValue(versionResp.Name)
 		data.Versions[idx].Message = types.StringValue(versionResp.Message)
 		active := false
 		if versionResp.ID == template.ActiveVersionID {
@@ -481,7 +502,8 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 
 	client := r.data.Client
 
-	if !planState.EqualTemplateMetadata(curState) {
+	templateMetadataChanged := !planState.EqualTemplateMetadata(curState)
+	if templateMetadataChanged {
 		tflog.Trace(ctx, "change in template metadata detected, updating.")
 		_, err := client.UpdateTemplateMeta(ctx, templateID, codersdk.UpdateTemplateMeta{
 			Name:                       planState.Name.ValueString(),
@@ -499,8 +521,9 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		tflog.Trace(ctx, "successfully updated template metadata")
 	}
 
-	// If there's a change, and we're still managing ACL
-	if !planState.ACL.Equal(curState.ACL) && !planState.ACL.IsNull() {
+	// Since the everyone group always gets deleted by `DisableEveryoneGroupAccess`, we need to run this even if there
+	// were no ACL changes, in case the template metadata was updated.
+	if !planState.ACL.IsNull() && (!curState.ACL.Equal(planState.ACL) || templateMetadataChanged) {
 		var acl ACL
 		resp.Diagnostics.Append(planState.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...)
 		if resp.Diagnostics.HasError() {
@@ -515,31 +538,51 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	for idx, plannedVersion := range planState.Versions {
-		var curVersionID uuid.UUID
-		// All versions in the state are guaranteed to have known IDs
-		foundVersion := curState.Versions.ByID(plannedVersion.ID)
-		// If the version is new, or if the directory hash has changed, create a new version
-		if foundVersion == nil || foundVersion.DirectoryHash != plannedVersion.DirectoryHash {
+		var curVersionName string
+		// All versions in the state are guaranteed to have known name prefixes
+		foundVersion := curState.Versions.ByNamePrefix(plannedVersion.NamePrefix)
+		// If the version is new (name prefix doesn't exist already), or if the directory hash has changed, create a
+		// new version.
+		if foundVersion == nil || !foundVersion.DirectoryHash.Equal(plannedVersion.DirectoryHash) {
 			tflog.Trace(ctx, "discovered a new or modified template version")
+			var curRevs int64 = 0
+			if foundVersion != nil {
+				curRevs = foundVersion.RevisionNum.ValueInt64() + 1
+			}
 			versionResp, err := newVersion(ctx, client, newVersionRequest{
 				Version:        &plannedVersion,
 				OrganizationID: orgID,
 				TemplateID:     &templateID,
+				RevisionNum:    curRevs,
 			})
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", err.Error())
 				return
 			}
-			curVersionID = versionResp.ID
+			planState.Versions[idx].RevisionNum = types.Int64Value(curRevs)
+			curVersionName = versionResp.Name
 		} else {
-			// Or if it's an existing version, get the ID
-			curVersionID = plannedVersion.ID.ValueUUID()
+			// Or if it's an existing version, get the full name to look it up
+			planState.Versions[idx].RevisionNum = foundVersion.RevisionNum
+			curVersionName = foundVersion.FullName.ValueString()
 		}
-		versionResp, err := client.TemplateVersion(ctx, curVersionID)
+		versionResp, err := client.TemplateVersionByName(ctx, templateID, curVersionName)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
 			return
 		}
+
+		if versionResp.Message != plannedVersion.Message.ValueString() {
+			_, err := client.UpdateTemplateVersion(ctx, versionResp.ID, codersdk.PatchTemplateVersionRequest{
+				Name:    versionResp.Name,
+				Message: plannedVersion.Message.ValueStringPointer(),
+			})
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template version metadata: %s", err))
+				return
+			}
+		}
+
 		if plannedVersion.Active.ValueBool() {
 			tflog.Trace(ctx, "marking template version as active", map[string]any{
 				"version_id":  versionResp.ID,
@@ -555,6 +598,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			tflog.Trace(ctx, "marked template version as active")
 		}
 		planState.Versions[idx].ID = UUIDValue(versionResp.ID)
+		planState.Versions[idx].FullName = types.StringValue(versionResp.Name)
 	}
 
 	// Save updated data into Terraform state
@@ -592,24 +636,24 @@ func (r *TemplateResource) ConfigValidators(context.Context) []resource.ConfigVa
 	return []resource.ConfigValidator{}
 }
 
-type activeVersionValidator struct{}
+type versionsValidator struct{}
 
-func NewActiveVersionValidator() validator.List {
-	return &activeVersionValidator{}
+func NewVersionsValidator() validator.List {
+	return &versionsValidator{}
 }
 
 // Description implements validator.List.
-func (a *activeVersionValidator) Description(ctx context.Context) string {
+func (a *versionsValidator) Description(ctx context.Context) string {
 	return a.MarkdownDescription(ctx)
 }
 
 // MarkdownDescription implements validator.List.
-func (a *activeVersionValidator) MarkdownDescription(context.Context) string {
+func (a *versionsValidator) MarkdownDescription(context.Context) string {
 	return "Validate that exactly one template version has active set to true."
 }
 
 // ValidateList implements validator.List.
-func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+func (a *versionsValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
 	var data []TemplateVersion
 	resp.Diagnostics.Append(req.ConfigValue.ElementsAs(ctx, &data, false)...)
 	if resp.Diagnostics.HasError() {
@@ -630,9 +674,20 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 	if !active {
 		resp.Diagnostics.AddError("Client Error", "At least one template version must be active.")
 	}
+
+	// Check if all versions have unique name prefixes
+	namePrefixes := make(map[string]bool)
+	for _, version := range data {
+		namePrefix := version.NamePrefix.ValueString()
+		if _, ok := namePrefixes[namePrefix]; ok {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Template version name prefix must be unique, found duplicate: `%s`", namePrefix))
+			return
+		}
+		namePrefixes[namePrefix] = true
+	}
 }
 
-var _ validator.List = &activeVersionValidator{}
+var _ validator.List = &versionsValidator{}
 
 type directoryHashPlanModifier struct{}
 
@@ -731,6 +786,7 @@ type newVersionRequest struct {
 	OrganizationID uuid.UUID
 	Version        *TemplateVersion
 	TemplateID     *uuid.UUID
+	RevisionNum    int64
 }
 
 func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error) {
@@ -761,8 +817,17 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 			Value: variable.Value.ValueString(),
 		})
 	}
+	randPart, err := cryptorand.String(6)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate random string: %s", err)
+	}
+
+	versionName := fmt.Sprintf("%d-%s", req.RevisionNum, randPart)
+	if req.Version.NamePrefix.ValueString() != "" {
+		versionName = fmt.Sprintf("%s-%s", req.Version.NamePrefix.ValueString(), versionName)
+	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
-		Name:               req.Version.Name.ValueString(),
+		Name:               versionName,
 		Message:            req.Version.Message.ValueString(),
 		StorageMethod:      codersdk.ProvisionerStorageMethodFile,
 		Provisioner:        codersdk.ProvisionerTypeTerraform,

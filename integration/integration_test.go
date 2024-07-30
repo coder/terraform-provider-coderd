@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -128,7 +129,7 @@ func TestIntegration(t *testing.T) {
 				})
 				require.NoError(t, err)
 				require.Len(t, versions, 2)
-				require.Equal(t, "latest", versions[0].Name)
+				require.Regexp(t, regexp.MustCompile(`^latest-0-.*$`), versions[0].Name)
 				require.NotEmpty(t, versions[0].ID)
 				require.Equal(t, templates[0].ID, *versions[0].TemplateID)
 				require.Equal(t, templates[0].ActiveVersionID, versions[0].ID)

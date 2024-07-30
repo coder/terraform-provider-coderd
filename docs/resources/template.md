@@ -45,14 +45,16 @@ Optional:
 
 - `active` (Boolean) Whether this version is the active version of the template. Only one version can be active at a time.
 - `message` (String) A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.
-- `name` (String) The name of the template version. Automatically generated if not provided.
+- `name_prefix` (String) A prefix for the name of the template version. Must be unique within the list of versions.
 - `provisioner_tags` (Attributes Set) Provisioner tags for the template version. (see [below for nested schema](#nestedatt--versions--provisioner_tags))
 - `tf_vars` (Attributes Set) Terraform variables for the template version. (see [below for nested schema](#nestedatt--versions--tf_vars))
 
 Read-Only:
 
 - `directory_hash` (String)
+- `full_name` (String) The full name of the template version, as on the Coder deployment.
 - `id` (String)
+- `revision_num` (Number) The ordinal appended to the name_prefix to generate a unique name for the template version.
 
 <a id="nestedatt--versions--provisioner_tags"></a>
 ### Nested Schema for `versions.provisioner_tags`
