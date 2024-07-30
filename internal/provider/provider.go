@@ -132,6 +132,7 @@ func (p *CoderdProvider) DataSources(ctx context.Context) []func() datasource.Da
 		NewGroupDataSource,
 		NewUserDataSource,
 		NewOrganizationDataSource,
+		NewTemplateDataSource,
 	}
 }
 

@@ -17,7 +17,6 @@ resource "coderd_user" "ethan" {
   suspended  = false
 }
 
-
 data "coderd_organization" "default" {
   is_default = true
 }
@@ -64,4 +63,9 @@ resource "coderd_template" "sample" {
       ]
     }
   ]
+}
+
+data "coderd_template" "sample" {
+  organization_id = data.coderd_organization.default.id
+  name            = coderd_template.sample.name
 }
