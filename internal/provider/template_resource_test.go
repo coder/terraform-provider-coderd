@@ -41,10 +41,12 @@ func TestAccTemplateResource(t *testing.T) {
 				},
 			},
 		},
-		GroupACL: []testAccTemplateKeyValueConfig{
-			{
-				Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
-				Value: PtrTo("use"),
+		ACL: testAccTemplateACLConfig{
+			GroupACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
+					Value: PtrTo("use"),
+				},
 			},
 		},
 	}
@@ -54,7 +56,7 @@ func TestAccTemplateResource(t *testing.T) {
 	cfg2.Name = PtrTo("example-template-new")
 	cfg2.Versions[0].Directory = PtrTo("../../integration/template-test/example-template-2/")
 	cfg2.Versions[0].Name = PtrTo("new")
-	cfg2.UserACL = []testAccTemplateKeyValueConfig{
+	cfg2.ACL.UserACL = []testAccTemplateKeyValueConfig{
 		{
 			Key:   PtrTo(firstUser.ID.String()),
 			Value: PtrTo("admin"),
@@ -87,8 +89,12 @@ func TestAccTemplateResource(t *testing.T) {
 	cfg6 := cfg4
 	cfg6.Versions = slices.Clone(cfg6.Versions[1:])
 
+	cfg7 := cfg6
+	cfg7.ACL.null = true
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -113,7 +119,7 @@ func TestAccTemplateResource(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				// In the real world, `versions` needs to be added to the configuration after importing
-				ImportStateVerifyIgnore: []string{"versions"},
+				ImportStateVerifyIgnore: []string{"versions", "acl"},
 			},
 			// Update existing version & metadata
 			{
@@ -180,6 +186,13 @@ func TestAccTemplateResource(t *testing.T) {
 					}),
 				),
 			},
+			// Unmanaged ACL
+			{
+				Config: cfg7.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
+				),
+			},
 		},
 	})
 }
@@ -193,25 +206,21 @@ type testAccTemplateResourceConfig struct {
 	Description    *string
 	OrganizationID *string
 	Versions       []testAccTemplateVersionConfig
-	GroupACL       []testAccTemplateKeyValueConfig
-	UserACL        []testAccTemplateKeyValueConfig
+	ACL            testAccTemplateACLConfig
 }
 
-func (c testAccTemplateResourceConfig) String(t *testing.T) string {
+type testAccTemplateACLConfig struct {
+	null     bool
+	GroupACL []testAccTemplateKeyValueConfig
+	UserACL  []testAccTemplateKeyValueConfig
+}
+
+func (c testAccTemplateACLConfig) String(t *testing.T) string {
+	if c.null == true {
+		return "null"
+	}
 	t.Helper()
-	tpl := `
-provider coderd {
-	url   = "{{.URL}}"
-	token = "{{.Token}}"
-}
-
-resource "coderd_template" "test" {
-	name            = {{orNull .Name}}
-	display_name    = {{orNull .DisplayName}}
-	description     = {{orNull .Description}}
-	organization_id = {{orNull .OrganizationID}}
-
-	acl = {
+	tpl := `{
 		groups = [
 			{{- range .GroupACL}}
 			{
@@ -229,6 +238,37 @@ resource "coderd_template" "test" {
 			{{- end}}
 		]
 	}
+	`
+
+	funcMap := template.FuncMap{
+		"orNull": PrintOrNull,
+	}
+
+	buf := strings.Builder{}
+	tmpl, err := template.New("test").Funcs(funcMap).Parse(tpl)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&buf, c)
+	require.NoError(t, err)
+
+	return buf.String()
+}
+
+func (c testAccTemplateResourceConfig) String(t *testing.T) string {
+	t.Helper()
+	tpl := `
+provider coderd {
+	url   = "{{.URL}}"
+	token = "{{.Token}}"
+}
+
+resource "coderd_template" "test" {
+	name            = {{orNull .Name}}
+	display_name    = {{orNull .DisplayName}}
+	description     = {{orNull .Description}}
+	organization_id = {{orNull .OrganizationID}}
+
+	acl = ` + c.ACL.String(t) + `
 
 	versions = [
 	{{- range .Versions }}
