@@ -32,9 +32,16 @@ func TestAccUserResource(t *testing.T) {
 
 	cfg2 := cfg1
 	cfg2.Username = PtrTo("exampleNew")
-	cfg2.Name = PtrTo("Example User New")
+
+	cfg3 := cfg2
+	cfg3.Name = PtrTo("Example New")
+
+	cfg4 := cfg3
+	cfg4.LoginType = PtrTo("github")
+	cfg4.Password = nil
 
 	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -66,10 +73,23 @@ func TestAccUserResource(t *testing.T) {
 				Config: cfg2.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
-					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User New"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example User"),
 				),
 			},
-			// Delete testing automatically occurs in TestCase
+			{
+				Config: cfg3.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example New"),
+				),
+			},
+			// Replace triggered
+			{
+				Config: cfg4.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "github"),
+				),
+			},
 		},
 	})
 }

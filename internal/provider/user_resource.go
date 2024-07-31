@@ -66,17 +66,14 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-
 			"username": schema.StringAttribute{
 				MarkdownDescription: "Username of the user.",
 				Required:            true,
 			},
 			"name": schema.StringAttribute{
-				Computed:            true,
 				MarkdownDescription: "Display name of the user. Defaults to username.",
-				Required:            false,
+				Computed:            true,
 				Optional:            true,
-				// Defaulted in Create
 			},
 			"email": schema.StringAttribute{
 				MarkdownDescription: "Email address of the user.",
@@ -84,9 +81,8 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			},
 			"roles": schema.SetAttribute{
 				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
-				Required:            false,
-				Optional:            true,
 				Computed:            true,
+				Optional:            true,
 				ElementType:         types.StringType,
 				Validators: []validator.Set{
 					setvalidator.ValueStringsAre(
@@ -97,24 +93,24 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			},
 			"login_type": schema.StringAttribute{
 				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
-				Required:            false,
-				Optional:            true,
 				Computed:            true,
+				Optional:            true,
 				Validators: []validator.String{
 					stringvalidator.OneOf("none", "password", "github", "oidc"),
 				},
 				Default: stringdefault.StaticString("none"),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
 			},
 			"password": schema.StringAttribute{
 				MarkdownDescription: "Password for the user. Required when login_type is 'password'. Passwords are saved into the state as plain text and should only be used for testing purposes.",
-				Required:            false,
 				Optional:            true,
 				Sensitive:           true,
 			},
 			"suspended": schema.BoolAttribute{
-				Computed:            true,
 				MarkdownDescription: "Whether the user is suspended.",
-				Required:            false,
+				Computed:            true,
 				Optional:            true,
 				Default:             booldefault.StaticBool(false),
 			},
@@ -164,12 +160,13 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	tflog.Trace(ctx, "creating user")
-	loginType := codersdk.LoginTypeNone
-	if data.LoginType.ValueString() != "" {
-		loginType = codersdk.LoginType(data.LoginType.ValueString())
-	}
-	if loginType == codersdk.LoginTypePassword && data.Password.ValueString() == "" {
+	loginType := codersdk.LoginType(data.LoginType.ValueString())
+	if loginType == codersdk.LoginTypePassword && data.Password.IsNull() {
 		resp.Diagnostics.AddError("Data Error", "Password is required when login_type is 'password'")
+		return
+	}
+	if loginType != codersdk.LoginTypePassword && !data.Password.IsNull() {
+		resp.Diagnostics.AddError("Data Error", "Password is only allowed when login_type is 'password'")
 		return
 	}
 	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
@@ -189,13 +186,13 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	data.ID = UUIDValue(user.ID)
 
 	tflog.Trace(ctx, "updating user profile")
-	name := data.Username.ValueString()
+	name := data.Username
 	if data.Name.ValueString() != "" {
-		name = data.Name.ValueString()
+		name = data.Name
 	}
 	user, err = client.UpdateUserProfile(ctx, user.ID.String(), codersdk.UpdateUserProfileRequest{
 		Username: data.Username.ValueString(),
-		Name:     name,
+		Name:     name.ValueString(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user profile, got error: %s", err))
@@ -290,18 +287,23 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
+	name := data.Username
+	if data.Name.ValueString() != "" {
+		name = data.Name
+	}
 	tflog.Trace(ctx, "updating user", map[string]any{
 		"new_username": data.Username.ValueString(),
-		"new_name":     data.Name.ValueString(),
+		"new_name":     name.ValueString(),
 	})
 	_, err = client.UpdateUserProfile(ctx, user.ID.String(), codersdk.UpdateUserProfileRequest{
 		Username: data.Username.ValueString(),
-		Name:     data.Name.ValueString(),
+		Name:     name.ValueString(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user profile, got error: %s", err))
 		return
 	}
+	data.Name = name
 	tflog.Trace(ctx, "successfully updated user profile")
 
 	var roles []string
@@ -320,15 +322,17 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 	tflog.Trace(ctx, "successfully updated user roles")
 
-	tflog.Trace(ctx, "updating password")
-	err = client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
-		Password: data.Password.ValueString(),
-	})
-	if err != nil && !strings.Contains(err.Error(), "New password cannot match old password.") {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update password, got error: %s", err))
-		return
+	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
+		tflog.Trace(ctx, "updating password")
+		err = client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
+			Password: data.Password.ValueString(),
+		})
+		if err != nil && !strings.Contains(err.Error(), "New password cannot match old password.") {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update password, got error: %s", err))
+			return
+		}
+		tflog.Trace(ctx, "successfully updated password")
 	}
-	tflog.Trace(ctx, "successfully updated password")
 
 	var statusErr error
 	if data.Suspended.ValueBool() {
