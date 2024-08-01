@@ -64,6 +64,7 @@ func TestAccGroupResource(t *testing.T) {
 
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -111,6 +112,7 @@ func TestAccGroupResource(t *testing.T) {
 
 	t.Run("CreateUnmanagedMembersOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
