@@ -7,10 +7,15 @@ terraform {
   }
 }
 
+provider "coderd" {
+  url   = "http://localhost:3000"
+  token = "NbRNSwdzeb-Npwlm9TIOX3bpEQIsgt2KI"
+}
+
 resource "coderd_user" "ethan" {
-  username   = "ethan"
-  name       = "Ethan Coolguy"
-  email      = "test@coder.com"
+  username   = "dean"
+  name       = "Dean Coolguy"
+  email      = "deantest@coder.com"
   roles      = ["owner", "template-admin"]
   login_type = "password"
   password   = "SomeSecurePassword!"
@@ -41,8 +46,7 @@ resource "coderd_template" "sample" {
   }
   versions = [
     {
-      name      = "latest"
-      directory = "./example-template"
+      directory = "./example-template-2"
       active    = true
       tf_vars = [
         {
@@ -52,7 +56,6 @@ resource "coderd_template" "sample" {
       ]
     },
     {
-      name      = "legacy"
       directory = "./example-template-2"
       active    = false
       tf_vars = [
