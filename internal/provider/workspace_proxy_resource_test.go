@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
@@ -51,6 +52,35 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "ws_proxy_acc", false)
+
+	cfg1 := testAccWorkspaceProxyResourceConfig{
+		URL:         client.URL.String(),
+		Token:       client.SessionToken(),
+		Name:        PtrTo("example"),
+		DisplayName: PtrTo("Example WS Proxy"),
+		Icon:        PtrTo("/emojis/1f407.png"),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg1.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to create workspace proxies."),
+			},
+		},
+	})
+
 }
 
 type testAccWorkspaceProxyResourceConfig struct {

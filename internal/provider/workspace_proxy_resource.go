@@ -103,6 +103,11 @@ func (r *WorkspaceProxyResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
+	if !r.data.Features[codersdk.FeatureWorkspaceProxy].Enabled {
+		resp.Diagnostics.AddError("Feature not enabled", "Your license is not entitled to create workspace proxies.")
+		return
+	}
+
 	client := r.data.Client
 	wsp, err := client.CreateWorkspaceProxy(ctx, codersdk.CreateWorkspaceProxyRequest{
 		Name:        data.Name.ValueString(),
