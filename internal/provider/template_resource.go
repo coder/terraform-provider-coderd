@@ -11,14 +11,19 @@ import (
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -45,14 +50,25 @@ type TemplateResource struct {
 type TemplateResourceModel struct {
 	ID UUID `tfsdk:"id"`
 
-	Name               types.String `tfsdk:"name"`
-	DisplayName        types.String `tfsdk:"display_name"`
-	Description        types.String `tfsdk:"description"`
-	OrganizationID     UUID         `tfsdk:"organization_id"`
-	Icon               types.String `tfsdk:"icon"`
-	AllowUserAutoStart types.Bool   `tfsdk:"allow_user_auto_start"`
-	AllowUserAutoStop  types.Bool   `tfsdk:"allow_user_auto_stop"`
+	Name                           types.String `tfsdk:"name"`
+	DisplayName                    types.String `tfsdk:"display_name"`
+	Description                    types.String `tfsdk:"description"`
+	OrganizationID                 UUID         `tfsdk:"organization_id"`
+	Icon                           types.String `tfsdk:"icon"`
+	DefaultTTLMillis               types.Int64  `tfsdk:"default_ttl_ms"`
+	ActivityBumpMillis             types.Int64  `tfsdk:"activity_bump_ms"`
+	AutostopRequirement            types.Object `tfsdk:"auto_stop_requirement"`
+	AutostartPermittedDaysOfWeek   types.Set    `tfsdk:"auto_start_permitted_days_of_week"`
+	AllowUserCancelWorkspaceJobs   types.Bool   `tfsdk:"allow_user_cancel_workspace_jobs"`
+	AllowUserAutostart             types.Bool   `tfsdk:"allow_user_auto_start"`
+	AllowUserAutostop              types.Bool   `tfsdk:"allow_user_auto_stop"`
+	FailureTTLMillis               types.Int64  `tfsdk:"failure_ttl_ms"`
+	TimeTilDormantMillis           types.Int64  `tfsdk:"time_til_dormant_ms"`
+	TimeTilDormantAutoDeleteMillis types.Int64  `tfsdk:"time_til_dormant_autodelete_ms"`
+	RequireActiveVersion           types.Bool   `tfsdk:"require_active_version"`
+	DeprecationMessage             types.String `tfsdk:"deprecation_message"`
 
+	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
 	Versions Versions     `tfsdk:"versions"`
 }
@@ -64,8 +80,17 @@ func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel
 		m.Description.Equal(other.Description) &&
 		m.OrganizationID.Equal(other.OrganizationID) &&
 		m.Icon.Equal(other.Icon) &&
-		m.AllowUserAutoStart.Equal(other.AllowUserAutoStart) &&
-		m.AllowUserAutoStop.Equal(other.AllowUserAutoStop)
+		m.DefaultTTLMillis.Equal(other.DefaultTTLMillis) &&
+		m.ActivityBumpMillis.Equal(other.ActivityBumpMillis) &&
+		m.AutostopRequirement.Equal(other.AutostopRequirement) &&
+		m.AutostartPermittedDaysOfWeek.Equal(other.AutostartPermittedDaysOfWeek) &&
+		m.AllowUserCancelWorkspaceJobs.Equal(other.AllowUserCancelWorkspaceJobs) &&
+		m.AllowUserAutostart.Equal(other.AllowUserAutostart) &&
+		m.AllowUserAutostop.Equal(other.AllowUserAutostop) &&
+		m.FailureTTLMillis.Equal(other.FailureTTLMillis) &&
+		m.TimeTilDormantMillis.Equal(other.TimeTilDormantMillis) &&
+		m.TimeTilDormantAutoDeleteMillis.Equal(other.TimeTilDormantAutoDeleteMillis) &&
+		m.RequireActiveVersion.Equal(other.RequireActiveVersion)
 }
 
 type TemplateVersion struct {
@@ -147,6 +172,16 @@ var permissionTypeAttr = basetypes.SetType{ElemType: types.ObjectType{
 	},
 }}
 
+type AutostopRequirement struct {
+	DaysOfWeek []string `tfsdk:"days_of_week"`
+	Weeks      int64    `tfsdk:"weeks"`
+}
+
+var autostopRequirementTypeAttr = map[string]attr.Type{
+	"days_of_week": basetypes.SetType{ElemType: basetypes.StringType{}},
+	"weeks":        basetypes.Int64Type{},
+}
+
 func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_template"
 }
@@ -197,15 +232,98 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
 			},
+			"default_ttl_ms": schema.Int64Attribute{
+				MarkdownDescription: "The default time-to-live for all workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"activity_bump_ms": schema.Int64Attribute{
+				MarkdownDescription: "The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(3600000),
+			},
+			"auto_stop_requirement": schema.SingleNestedAttribute{
+				MarkdownDescription: "The auto-stop requirement for all workspaces created from this template. Requires an enterprise Coder deployment.",
+				Optional:            true,
+				Computed:            true,
+				Attributes: map[string]schema.Attribute{
+					"days_of_week": schema.SetAttribute{
+						MarkdownDescription: "List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.",
+						Optional:            true,
+						Computed:            true,
+						ElementType:         types.StringType,
+						Validators:          []validator.Set{weekValidator},
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+					},
+					"weeks": schema.Int64Attribute{
+						MarkdownDescription: "Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.",
+						Optional:            true,
+						Computed:            true,
+						Default:             int64default.StaticInt64(1),
+					},
+				},
+				Default: objectdefault.StaticValue(types.ObjectValueMust(autostopRequirementTypeAttr, map[string]attr.Value{
+					"days_of_week": types.SetValueMust(types.StringType, []attr.Value{}),
+					"weeks":        types.Int64Value(1),
+				})),
+			},
+			"auto_start_permitted_days_of_week": schema.SetAttribute{
+				MarkdownDescription: "List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed. Requires an enterprise Coder deployment.",
+				Optional:            true,
+				Computed:            true,
+				ElementType:         types.StringType,
+				Validators:          []validator.Set{weekValidator},
+				Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{types.StringValue("monday"), types.StringValue("tuesday"), types.StringValue("wednesday"), types.StringValue("thursday"), types.StringValue("friday"), types.StringValue("saturday"), types.StringValue("sunday")})),
+			},
+			"allow_user_cancel_workspace_jobs": schema.BoolAttribute{
+				MarkdownDescription: "Whether users can cancel in-progress workspace jobs using this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
 			"allow_user_auto_start": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
+				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_stop": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
+				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"failure_ttl_ms": schema.Int64Attribute{
+				MarkdownDescription: "The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"time_til_dormant_ms": schema.Int64Attribute{
+				MarkdownDescription: "The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"time_til_dormant_autodelete_ms": schema.Int64Attribute{
+				MarkdownDescription: "The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"require_active_version": schema.BoolAttribute{
+				MarkdownDescription: "Whether workspaces must be created from the active version of this template. Defaults to false.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+			},
+			"deprecation_message": schema.StringAttribute{
+				MarkdownDescription: "If set, the template will be marked as deprecated and users will be blocked from creating new workspaces from it.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(""),
 			},
 			"acl": schema.SingleNestedAttribute{
 				MarkdownDescription: "Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform.",
@@ -327,16 +445,11 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		}
 		if idx == 0 {
 			tflog.Trace(ctx, "creating template")
-			templateResp, err = client.CreateTemplate(ctx, orgID, codersdk.CreateTemplateRequest{
-				Name:                       data.Name.ValueString(),
-				DisplayName:                data.DisplayName.ValueString(),
-				Description:                data.Description.ValueString(),
-				VersionID:                  versionResp.ID,
-				AllowUserAutostart:         data.AllowUserAutoStart.ValueBoolPointer(),
-				AllowUserAutostop:          data.AllowUserAutoStop.ValueBoolPointer(),
-				Icon:                       data.Icon.ValueString(),
-				DisableEveryoneGroupAccess: true,
-			})
+			createReq := data.toCreateRequest(ctx, resp, versionResp.ID)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			templateResp, err = client.CreateTemplate(ctx, orgID, *createReq)
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template: %s", err))
 				return
@@ -344,6 +457,13 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			tflog.Trace(ctx, "successfully created template", map[string]any{
 				"id": templateResp.ID,
 			})
+
+			// Read the response into the state to set computed fields
+			diag := data.readResponse(ctx, &templateResp)
+			if diag.HasError() {
+				resp.Diagnostics.Append(diag...)
+				return
+			}
 
 			if !data.ACL.IsNull() {
 				tflog.Trace(ctx, "updating template ACL")
@@ -382,7 +502,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
 
-	// Save data into Terraform state
+	// Save data into Terraform sutate
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -405,13 +525,11 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	data.Name = types.StringValue(template.Name)
-	data.DisplayName = types.StringValue(template.DisplayName)
-	data.Description = types.StringValue(template.Description)
-	data.OrganizationID = UUIDValue(template.OrganizationID)
-	data.Icon = types.StringValue(template.Icon)
-	data.AllowUserAutoStart = types.BoolValue(template.AllowUserAutostart)
-	data.AllowUserAutoStop = types.BoolValue(template.AllowUserAutostop)
+	diag := data.readResponse(ctx, &template)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
 
 	if !data.ACL.IsNull() {
 		tflog.Trace(ctx, "reading template ACL")
@@ -481,26 +599,26 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 
 	client := r.data.Client
 
-	if !planState.EqualTemplateMetadata(curState) {
+	templateMetadataChanged := !planState.EqualTemplateMetadata(curState)
+	// This is required, as the API will reject no-diff updates.
+	if templateMetadataChanged {
 		tflog.Trace(ctx, "change in template metadata detected, updating.")
-		_, err := client.UpdateTemplateMeta(ctx, templateID, codersdk.UpdateTemplateMeta{
-			Name:                       planState.Name.ValueString(),
-			DisplayName:                planState.DisplayName.ValueString(),
-			Description:                planState.Description.ValueString(),
-			AllowUserAutostart:         planState.AllowUserAutoStart.ValueBool(),
-			AllowUserAutostop:          planState.AllowUserAutoStop.ValueBool(),
-			Icon:                       planState.Icon.ValueString(),
-			DisableEveryoneGroupAccess: true,
-		})
+		updateReq := planState.toUpdateRequest(ctx, resp)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		_, err := client.UpdateTemplateMeta(ctx, templateID, *updateReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template metadata: %s", err))
 			return
 		}
+
 		tflog.Trace(ctx, "successfully updated template metadata")
 	}
 
-	// If there's a change, and we're still managing ACL
-	if !planState.ACL.Equal(curState.ACL) && !planState.ACL.IsNull() {
+	// Since the everyone group always gets deleted by `DisableEveryoneGroupAccess`, we need to run this even if there
+	// were no ACL changes but the template metadata was updated.
+	if !planState.ACL.IsNull() && (!curState.ACL.Equal(planState.ACL) || templateMetadataChanged) {
 		var acl ACL
 		resp.Diagnostics.Append(planState.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...)
 		if resp.Diagnostics.HasError() {
@@ -675,6 +793,10 @@ func NewDirectoryHashPlanModifier() planmodifier.Object {
 
 var _ planmodifier.Object = &directoryHashPlanModifier{}
 
+var weekValidator = setvalidator.ValueStringsAre(
+	stringvalidator.OneOf("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
+)
+
 func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.Logger, directory string) (*codersdk.UploadResponse, error) {
 	pipeReader, pipeWriter := io.Pipe()
 	go func() {
@@ -819,5 +941,124 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	return ACL{
 		UserPermissions:  userPerms,
 		GroupPermissions: groupPerms,
+	}
+}
+
+func (r *TemplateResourceModel) readResponse(ctx context.Context, template *codersdk.Template) diag.Diagnostics {
+	r.Name = types.StringValue(template.Name)
+	r.DisplayName = types.StringValue(template.DisplayName)
+	r.Description = types.StringValue(template.Description)
+	r.OrganizationID = UUIDValue(template.OrganizationID)
+	r.Icon = types.StringValue(template.Icon)
+	r.DefaultTTLMillis = types.Int64Value(template.DefaultTTLMillis)
+	r.ActivityBumpMillis = types.Int64Value(template.ActivityBumpMillis)
+	asrObj, diag := types.ObjectValueFrom(ctx, autostopRequirementTypeAttr, AutostopRequirement{
+		DaysOfWeek: template.AutostopRequirement.DaysOfWeek,
+		Weeks:      template.AutostopRequirement.Weeks,
+	})
+	if diag.HasError() {
+		return diag
+	}
+	r.AutostopRequirement = asrObj
+	autoStartDays := make([]attr.Value, 0, len(template.AutostartRequirement.DaysOfWeek))
+	for _, day := range template.AutostartRequirement.DaysOfWeek {
+		autoStartDays = append(autoStartDays, types.StringValue(day))
+	}
+	r.AutostartPermittedDaysOfWeek = types.SetValueMust(types.StringType, autoStartDays)
+	r.AllowUserCancelWorkspaceJobs = types.BoolValue(template.AllowUserCancelWorkspaceJobs)
+	r.AllowUserAutostart = types.BoolValue(template.AllowUserAutostart)
+	r.AllowUserAutostop = types.BoolValue(template.AllowUserAutostop)
+	r.FailureTTLMillis = types.Int64Value(template.FailureTTLMillis)
+	r.TimeTilDormantMillis = types.Int64Value(template.TimeTilDormantMillis)
+	r.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
+	r.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
+	r.DeprecationMessage = types.StringValue(template.DeprecationMessage)
+	return nil
+}
+
+func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, resp *resource.UpdateResponse) *codersdk.UpdateTemplateMeta {
+	var days []string
+	resp.Diagnostics.Append(
+		r.AutostartPermittedDaysOfWeek.ElementsAs(ctx, &days, false)...,
+	)
+	if resp.Diagnostics.HasError() {
+		return nil
+	}
+	autoStart := &codersdk.TemplateAutostartRequirement{
+		DaysOfWeek: days,
+	}
+	var reqs AutostopRequirement
+	resp.Diagnostics.Append(
+		r.AutostopRequirement.As(ctx, &reqs, basetypes.ObjectAsOptions{})...,
+	)
+	if resp.Diagnostics.HasError() {
+		return nil
+	}
+	autoStop := &codersdk.TemplateAutostopRequirement{
+		DaysOfWeek: reqs.DaysOfWeek,
+		Weeks:      reqs.Weeks,
+	}
+	return &codersdk.UpdateTemplateMeta{
+		Name:                           r.Name.ValueString(),
+		DisplayName:                    r.DisplayName.ValueString(),
+		Description:                    r.Description.ValueString(),
+		Icon:                           r.Icon.ValueString(),
+		DefaultTTLMillis:               r.DefaultTTLMillis.ValueInt64(),
+		ActivityBumpMillis:             r.ActivityBumpMillis.ValueInt64(),
+		AutostopRequirement:            autoStop,
+		AutostartRequirement:           autoStart,
+		AllowUserCancelWorkspaceJobs:   r.AllowUserCancelWorkspaceJobs.ValueBool(),
+		AllowUserAutostart:             r.AllowUserAutostart.ValueBool(),
+		AllowUserAutostop:              r.AllowUserAutostop.ValueBool(),
+		FailureTTLMillis:               r.FailureTTLMillis.ValueInt64(),
+		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64(),
+		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64(),
+		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
+		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
+		// If we're managing ACL, we want to delete the everyone group
+		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
+	}
+}
+
+func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resource.CreateResponse, versionID uuid.UUID) *codersdk.CreateTemplateRequest {
+	var days []string
+	resp.Diagnostics.Append(
+		r.AutostartPermittedDaysOfWeek.ElementsAs(ctx, &days, false)...,
+	)
+	if resp.Diagnostics.HasError() {
+		return nil
+	}
+	autoStart := &codersdk.TemplateAutostartRequirement{
+		DaysOfWeek: days,
+	}
+	var reqs AutostopRequirement
+	resp.Diagnostics.Append(
+		r.AutostopRequirement.As(ctx, &reqs, basetypes.ObjectAsOptions{})...,
+	)
+	if resp.Diagnostics.HasError() {
+		return nil
+	}
+	autoStop := &codersdk.TemplateAutostopRequirement{
+		DaysOfWeek: reqs.DaysOfWeek,
+		Weeks:      reqs.Weeks,
+	}
+	return &codersdk.CreateTemplateRequest{
+		Name:                           r.Name.ValueString(),
+		DisplayName:                    r.DisplayName.ValueString(),
+		Description:                    r.Description.ValueString(),
+		Icon:                           r.Icon.ValueString(),
+		VersionID:                      versionID,
+		DefaultTTLMillis:               r.DefaultTTLMillis.ValueInt64Pointer(),
+		ActivityBumpMillis:             r.ActivityBumpMillis.ValueInt64Pointer(),
+		AutostopRequirement:            autoStop,
+		AutostartRequirement:           autoStart,
+		AllowUserCancelWorkspaceJobs:   r.AllowUserCancelWorkspaceJobs.ValueBoolPointer(),
+		AllowUserAutostart:             r.AllowUserAutostart.ValueBoolPointer(),
+		AllowUserAutostop:              r.AllowUserAutostop.ValueBoolPointer(),
+		FailureTTLMillis:               r.FailureTTLMillis.ValueInt64Pointer(),
+		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64Pointer(),
+		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
+		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
+		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}
 }

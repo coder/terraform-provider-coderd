@@ -23,12 +23,22 @@ A Coder template
 ### Optional
 
 - `acl` (Attributes) Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform. (see [below for nested schema](#nestedatt--acl))
-- `allow_user_auto_start` (Boolean)
-- `allow_user_auto_stop` (Boolean)
+- `activity_bump_ms` (Number) The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.
+- `allow_user_auto_start` (Boolean) Whether users can auto-start workspaces created from this template. Defaults to true.
+- `allow_user_auto_stop` (Boolean) Whether users can auto-start workspaces created from this template. Defaults to true.
+- `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel in-progress workspace jobs using this template. Defaults to true.
+- `auto_start_permitted_days_of_week` (Set of String) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed. Requires an enterprise Coder deployment.
+- `auto_stop_requirement` (Attributes) The auto-stop requirement for all workspaces created from this template. Requires an enterprise Coder deployment. (see [below for nested schema](#nestedatt--auto_stop_requirement))
+- `default_ttl_ms` (Number) The default time-to-live for all workspaces created from this template, in milliseconds.
+- `deprecation_message` (String) If set, the template will be marked as deprecated and users will be blocked from creating new workspaces from it.
 - `description` (String) A description of the template.
 - `display_name` (String) The display name of the template. Defaults to the template name.
+- `failure_ttl_ms` (Number) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.
 - `icon` (String) Relative path or external URL that specifes an icon to be displayed in the dashboard.
 - `organization_id` (String) The ID of the organization. Defaults to the provider's default organization
+- `require_active_version` (Boolean) Whether workspaces must be created from the active version of this template. Defaults to false.
+- `time_til_dormant_autodelete_ms` (Number) The max lifetime before Coder permanently deletes dormant workspaces created from this template.
+- `time_til_dormant_ms` (Number) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.
 
 ### Read-Only
 
@@ -97,3 +107,13 @@ Required:
 
 - `id` (String)
 - `role` (String)
+
+
+
+<a id="nestedatt--auto_stop_requirement"></a>
+### Nested Schema for `auto_stop_requirement`
+
+Optional:
+
+- `days_of_week` (Set of String) List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.
+- `weeks` (Number) Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.
