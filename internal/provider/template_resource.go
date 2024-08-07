@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectdefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -284,13 +284,13 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_start": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true.",
+				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_stop": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true.",
+				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
@@ -346,9 +346,12 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Computed:   true,
 						},
 						"name": schema.StringAttribute{
-							MarkdownDescription: "The name of the template version. Automatically generated if not provided.",
+							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents are updated.",
 							Optional:            true,
 							Computed:            true,
+							Validators: []validator.String{
+								stringvalidator.LengthAtLeast(1),
+							},
 						},
 						"message": schema.StringAttribute{
 							MarkdownDescription: "A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.",
@@ -380,10 +383,9 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							NestedObject:        variableNestedObject,
 						},
 					},
-					PlanModifiers: []planmodifier.Object{
-						NewDirectoryHashPlanModifier(),
-						objectplanmodifier.UseStateForUnknown(),
-					},
+				},
+				PlanModifiers: []planmodifier.List{
+					NewVersionsPlanModifier(),
 				},
 			},
 		},
@@ -483,18 +485,11 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			}
 		}
 		if version.Active.ValueBool() {
-			tflog.Trace(ctx, "marking template version as active", map[string]any{
-				"version_id":  versionResp.ID,
-				"template_id": templateResp.ID,
-			})
-			err := client.UpdateActiveTemplateVersion(ctx, templateResp.ID, codersdk.UpdateActiveTemplateVersion{
-				ID: versionResp.ID,
-			})
+			err := markActive(ctx, client, templateResp.ID, versionResp.ID)
 			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set active template version: %s", err))
+				resp.Diagnostics.AddError("Client Error", err.Error())
 				return
 			}
-			tflog.Trace(ctx, "marked template version as active")
 		}
 		data.Versions[idx].ID = UUIDValue(versionResp.ID)
 		data.Versions[idx].Name = types.StringValue(versionResp.Name)
@@ -502,7 +497,12 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
 
-	// Save data into Terraform sutate
+	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -569,11 +569,11 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var planState TemplateResourceModel
+	var newState TemplateResourceModel
 	var curState TemplateResourceModel
 
 	// Read Terraform plan data into the model
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &planState)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &newState)...)
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -585,25 +585,25 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	if planState.OrganizationID.IsUnknown() {
-		planState.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+	if newState.OrganizationID.IsUnknown() {
+		newState.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
-	if planState.DisplayName.IsUnknown() {
-		planState.DisplayName = planState.Name
+	if newState.DisplayName.IsUnknown() {
+		newState.DisplayName = newState.Name
 	}
 
-	orgID := planState.OrganizationID.ValueUUID()
+	orgID := newState.OrganizationID.ValueUUID()
 
-	templateID := planState.ID.ValueUUID()
+	templateID := newState.ID.ValueUUID()
 
 	client := r.data.Client
 
-	templateMetadataChanged := !planState.EqualTemplateMetadata(curState)
+	templateMetadataChanged := !newState.EqualTemplateMetadata(curState)
 	// This is required, as the API will reject no-diff updates.
 	if templateMetadataChanged {
 		tflog.Trace(ctx, "change in template metadata detected, updating.")
-		updateReq := planState.toUpdateRequest(ctx, resp)
+		updateReq := newState.toUpdateRequest(ctx, resp)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -618,9 +618,9 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 
 	// Since the everyone group always gets deleted by `DisableEveryoneGroupAccess`, we need to run this even if there
 	// were no ACL changes but the template metadata was updated.
-	if !planState.ACL.IsNull() && (!curState.ACL.Equal(planState.ACL) || templateMetadataChanged) {
+	if !newState.ACL.IsNull() && (!curState.ACL.Equal(newState.ACL) || templateMetadataChanged) {
 		var acl ACL
-		resp.Diagnostics.Append(planState.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...)
+		resp.Diagnostics.Append(newState.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -632,15 +632,11 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		tflog.Trace(ctx, "successfully updated template ACL")
 	}
 
-	for idx, plannedVersion := range planState.Versions {
-		var curVersionID uuid.UUID
-		// All versions in the state are guaranteed to have known IDs
-		foundVersion := curState.Versions.ByID(plannedVersion.ID)
-		// If the version is new, or if the directory hash has changed, create a new version
-		if foundVersion == nil || foundVersion.DirectoryHash != plannedVersion.DirectoryHash {
+	for idx := range newState.Versions {
+		if newState.Versions[idx].ID.IsUnknown() {
 			tflog.Trace(ctx, "discovered a new or modified template version")
-			versionResp, err := newVersion(ctx, client, newVersionRequest{
-				Version:        &plannedVersion,
+			uploadResp, err := newVersion(ctx, client, newVersionRequest{
+				Version:        &newState.Versions[idx],
 				OrganizationID: orgID,
 				TemplateID:     &templateID,
 			})
@@ -648,35 +644,56 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				resp.Diagnostics.AddError("Client Error", err.Error())
 				return
 			}
-			curVersionID = versionResp.ID
-		} else {
-			// Or if it's an existing version, get the ID
-			curVersionID = plannedVersion.ID.ValueUUID()
-		}
-		versionResp, err := client.TemplateVersion(ctx, curVersionID)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
-			return
-		}
-		if plannedVersion.Active.ValueBool() {
-			tflog.Trace(ctx, "marking template version as active", map[string]any{
-				"version_id":  versionResp.ID,
-				"template_id": templateID,
-			})
-			err := client.UpdateActiveTemplateVersion(ctx, templateID, codersdk.UpdateActiveTemplateVersion{
-				ID: versionResp.ID,
-			})
+			versionResp, err := client.TemplateVersion(ctx, uploadResp.ID)
 			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update active template version: %s", err))
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
 				return
 			}
-			tflog.Trace(ctx, "marked template version as active")
+			newState.Versions[idx].ID = UUIDValue(versionResp.ID)
+			newState.Versions[idx].Name = types.StringValue(versionResp.Name)
+			if newState.Versions[idx].Active.ValueBool() {
+				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
+				if err != nil {
+					resp.Diagnostics.AddError("Client Error", err.Error())
+					return
+				}
+			}
+		} else {
+			// Since the ID was not unknown, it must be in the current state,
+			// having been retrieved from the private state,
+			// but the list might be a different size.
+			curVersion := curState.Versions.ByID(newState.Versions[idx].ID)
+			if curVersion == nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Public/Private State Mismatch: failed to find template version with ID %s", newState.Versions[idx].ID))
+				return
+			}
+			if !curVersion.Name.Equal(newState.Versions[idx].Name) {
+				_, err := client.UpdateTemplateVersion(ctx, newState.Versions[idx].ID.ValueUUID(), codersdk.PatchTemplateVersionRequest{
+					Name:    newState.Versions[idx].Name.ValueString(),
+					Message: newState.Versions[idx].Message.ValueStringPointer(),
+				})
+				if err != nil {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template version metadata: %s", err))
+					return
+				}
+			}
+			if newState.Versions[idx].Active.ValueBool() && !curVersion.Active.ValueBool() {
+				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
+				if err != nil {
+					resp.Diagnostics.AddError("Client Error", err.Error())
+					return
+				}
+			}
 		}
-		planState.Versions[idx].ID = UUIDValue(versionResp.ID)
+	}
+
+	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Save updated data into Terraform state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &planState)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
 }
 
 func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -748,50 +765,79 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 	if !active {
 		resp.Diagnostics.AddError("Client Error", "At least one template version must be active.")
 	}
+
+	// Check all versions have unique names
+	uniqueNames := make(map[string]struct{})
+	for _, version := range data {
+		if version.Name.IsNull() {
+			continue
+		}
+		if _, ok := uniqueNames[version.Name.ValueString()]; ok {
+			resp.Diagnostics.AddError("Client Error", "Template version names must be unique.")
+			return
+		}
+		uniqueNames[version.Name.ValueString()] = struct{}{}
+	}
 }
 
 var _ validator.List = &activeVersionValidator{}
 
-type directoryHashPlanModifier struct{}
+type versionsPlanModifier struct{}
 
 // Description implements planmodifier.Object.
-func (d *directoryHashPlanModifier) Description(ctx context.Context) string {
+func (d *versionsPlanModifier) Description(ctx context.Context) string {
 	return d.MarkdownDescription(ctx)
 }
 
 // MarkdownDescription implements planmodifier.Object.
-func (d *directoryHashPlanModifier) MarkdownDescription(context.Context) string {
+func (d *versionsPlanModifier) MarkdownDescription(context.Context) string {
 	return "Compute the hash of a directory."
 }
 
-// PlanModifyObject implements planmodifier.Object.
-func (d *directoryHashPlanModifier) PlanModifyObject(ctx context.Context, req planmodifier.ObjectRequest, resp *planmodifier.ObjectResponse) {
-	attributes := req.PlanValue.Attributes()
-	directory, ok := attributes["directory"].(types.String)
-	if !ok {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("unexpected type for directory, got: %T", directory))
+// PlanModifyObject implements planmodifier.List.
+func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	var data Versions
+	resp.Diagnostics.Append(req.PlanValue.ElementsAs(ctx, &data, false)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	hash, err := computeDirectoryHash(directory.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
-		return
+	for i := range data {
+		hash, err := computeDirectoryHash(data[i].Directory.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
+			return
+		}
+		data[i].DirectoryHash = types.StringValue(hash)
 	}
-	attributes["directory_hash"] = types.StringValue(hash)
-	out, diag := types.ObjectValue(req.PlanValue.AttributeTypes(ctx), attributes)
+
+	var lv LastVersionsByHash
+	lvBytes, diag := req.Private.GetKey(ctx, LastVersionsKey)
 	if diag.HasError() {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create plan object: %s", diag))
+		resp.Diagnostics.Append(diag...)
 		return
 	}
-	resp.PlanValue = out
+	// If this is the first read, init the private state value
+	if lvBytes == nil {
+		lv = make(LastVersionsByHash)
+	} else {
+		err := json.Unmarshal(lvBytes, &lv)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to unmarshal private state when reading: %s", err))
+			return
+		}
+	}
+
+	data.reconcileVersionIDs(lv)
+
+	resp.PlanValue, resp.Diagnostics = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), data)
 }
 
-func NewDirectoryHashPlanModifier() planmodifier.Object {
-	return &directoryHashPlanModifier{}
+func NewVersionsPlanModifier() planmodifier.List {
+	return &versionsPlanModifier{}
 }
 
-var _ planmodifier.Object = &directoryHashPlanModifier{}
+var _ planmodifier.List = &versionsPlanModifier{}
 
 var weekValidator = setvalidator.ValueStringsAre(
 	stringvalidator.OneOf("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
@@ -906,6 +952,21 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	}
 	tflog.Trace(ctx, "successfully created template version")
 	return &versionResp, nil
+}
+
+func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UUID, versionID uuid.UUID) error {
+	tflog.Trace(ctx, "marking template version as active", map[string]any{
+		"version_id":  versionID.String(),
+		"template_id": templateID.String(),
+	})
+	err := client.UpdateActiveTemplateVersion(ctx, templateID, codersdk.UpdateActiveTemplateVersion{
+		ID: versionID,
+	})
+	if err != nil {
+		return fmt.Errorf("Failed to update active template version: %s", err)
+	}
+	tflog.Trace(ctx, "marked template version as active")
+	return nil
 }
 
 func convertACLToRequest(permissions ACL) codersdk.UpdateTemplateACL {
@@ -1060,5 +1121,83 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
+	}
+}
+
+type LastVersionsByHash = map[string][]PreviousTemplateVersion
+
+var LastVersionsKey = "last_versions"
+
+type PreviousTemplateVersion struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+type privateState interface {
+	GetKey(ctx context.Context, key string) ([]byte, diag.Diagnostics)
+	SetKey(ctx context.Context, key string, value []byte) diag.Diagnostics
+}
+
+func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags diag.Diagnostics) {
+	lv := make(LastVersionsByHash)
+	for _, version := range v {
+		vbh, ok := lv[version.DirectoryHash.ValueString()]
+		// Store the IDs and names of all versions with the same directory hash,
+		// in the order they appear
+		if ok {
+			lv[version.DirectoryHash.ValueString()] = append(vbh, PreviousTemplateVersion{
+				ID:   version.ID.ValueUUID(),
+				Name: version.Name.ValueString(),
+			})
+		} else {
+			lv[version.DirectoryHash.ValueString()] = []PreviousTemplateVersion{
+				{
+					ID:   version.ID.ValueUUID(),
+					Name: version.Name.ValueString(),
+				},
+			}
+		}
+	}
+	lvBytes, err := json.Marshal(lv)
+	if err != nil {
+		diags.AddError("Client Error", fmt.Sprintf("Failed to marshal private state: %s", err))
+		return diags
+	}
+	return ps.SetKey(ctx, LastVersionsKey, lvBytes)
+}
+
+func (v Versions) reconcileVersionIDs(lv LastVersionsByHash) {
+	for i := range v {
+		prevList, ok := lv[v[i].DirectoryHash.ValueString()]
+		// If not in state, mark as known after apply since we'll create a new version.
+		// Versions whose Terraform configuration has not changed will have known
+		// IDs at this point, so we need to set this manually.
+		if !ok {
+			v[i].ID = NewUUIDUnknown()
+		} else {
+			// More than one candidate, try to match by name
+			for j, prev := range prevList {
+				// If the name is the same, use the existing ID, and remove
+				// it from the previous version candidates
+				if v[i].Name.ValueString() == prev.Name {
+					v[i].ID = UUIDValue(prev.ID)
+					lv[v[i].DirectoryHash.ValueString()] = append(prevList[:j], prevList[j+1:]...)
+					break
+				}
+			}
+		}
+	}
+
+	// For versions whose hash was found in the private state but couldn't be
+	// matched, use the leftovers in the order they appear
+	for i := range v {
+		prevList := lv[v[i].DirectoryHash.ValueString()]
+		if len(prevList) > 0 && v[i].ID.IsUnknown() {
+			v[i].ID = UUIDValue(prevList[0].ID)
+			if v[i].Name.IsUnknown() {
+				v[i].Name = types.StringValue(prevList[0].Name)
+			}
+			lv[v[i].DirectoryHash.ValueString()] = prevList[1:]
+		}
 	}
 }

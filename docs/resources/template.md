@@ -24,8 +24,8 @@ A Coder template
 
 - `acl` (Attributes) Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform. (see [below for nested schema](#nestedatt--acl))
 - `activity_bump_ms` (Number) The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.
-- `allow_user_auto_start` (Boolean) Whether users can auto-start workspaces created from this template. Defaults to true.
-- `allow_user_auto_stop` (Boolean) Whether users can auto-start workspaces created from this template. Defaults to true.
+- `allow_user_auto_start` (Boolean) Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.
+- `allow_user_auto_stop` (Boolean) Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel in-progress workspace jobs using this template. Defaults to true.
 - `auto_start_permitted_days_of_week` (Set of String) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed. Requires an enterprise Coder deployment.
 - `auto_stop_requirement` (Attributes) The auto-stop requirement for all workspaces created from this template. Requires an enterprise Coder deployment. (see [below for nested schema](#nestedatt--auto_stop_requirement))
@@ -55,7 +55,7 @@ Optional:
 
 - `active` (Boolean) Whether this version is the active version of the template. Only one version can be active at a time.
 - `message` (String) A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.
-- `name` (String) The name of the template version. Automatically generated if not provided.
+- `name` (String) The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents are updated.
 - `provisioner_tags` (Attributes Set) Provisioner tags for the template version. (see [below for nested schema](#nestedatt--versions--provisioner_tags))
 - `tf_vars` (Attributes Set) Terraform variables for the template version. (see [below for nested schema](#nestedatt--versions--tf_vars))
 
