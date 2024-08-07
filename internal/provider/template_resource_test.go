@@ -554,7 +554,7 @@ type testAccTemplateKeyValueConfig struct {
 
 func testAccCheckNumTemplateVersions(ctx context.Context, client *codersdk.Client, expected int) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		templates, err := client.Templates(ctx)
+		templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
 		if err != nil {
 			return err
 		}
