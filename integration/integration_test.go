@@ -115,7 +115,7 @@ func TestIntegration(t *testing.T) {
 				require.NoError(t, err)
 
 				// Check template metadata
-				templates, err := c.Templates(ctx)
+				templates, err := c.Templates(ctx, codersdk.TemplateFilter{})
 				require.NoError(t, err)
 				require.Len(t, templates, 1)
 				require.Equal(t, "example-template", templates[0].Name)
