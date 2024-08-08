@@ -7,15 +7,10 @@ terraform {
   }
 }
 
-provider "coderd" {
-  url   = "http://localhost:3000"
-  token = "NbRNSwdzeb-Npwlm9TIOX3bpEQIsgt2KI"
-}
-
 resource "coderd_user" "ethan" {
-  username   = "dean"
-  name       = "Dean Coolguy"
-  email      = "deantest@coder.com"
+  username   = "ethan"
+  name       = "Ethan Coolguy"
+  email      = "test@coder.com"
   roles      = ["owner", "template-admin"]
   login_type = "password"
   password   = "SomeSecurePassword!"

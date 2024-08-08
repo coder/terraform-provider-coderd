@@ -6,6 +6,7 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -68,7 +70,10 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				MarkdownDescription: "The display name of the group. Defaults to the group name.",
 				Computed:            true,
 				Optional:            true,
-				// Defaulted in Create
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				Default: stringdefault.StaticString(""),
 			},
 			"avatar_url": schema.StringAttribute{
 				MarkdownDescription: "The URL of the group's avatar.",
@@ -139,15 +144,10 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	orgID := data.OrganizationID.ValueUUID()
 
-	displayName := data.Name.ValueString()
-	if data.DisplayName.ValueString() != "" {
-		displayName = data.DisplayName.ValueString()
-	}
-
 	tflog.Trace(ctx, "creating group")
 	group, err := client.CreateGroup(ctx, orgID, codersdk.CreateGroupRequest{
 		Name:           data.Name.ValueString(),
-		DisplayName:    displayName,
+		DisplayName:    data.DisplayName.ValueString(),
 		AvatarURL:      data.AvatarURL.ValueString(),
 		QuotaAllowance: int(data.QuotaAllowance.ValueInt32()),
 	})

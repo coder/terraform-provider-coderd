@@ -796,19 +796,24 @@ func (d *versionsPlanModifier) MarkdownDescription(context.Context) string {
 
 // PlanModifyObject implements planmodifier.List.
 func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
-	var data Versions
-	resp.Diagnostics.Append(req.PlanValue.ElementsAs(ctx, &data, false)...)
+	var planVersions Versions
+	resp.Diagnostics.Append(req.PlanValue.ElementsAs(ctx, &planVersions, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var configVersions Versions
+	resp.Diagnostics.Append(req.ConfigValue.ElementsAs(ctx, &configVersions, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	for i := range data {
-		hash, err := computeDirectoryHash(data[i].Directory.ValueString())
+	for i := range planVersions {
+		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
 			return
 		}
-		data[i].DirectoryHash = types.StringValue(hash)
+		planVersions[i].DirectoryHash = types.StringValue(hash)
 	}
 
 	var lv LastVersionsByHash
@@ -828,9 +833,9 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		}
 	}
 
-	data.reconcileVersionIDs(lv)
+	planVersions.reconcileVersionIDs(lv, configVersions)
 
-	resp.PlanValue, resp.Diagnostics = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), data)
+	resp.PlanValue, resp.Diagnostics = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), planVersions)
 }
 
 func NewVersionsPlanModifier() planmodifier.List {
@@ -1166,22 +1171,28 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	return ps.SetKey(ctx, LastVersionsKey, lvBytes)
 }
 
-func (v Versions) reconcileVersionIDs(lv LastVersionsByHash) {
-	for i := range v {
-		prevList, ok := lv[v[i].DirectoryHash.ValueString()]
+func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions) {
+	for i := range planVersions {
+		prevList, ok := lv[planVersions[i].DirectoryHash.ValueString()]
 		// If not in state, mark as known after apply since we'll create a new version.
 		// Versions whose Terraform configuration has not changed will have known
 		// IDs at this point, so we need to set this manually.
 		if !ok {
-			v[i].ID = NewUUIDUnknown()
+			planVersions[i].ID = NewUUIDUnknown()
+			// We might have the old randomly generated name in the plan,
+			// so unless the user has set it to a new one, we need to set it to
+			// unknown so that a new one is generated
+			if configVersions[i].Name.IsNull() {
+				planVersions[i].Name = types.StringUnknown()
+			}
 		} else {
 			// More than one candidate, try to match by name
 			for j, prev := range prevList {
 				// If the name is the same, use the existing ID, and remove
 				// it from the previous version candidates
-				if v[i].Name.ValueString() == prev.Name {
-					v[i].ID = UUIDValue(prev.ID)
-					lv[v[i].DirectoryHash.ValueString()] = append(prevList[:j], prevList[j+1:]...)
+				if planVersions[i].Name.ValueString() == prev.Name {
+					planVersions[i].ID = UUIDValue(prev.ID)
+					lv[planVersions[i].DirectoryHash.ValueString()] = append(prevList[:j], prevList[j+1:]...)
 					break
 				}
 			}
@@ -1190,14 +1201,14 @@ func (v Versions) reconcileVersionIDs(lv LastVersionsByHash) {
 
 	// For versions whose hash was found in the private state but couldn't be
 	// matched, use the leftovers in the order they appear
-	for i := range v {
-		prevList := lv[v[i].DirectoryHash.ValueString()]
-		if len(prevList) > 0 && v[i].ID.IsUnknown() {
-			v[i].ID = UUIDValue(prevList[0].ID)
-			if v[i].Name.IsUnknown() {
-				v[i].Name = types.StringValue(prevList[0].Name)
+	for i := range planVersions {
+		prevList := lv[planVersions[i].DirectoryHash.ValueString()]
+		if len(prevList) > 0 && planVersions[i].ID.IsUnknown() {
+			planVersions[i].ID = UUIDValue(prevList[0].ID)
+			if planVersions[i].Name.IsUnknown() {
+				planVersions[i].Name = types.StringValue(prevList[0].Name)
 			}
-			lv[v[i].DirectoryHash.ValueString()] = prevList[1:]
+			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]
 		}
 	}
 }
