@@ -579,13 +579,14 @@ func TestReconcileVersionIDs(t *testing.T) {
 	bUUID := uuid.New()
 	cases := []struct {
 		Name             string
-		inputVersions    Versions
+		planVersions     Versions
+		configVersions   Versions
 		inputState       LastVersionsByHash
 		expectedVersions Versions
 	}{
 		{
 			Name: "IdenticalDontRename",
-			inputVersions: []TemplateVersion{
+			planVersions: []TemplateVersion{
 				{
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
@@ -595,6 +596,14 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("bar"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+				{
+					Name: types.StringValue("bar"),
 				},
 			},
 			inputState: map[string][]PreviousTemplateVersion{
@@ -620,7 +629,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 		},
 		{
 			Name: "IdenticalRenameFirst",
-			inputVersions: []TemplateVersion{
+			planVersions: []TemplateVersion{
 				{
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
@@ -630,6 +639,14 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("bar"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+				{
+					Name: types.StringValue("bar"),
 				},
 			},
 			inputState: map[string][]PreviousTemplateVersion{
@@ -655,7 +672,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 		},
 		{
 			Name: "IdenticalHashesInState",
-			inputVersions: []TemplateVersion{
+			planVersions: []TemplateVersion{
 				{
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
@@ -665,6 +682,14 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("bar"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+				{
+					Name: types.StringValue("bar"),
 				},
 			},
 			inputState: map[string][]PreviousTemplateVersion{
@@ -694,7 +719,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 		},
 		{
 			Name: "UnknownUsesStateInOrder",
-			inputVersions: []TemplateVersion{
+			planVersions: []TemplateVersion{
 				{
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
@@ -704,6 +729,14 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringUnknown(),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+				{
+					Name: types.StringValue("bar"),
 				},
 			},
 			inputState: map[string][]PreviousTemplateVersion{
@@ -731,13 +764,43 @@ func TestReconcileVersionIDs(t *testing.T) {
 				},
 			},
 		},
+		{
+			Name: "NewVersionNewRandomName",
+			planVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("weird_draught12"),
+					DirectoryHash: types.StringValue("bbb"),
+					ID:            UUIDValue(aUUID),
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringNull(),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:   aUUID,
+						Name: "weird_draught12",
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:          types.StringUnknown(),
+					DirectoryHash: types.StringValue("bbb"),
+					ID:            NewUUIDUnknown(),
+				},
+			},
+		},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			c.inputVersions.reconcileVersionIDs(c.inputState)
-			require.Equal(t, c.expectedVersions, c.inputVersions)
+			c.planVersions.reconcileVersionIDs(c.inputState, c.configVersions)
+			require.Equal(t, c.expectedVersions, c.planVersions)
 		})
 
 	}
