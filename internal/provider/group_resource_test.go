@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
@@ -122,6 +123,39 @@ func TestAccGroupResource(t *testing.T) {
 			},
 		})
 	})
+}
+
+func TestAccGroupResourceAGPL(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "group_acc_agpl", false)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	cfg1 := testAccGroupResourceconfig{
+		URL:            client.URL.String(),
+		Token:          client.SessionToken(),
+		Name:           PtrTo("example-group"),
+		DisplayName:    PtrTo("Example Group"),
+		AvatarUrl:      PtrTo("https://google.com"),
+		QuotaAllowance: PtrTo(int32(100)),
+		Members:        PtrTo([]string{firstUser.ID.String()}),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg1.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use groups."),
+			},
+		},
+	})
+
 }
 
 type testAccGroupResourceconfig struct {

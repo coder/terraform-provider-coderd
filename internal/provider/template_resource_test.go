@@ -374,6 +374,87 @@ func TestAccTemplateResource(t *testing.T) {
 	})
 }
 
+func TestAccTemplateResourceAGPL(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", false)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	cfg1 := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  PtrTo("example-template"),
+		Versions: []testAccTemplateVersionConfig{
+			{
+				// Auto-generated version name
+				Directory: PtrTo("../../integration/template-test/example-template/"),
+				Active:    PtrTo(true),
+			},
+		},
+		AllowUserAutostart: PtrTo(false),
+	}
+
+	cfg2 := cfg1
+	cfg2.AllowUserAutostart = nil
+	cfg2.AutostopRequirement.DaysOfWeek = PtrTo([]string{"monday", "tuesday"})
+
+	cfg3 := cfg2
+	cfg3.AutostopRequirement.null = true
+	cfg3.AutostartRequirement = PtrTo([]string{})
+
+	cfg4 := cfg3
+	cfg4.FailureTTL = PtrTo(int64(1))
+
+	cfg5 := cfg4
+	cfg5.FailureTTL = nil
+	cfg5.AutostartRequirement = nil
+	cfg5.RequireActiveVersion = PtrTo(true)
+
+	cfg6 := cfg5
+	cfg6.RequireActiveVersion = nil
+	cfg6.ACL = testAccTemplateACLConfig{
+		GroupACL: []testAccTemplateKeyValueConfig{
+			{
+				Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
+				Value: PtrTo("use"),
+			},
+		},
+	}
+
+	for _, cfg := range []testAccTemplateResourceConfig{cfg1, cfg2, cfg3, cfg4} {
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg.String(t),
+					ExpectError: regexp.MustCompile("Your license is not entitled to use advanced template scheduling"),
+				},
+			},
+		})
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg5.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use access control"),
+			},
+			{
+				Config:      cfg6.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use template access control"),
+			},
+		},
+	})
+}
+
 type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -45,13 +46,21 @@ type GroupResourceModel struct {
 	Members        types.Set    `tfsdk:"members"`
 }
 
+func CheckGroupEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
+	if !features[codersdk.FeatureTemplateRBAC].Enabled {
+		diags.AddError("Feature not enabled", "Your license is not entitled to use groups.")
+		return
+	}
+	return nil
+}
+
 func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_group"
 }
 
 func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the `data.coderd_group` data source.",
+		MarkdownDescription: "A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the `data.coderd_group` data source. Creating groups requires an Enterprise license.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -132,6 +141,11 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, r.data.Features)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

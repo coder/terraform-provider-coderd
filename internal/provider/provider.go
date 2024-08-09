@@ -34,6 +34,7 @@ type CoderdProvider struct {
 type CoderdProviderData struct {
 	Client                *codersdk.Client
 	DefaultOrganizationID uuid.UUID
+	Features              map[codersdk.FeatureName]codersdk.Feature
 }
 
 // CoderdProviderModel describes the provider data model.
@@ -111,9 +112,15 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		}
 		data.DefaultOrganizationID = UUIDValue(user.OrganizationIDs[0])
 	}
+	entitlements, err := client.Entitlements(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", "failed to get deployment entitlements: "+err.Error())
+	}
+
 	providerData := &CoderdProviderData{
 		Client:                client,
 		DefaultOrganizationID: data.DefaultOrganizationID.ValueUUID(),
+		Features:              entitlements.Features,
 	}
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData

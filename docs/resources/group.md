@@ -3,12 +3,12 @@
 page_title: "coderd_group Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the data.coderd_group data source.
+  A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the data.coderd_group data source. Creating groups requires an Enterprise license.
 ---
 
 # coderd_group (Resource)
 
-A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the `data.coderd_group` data source.
+A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the `data.coderd_group` data source. Creating groups requires an Enterprise license.
 
 
 

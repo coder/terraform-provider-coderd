@@ -74,7 +74,7 @@ type TemplateResourceModel struct {
 }
 
 // EqualTemplateMetadata returns true if two templates have identical metadata (excluding ACL).
-func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel) bool {
+func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceModel) bool {
 	return m.Name.Equal(other.Name) &&
 		m.DisplayName.Equal(other.DisplayName) &&
 		m.Description.Equal(other.Description) &&
@@ -91,6 +91,47 @@ func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel
 		m.TimeTilDormantMillis.Equal(other.TimeTilDormantMillis) &&
 		m.TimeTilDormantAutoDeleteMillis.Equal(other.TimeTilDormantAutoDeleteMillis) &&
 		m.RequireActiveVersion.Equal(other.RequireActiveVersion)
+}
+
+func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
+	var autoStop AutostopRequirement
+	diags.Append(m.AutostopRequirement.As(ctx, &autoStop, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return diags
+	}
+	requiresScheduling := len(autoStop.DaysOfWeek) > 0 ||
+		!m.AllowUserAutostart.ValueBool() ||
+		!m.AllowUserAutostop.ValueBool() ||
+		m.FailureTTLMillis.ValueInt64() != 0 ||
+		m.TimeTilDormantAutoDeleteMillis.ValueInt64() != 0 ||
+		m.TimeTilDormantMillis.ValueInt64() != 0 ||
+		len(m.AutostartPermittedDaysOfWeek.Elements()) != 7
+	requiresActiveVersion := m.RequireActiveVersion.ValueBool()
+	requiresACL := !m.ACL.IsNull()
+	if requiresScheduling || requiresActiveVersion || requiresACL {
+		if requiresScheduling && !features[codersdk.FeatureAdvancedTemplateScheduling].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use advanced template scheduling, so you cannot modify any of the following fields from their defaults: auto_stop_requirement, auto_start_permitted_days_of_week, allow_user_auto_start, allow_user_auto_stop, failure_ttl_ms, time_til_dormant_ms, time_til_dormant_autodelete_ms.",
+			)
+			return
+		}
+		if requiresActiveVersion && !features[codersdk.FeatureAccessControl].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use access control, so you cannot set require_active_version.",
+			)
+			return
+		}
+		if requiresACL && !features[codersdk.FeatureTemplateRBAC].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use template access control, so you cannot set acl.",
+			)
+			return
+		}
+	}
+	return
 }
 
 type TemplateVersion struct {
@@ -245,7 +286,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             int64default.StaticInt64(3600000),
 			},
 			"auto_stop_requirement": schema.SingleNestedAttribute{
-				MarkdownDescription: "The auto-stop requirement for all workspaces created from this template. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) The auto-stop requirement for all workspaces created from this template.",
 				Optional:            true,
 				Computed:            true,
 				Attributes: map[string]schema.Attribute{
@@ -270,7 +311,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				})),
 			},
 			"auto_start_permitted_days_of_week": schema.SetAttribute{
-				MarkdownDescription: "List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.",
 				Optional:            true,
 				Computed:            true,
 				ElementType:         types.StringType,
@@ -284,37 +325,37 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_start": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_stop": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"failure_ttl_ms": schema.Int64Attribute{
-				MarkdownDescription: "The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 			},
 			"time_til_dormant_ms": schema.Int64Attribute{
-				MarkdownDescription: "The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
+				MarkdownDescription: "Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 			},
 			"time_til_dormant_autodelete_ms": schema.Int64Attribute{
-				MarkdownDescription: "The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 			},
 			"require_active_version": schema.BoolAttribute{
-				MarkdownDescription: "Whether workspaces must be created from the active version of this template. Defaults to false.",
+				MarkdownDescription: "(Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
@@ -326,7 +367,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             stringdefault.StaticString(""),
 			},
 			"acl": schema.SingleNestedAttribute{
-				MarkdownDescription: "Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform.",
+				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added or removed by Terraform.",
 				Optional:            true,
 				Attributes: map[string]schema.Attribute{
 					"users":  permissionAttribute,
@@ -427,6 +468,11 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 
 	if data.DisplayName.IsUnknown() {
 		data.DisplayName = data.Name
+	}
+
+	resp.Diagnostics.Append(data.CheckEntitlements(ctx, r.data.Features)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	client := r.data.Client
@@ -593,13 +639,18 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		newState.DisplayName = newState.Name
 	}
 
+	resp.Diagnostics.Append(newState.CheckEntitlements(ctx, r.data.Features)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	orgID := newState.OrganizationID.ValueUUID()
 
 	templateID := newState.ID.ValueUUID()
 
 	client := r.data.Client
 
-	templateMetadataChanged := !newState.EqualTemplateMetadata(curState)
+	templateMetadataChanged := !newState.EqualTemplateMetadata(&curState)
 	// This is required, as the API will reject no-diff updates.
 	if templateMetadataChanged {
 		tflog.Trace(ctx, "change in template metadata detected, updating.")

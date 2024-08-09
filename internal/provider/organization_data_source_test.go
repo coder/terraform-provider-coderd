@@ -19,7 +19,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "org_data_acc", true)
+	client := integration.StartCoder(ctx, t, "org_data_acc", false)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
