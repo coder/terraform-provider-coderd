@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *codersdk.Client {
+func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool) *codersdk.Client {
 	coderImg := os.Getenv("CODER_IMAGE")
 	if coderImg == "" {
 		coderImg = "ghcr.io/coder/coder"
@@ -28,6 +28,11 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 	coderVersion := os.Getenv("CODER_VERSION")
 	if coderVersion == "" {
 		coderVersion = "latest"
+	}
+
+	coderLicense := os.Getenv("CODER_ENTERPRISE_LICENSE")
+	if useLicense && coderLicense == "" {
+		t.Skip("Skipping tests that require a license.")
 	}
 
 	t.Logf("using coder image %s:%s", coderImg, coderVersion)
@@ -96,7 +101,6 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 		Email:    testEmail,
 		Username: testUsername,
 		Password: testPassword,
-		Trial:    useTrial,
 	})
 	require.NoError(t, err, "create first user")
 	resp, err := client.LoginWithPassword(ctx, codersdk.LoginWithPasswordRequest{
@@ -105,6 +109,12 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 	})
 	require.NoError(t, err, "login to coder instance with password")
 	client.SetSessionToken(resp.SessionToken)
+	if useLicense {
+		_, err := client.AddLicense(ctx, codersdk.AddLicenseRequest{
+			License: coderLicense,
+		})
+		require.NoError(t, err, "add license")
+	}
 	return client
 }
 

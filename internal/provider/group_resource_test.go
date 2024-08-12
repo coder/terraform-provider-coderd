@@ -18,7 +18,6 @@ func TestAccGroupResource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-
 	ctx := context.Background()
 	client := integration.StartCoder(ctx, t, "group_acc", true)
 	firstUser, err := client.User(ctx, codersdk.Me)
