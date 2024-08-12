@@ -48,13 +48,6 @@ func TestAccTemplateResource(t *testing.T) {
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    PtrTo(true),
-					// TODO(ethanndickson): Remove this when we add in `*.tfvars` parsing
-					TerraformVariables: []testAccTemplateKeyValueConfig{
-						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
-						},
-					},
 				},
 			},
 			ACL: testAccTemplateACLConfig{

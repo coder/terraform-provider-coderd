@@ -965,20 +965,18 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 		return nil, fmt.Errorf("failed to upload directory: %s", err)
 	}
 	tflog.Trace(ctx, "successfully uploaded directory")
-	// TODO(ethanndickson): Uncomment when a released `codersdk` exports template variable parsing
-	// tflog.Trace(ctx,"discovering and parsing vars files")
-	// varFiles, err := codersdk.DiscoverVarsFiles(directory)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to discover vars files: %s", err)
-	// }
-	// vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to parse user variable values: %s", err)
-	// }
-	// tflog.Trace(ctx,"discovered and parsed vars files", map[string]any{
-	// 	"vars": vars,
-	// })
-	vars := make([]codersdk.VariableValue, 0, len(req.Version.TerraformVariables))
+	tflog.Trace(ctx, "discovering and parsing vars files")
+	varFiles, err := codersdk.DiscoverVarsFiles(directory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover vars files: %s", err)
+	}
+	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user variable values: %s", err)
+	}
+	tflog.Trace(ctx, "discovered and parsed vars files", map[string]any{
+		"vars": vars,
+	})
 	for _, variable := range req.Version.TerraformVariables {
 		vars = append(vars, codersdk.VariableValue{
 			Name:  variable.Name.ValueString(),
