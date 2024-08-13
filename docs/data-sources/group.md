@@ -3,12 +3,12 @@
 page_title: "coderd_group Data Source - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  An existing group on the coder deployment.
+  An existing group on the Coder deployment.
 ---
 
 # coderd_group (Data Source)
 
-An existing group on the coder deployment.
+An existing group on the Coder deployment.
 
 
 

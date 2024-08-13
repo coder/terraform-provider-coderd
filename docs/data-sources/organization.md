@@ -3,12 +3,17 @@
 page_title: "coderd_organization Data Source - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  An existing organization on the coder deployment.
+  An existing organization on the Coder deployment.
+  ~> Warning
+  This data source is only compatible with Coder version 2.13.0 https://github.com/coder/coder/releases/tag/v2.13.0 and later.
 ---
 
 # coderd_organization (Data Source)
 
-An existing organization on the coder deployment.
+An existing organization on the Coder deployment.
+
+~> **Warning**
+This data source is only compatible with Coder version [2.13.0](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
 
 
 

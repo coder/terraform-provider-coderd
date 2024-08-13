@@ -52,6 +52,10 @@ func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 
 func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: `
+~> **Warning**
+This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
+`,
 		Attributes: map[string]schema.Attribute{
 			"url": schema.StringAttribute{
 				MarkdownDescription: "URL to the Coder deployment. Defaults to $CODER_URL.",

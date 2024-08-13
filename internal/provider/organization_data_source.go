@@ -46,7 +46,11 @@ func (d *OrganizationDataSource) Metadata(ctx context.Context, req datasource.Me
 
 func (d *OrganizationDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing organization on the coder deployment.",
+		MarkdownDescription: `An existing organization on the Coder deployment.
+
+~> **Warning**
+This data source is only compatible with Coder version [2.13.0](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
+`,
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

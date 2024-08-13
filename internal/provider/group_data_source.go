@@ -56,7 +56,7 @@ func (d *GroupDataSource) Metadata(ctx context.Context, req datasource.MetadataR
 
 func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing group on the coder deployment.",
+		MarkdownDescription: "An existing group on the Coder deployment.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
