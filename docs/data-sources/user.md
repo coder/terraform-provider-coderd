@@ -3,12 +3,12 @@
 page_title: "coderd_user Data Source - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  An existing user on the coder deployment
+  An existing user on the Coder deployment
 ---
 
 # coderd_user (Data Source)
 
-An existing user on the coder deployment
+An existing user on the Coder deployment
 
 
 

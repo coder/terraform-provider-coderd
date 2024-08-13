@@ -50,7 +50,7 @@ func (d *UserDataSource) Metadata(ctx context.Context, req datasource.MetadataRe
 
 func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing user on the coder deployment",
+		MarkdownDescription: "An existing user on the Coder deployment",
 
 		// Validation handled by ConfigValidators
 		Attributes: map[string]schema.Attribute{
