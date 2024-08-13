@@ -26,7 +26,7 @@ func TestAccTemplateResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "template_acc", true)
+	client := integration.StartCoder(ctx, t, "template_acc", false)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -51,31 +51,15 @@ func TestAccTemplateResource(t *testing.T) {
 				},
 			},
 			ACL: testAccTemplateACLConfig{
-				GroupACL: []testAccTemplateKeyValueConfig{
-					{
-						Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
-						Value: PtrTo("use"),
-					},
-				},
+				null: true,
 			},
 		}
 
 		cfg2 := cfg1
 		cfg2.Versions = slices.Clone(cfg2.Versions)
 		cfg2.Name = PtrTo("example-template-new")
-		cfg2.AllowUserAutostart = PtrTo(false)
 		cfg2.Versions[0].Directory = &exTemplateTwo
 		cfg2.Versions[0].Name = PtrTo("new")
-		cfg2.ACL.UserACL = []testAccTemplateKeyValueConfig{
-			{
-				Key:   PtrTo(firstUser.ID.String()),
-				Value: PtrTo("admin"),
-			},
-		}
-		cfg2.AutostopRequirement = testAccAutostopRequirementConfig{
-			DaysOfWeek: PtrTo([]string{"monday", "tuesday"}),
-			Weeks:      PtrTo(int64(2)),
-		}
 
 		cfg3 := cfg2
 		cfg3.Versions = slices.Clone(cfg3.Versions)
@@ -102,9 +86,6 @@ func TestAccTemplateResource(t *testing.T) {
 
 		cfg6 := cfg4
 		cfg6.Versions = slices.Clone(cfg6.Versions[1:])
-
-		cfg7 := cfg6
-		cfg7.ACL.null = true
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -180,9 +161,6 @@ func TestAccTemplateResource(t *testing.T) {
 					Check: resource.ComposeAggregateTestCheckFunc(
 						resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
 						resource.TestCheckResourceAttr("coderd_template.test", "name", "example-template-new"),
-						resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
-						resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
-						resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 							"name": regexp.MustCompile("new"),
 						}),
@@ -244,14 +222,6 @@ func TestAccTemplateResource(t *testing.T) {
 						}),
 					),
 				},
-				// Unmanaged ACL
-				{
-					Config: cfg7.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
-						testAccCheckNumTemplateVersions(ctx, client, 5),
-					),
-				},
 				// Resource deleted
 			},
 		})
@@ -284,6 +254,9 @@ func TestAccTemplateResource(t *testing.T) {
 						},
 					},
 				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
 			},
 		}
 
@@ -364,6 +337,122 @@ func TestAccTemplateResource(t *testing.T) {
 				},
 			},
 		})
+	})
+}
+
+func TestAccTemplateResourceEnterprise(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", true)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	cfg1 := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  PtrTo("example-template"),
+		Versions: []testAccTemplateVersionConfig{
+			{
+				// Auto-generated version name
+				Directory: PtrTo("../../integration/template-test/example-template"),
+				Active:    PtrTo(true),
+				// TODO(ethanndickson): Remove this when we add in `*.tfvars` parsing
+				TerraformVariables: []testAccTemplateKeyValueConfig{
+					{
+						Key:   PtrTo("name"),
+						Value: PtrTo("world"),
+					},
+				},
+			},
+		},
+		ACL: testAccTemplateACLConfig{
+			GroupACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
+					Value: PtrTo("use"),
+				},
+			},
+			UserACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   PtrTo(firstUser.ID.String()),
+					Value: PtrTo("admin"),
+				},
+			},
+		},
+	}
+
+	cfg2 := cfg1
+	cfg2.ACL.null = true
+
+	cfg3 := cfg2
+	cfg3.AllowUserAutostart = PtrTo(false)
+	cfg3.AutostopRequirement = testAccAutostopRequirementConfig{
+		DaysOfWeek: PtrTo([]string{"monday", "tuesday"}),
+		Weeks:      PtrTo(int64(2)),
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg1.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(".+"),
+						"role": regexp.MustCompile("^use$"),
+					}),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(".+"),
+						"role": regexp.MustCompile("^admin$"),
+					}),
+				),
+			},
+			{
+				Config: cfg2.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
+					func(s *terraform.State) error {
+						templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
+						if err != nil {
+							return err
+						}
+						if len(templates) != 1 {
+							return fmt.Errorf("expected 1 template, got %d", len(templates))
+						}
+						acl, err := client.TemplateACL(ctx, templates[0].ID)
+						if err != nil {
+							return err
+						}
+						if len(acl.Groups) != 1 {
+							return fmt.Errorf("expected 1 group ACL, got %d", len(acl.Groups))
+						}
+						if acl.Groups[0].Role != "use" && acl.Groups[0].ID != firstUser.OrganizationIDs[0] {
+							return fmt.Errorf("expected group ACL to be 'use' for %s, got %s", firstUser.OrganizationIDs[0].String(), acl.Groups[0].Role)
+						}
+						if len(acl.Users) != 1 {
+							return fmt.Errorf("expected 1 user ACL, got %d", len(acl.Users))
+						}
+						if acl.Users[0].Role != "admin" && acl.Users[0].ID != firstUser.ID {
+							return fmt.Errorf("expected user ACL to be 'admin' for %s, got %s", firstUser.ID.String(), acl.Users[0].Role)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: cfg3.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
+				),
+			},
+		},
 	})
 }
 
