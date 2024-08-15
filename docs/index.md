@@ -4,13 +4,13 @@ page_title: "coderd Provider"
 subcategory: ""
 description: |-
   ~> Warning
-  This provider is only compatible with Coder version 2.10.1 https://github.com/coder/coder/releases/tag/v2.13.0 and later.
+  This provider is only compatible with Coder version 2.13.0 https://github.com/coder/coder/releases/tag/v2.13.0 and later.
 ---
 
 # coderd Provider
 
 ~> **Warning**
-This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
+This provider is only compatible with Coder version [2.13.0](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
 
 
 
