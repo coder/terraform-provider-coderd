@@ -54,7 +54,7 @@ func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `
 ~> **Warning**
-This provider is only compatible with Coder version [2.13.0](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
+This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.10.1) and later.
 `,
 		Attributes: map[string]schema.Attribute{
 			"url": schema.StringAttribute{
