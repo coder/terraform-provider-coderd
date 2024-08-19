@@ -158,7 +158,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	orgID := data.OrganizationID.ValueUUID()
 
-	tflog.Trace(ctx, "creating group")
+	tflog.Info(ctx, "creating group")
 	group, err := client.CreateGroup(ctx, orgID, codersdk.CreateGroupRequest{
 		Name:           data.Name.ValueString(),
 		DisplayName:    data.DisplayName.ValueString(),
@@ -169,13 +169,13 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully created group", map[string]any{
+	tflog.Info(ctx, "successfully created group", map[string]any{
 		"id": group.ID.String(),
 	})
 	data.ID = UUIDValue(group.ID)
 	data.DisplayName = types.StringValue(group.DisplayName)
 
-	tflog.Trace(ctx, "setting group members")
+	tflog.Info(ctx, "setting group members")
 	var members []string
 	resp.Diagnostics.Append(
 		data.Members.ElementsAs(ctx, &members, false)...,
@@ -190,7 +190,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to add members to group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully set group members")
+	tflog.Info(ctx, "successfully set group members")
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -270,7 +270,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 		add, remove = memberDiff(curMembers, plannedMembers)
 	}
-	tflog.Trace(ctx, "updating group", map[string]any{
+	tflog.Info(ctx, "updating group", map[string]any{
 		"id":              groupID,
 		"new_members":     add,
 		"removed_members": remove,
@@ -293,7 +293,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated group")
+	tflog.Info(ctx, "successfully updated group")
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -312,7 +312,7 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	client := r.data.Client
 	groupID := data.ID.ValueUUID()
 
-	tflog.Trace(ctx, "deleting group", map[string]any{
+	tflog.Info(ctx, "deleting group", map[string]any{
 		"id": groupID,
 	})
 	err := client.DeleteGroup(ctx, groupID)
@@ -320,7 +320,7 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully deleted group")
+	tflog.Info(ctx, "successfully deleted group")
 }
 
 func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
