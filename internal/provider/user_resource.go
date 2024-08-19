@@ -159,7 +159,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	tflog.Trace(ctx, "creating user")
+	tflog.Info(ctx, "creating user")
 	loginType := codersdk.LoginType(data.LoginType.ValueString())
 	if loginType == codersdk.LoginTypePassword && data.Password.IsNull() {
 		resp.Diagnostics.AddError("Data Error", "Password is required when login_type is 'password'")
@@ -180,12 +180,12 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create user, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully created user", map[string]any{
+	tflog.Info(ctx, "successfully created user", map[string]any{
 		"id": user.ID.String(),
 	})
 	data.ID = UUIDValue(user.ID)
 
-	tflog.Trace(ctx, "updating user profile")
+	tflog.Info(ctx, "updating user profile")
 	name := data.Username
 	if data.Name.ValueString() != "" {
 		name = data.Name
@@ -198,14 +198,14 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user profile, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated user profile")
+	tflog.Info(ctx, "successfully updated user profile")
 	data.Name = types.StringValue(user.Name)
 
 	var roles []string
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Trace(ctx, "updating user roles", map[string]any{
+	tflog.Info(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
 	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
@@ -215,7 +215,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated user roles")
+	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
 		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
@@ -291,7 +291,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if data.Name.ValueString() != "" {
 		name = data.Name
 	}
-	tflog.Trace(ctx, "updating user", map[string]any{
+	tflog.Info(ctx, "updating user", map[string]any{
 		"new_username": data.Username.ValueString(),
 		"new_name":     name.ValueString(),
 	})
@@ -304,13 +304,13 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 	data.Name = name
-	tflog.Trace(ctx, "successfully updated user profile")
+	tflog.Info(ctx, "successfully updated user profile")
 
 	var roles []string
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Trace(ctx, "updating user roles", map[string]any{
+	tflog.Info(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
 	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
@@ -320,10 +320,10 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated user roles")
+	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
-		tflog.Trace(ctx, "updating password")
+		tflog.Info(ctx, "updating password")
 		err = client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
 			Password: data.Password.ValueString(),
 		})
@@ -331,7 +331,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update password, got error: %s", err))
 			return
 		}
-		tflog.Trace(ctx, "successfully updated password")
+		tflog.Info(ctx, "successfully updated password")
 	}
 
 	var statusErr error
@@ -362,13 +362,13 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	client := r.data.Client
 
-	tflog.Trace(ctx, "deleting user")
+	tflog.Info(ctx, "deleting user")
 	err := client.DeleteUser(ctx, data.ID.ValueUUID())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete user, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully deleted user")
+	tflog.Info(ctx, "successfully deleted user")
 }
 
 func (r *UserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
