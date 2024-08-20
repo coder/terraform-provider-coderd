@@ -7,6 +7,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -42,10 +43,10 @@ type TemplateDataSourceModel struct {
 	DeprecationMessage types.String `tfsdk:"deprecation_message"`
 	Icon               types.String `tfsdk:"icon"`
 
-	DefaultTTLMillis   types.Int64 `tfsdk:"default_ttl_ms"`
-	ActivityBumpMillis types.Int64 `tfsdk:"activity_bump_ms"`
-	// TODO: AutostopRequirement
-	// TODO: AutostartRequirement
+	DefaultTTLMillis             types.Int64  `tfsdk:"default_ttl_ms"`
+	ActivityBumpMillis           types.Int64  `tfsdk:"activity_bump_ms"`
+	AutostopRequirement          types.Object `tfsdk:"auto_stop_requirement"`
+	AutostartPermittedDaysOfWeek types.Set    `tfsdk:"auto_start_permitted_days_of_week"`
 
 	AllowUserAutostart           types.Bool `tfsdk:"allow_user_autostart"`
 	AllowUserAutostop            types.Bool `tfsdk:"allow_user_autostop"`
@@ -55,14 +56,14 @@ type TemplateDataSourceModel struct {
 	TimeTilDormantMillis           types.Int64 `tfsdk:"time_til_dormant_ms"`
 	TimeTilDormantAutoDeleteMillis types.Int64 `tfsdk:"time_til_dormant_autodelete_ms"`
 
-	RequireActiveVersion types.Bool `tfsdk:"require_active_version"`
-	// TODO: MaxPortShareLevel
+	RequireActiveVersion types.Bool   `tfsdk:"require_active_version"`
+	MaxPortShareLevel    types.String `tfsdk:"max_port_share_level"`
 
 	CreatedByUserID UUID        `tfsdk:"created_by_user_id"`
 	CreatedAt       types.Int64 `tfsdk:"created_at"` // Unix timestamp
 	UpdatedAt       types.Int64 `tfsdk:"updated_at"` // Unix timestamp
 
-	// TODO: ACL-related stuff
+	ACL types.Object `tfsdk:"acl"`
 }
 
 func (d *TemplateDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -134,6 +135,27 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				MarkdownDescription: "Duration to bump the deadline of a workspace when it receives activity.",
 				Computed:            true,
 			},
+			"auto_stop_requirement": schema.SingleNestedAttribute{
+				MarkdownDescription: "The auto-stop requirement for all workspaces created from this template.",
+				Computed:            true,
+				Attributes: map[string]schema.Attribute{
+					"days_of_week": schema.SetAttribute{
+						MarkdownDescription: "List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.",
+						Computed:            true,
+						ElementType:         types.StringType,
+					},
+					"weeks": schema.Int64Attribute{
+						MarkdownDescription: "Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.",
+						Optional:            true,
+						Computed:            true,
+					},
+				},
+			},
+			"auto_start_permitted_days_of_week": schema.SetAttribute{
+				MarkdownDescription: "List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.",
+				Computed:            true,
+				ElementType:         types.StringType,
+			},
 			"allow_user_autostart": schema.BoolAttribute{
 				MarkdownDescription: "Whether users can autostart workspaces created from the template.",
 				Computed:            true,
@@ -162,6 +184,10 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				MarkdownDescription: "Whether workspaces created from the template must be up-to-date on the latest active version.",
 				Computed:            true,
 			},
+			"max_port_share_level": schema.StringAttribute{
+				MarkdownDescription: "The maximum port share level for workspaces created from the template.",
+				Computed:            true,
+			},
 			"created_by_user_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the user who created the template.",
 				CustomType:          UUIDType,
@@ -174,6 +200,14 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			"updated_at": schema.Int64Attribute{
 				MarkdownDescription: "Unix timestamp of when the template was last updated.",
 				Computed:            true,
+			},
+			"acl": schema.SingleNestedAttribute{
+				MarkdownDescription: "(Enterprise) Access control list for the template.",
+				Computed:            true,
+				Attributes: map[string]schema.Attribute{
+					"users":  computedPermissionAttribute,
+					"groups": computedPermissionAttribute,
+				},
 			},
 		},
 	}
@@ -244,6 +278,33 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
+	acl, err := client.TemplateACL(ctx, template.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
+		return
+	}
+	tfACL := convertResponseToACL(acl)
+	aclObj, diag := types.ObjectValueFrom(ctx, aclTypeAttr, tfACL)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+
+	asrObj, diag := types.ObjectValueFrom(ctx, autostopRequirementTypeAttr, AutostopRequirement{
+		DaysOfWeek: template.AutostopRequirement.DaysOfWeek,
+		Weeks:      template.AutostopRequirement.Weeks,
+	})
+	resp.Diagnostics.Append(diag...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	autoStartDays := make([]attr.Value, 0, len(template.AutostartRequirement.DaysOfWeek))
+	for _, day := range template.AutostartRequirement.DaysOfWeek {
+		autoStartDays = append(autoStartDays, types.StringValue(day))
+	}
+	data.ACL = aclObj
+	data.AutostartPermittedDaysOfWeek = types.SetValueMust(types.StringType, autoStartDays)
+	data.AutostopRequirement = asrObj
 	data.OrganizationID = UUIDValue(template.OrganizationID)
 	data.ID = UUIDValue(template.ID)
 	data.Name = types.StringValue(template.Name)
@@ -263,10 +324,26 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.TimeTilDormantMillis = types.Int64Value(template.TimeTilDormantMillis)
 	data.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	data.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
+	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 	data.CreatedByUserID = UUIDValue(template.CreatedByID)
 	data.CreatedAt = types.Int64Value(template.CreatedAt.Unix())
 	data.UpdatedAt = types.Int64Value(template.UpdatedAt.Unix())
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// computedPermissionAttribute is the attribute schema for a computed instance of `[]Permission`.
+var computedPermissionAttribute = schema.SetNestedAttribute{
+	Computed: true,
+	NestedObject: schema.NestedAttributeObject{
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed: true,
+			},
+			"role": schema.StringAttribute{
+				Computed: true,
+			},
+		},
+	},
 }
