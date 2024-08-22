@@ -60,7 +60,7 @@ func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataReque
 
 func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the `data.coderd_group` data source. Creating groups requires an Enterprise license.",
+		MarkdownDescription: "A group on the Coder deployment.\n\nCreating groups requires an Enterprise license.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -107,7 +107,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 			"members": schema.SetAttribute{
-				MarkdownDescription: "Members of the group, by ID. If null, members will not be added or removed by Terraform.",
+				MarkdownDescription: "Members of the group, by ID. If null, members will not be added or removed by Terraform. To have a group resource with unmanaged members, but be able to read the members in Terraform, use `data.coderd_group`",
 				ElementType:         UUIDType,
 				Optional:            true,
 			},

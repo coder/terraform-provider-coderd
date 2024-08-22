@@ -39,6 +39,7 @@ resource "coderd_user" "audit" {
 resource "coderd_user" "admin" {
   username  = "admin"
   suspended = true
+  email     = "admin@example.com"
 }
 ```
 

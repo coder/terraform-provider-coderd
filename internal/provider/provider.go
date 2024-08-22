@@ -53,16 +53,18 @@ func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `
+The coderd provider can be used to manage resources on a Coder deployment. The provider exposes resources and data sources for users, groups, templates, and workspace proxies.
+
 ~> **Warning**
 This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.10.1) and later.
 `,
 		Attributes: map[string]schema.Attribute{
 			"url": schema.StringAttribute{
-				MarkdownDescription: "URL to the Coder deployment. Defaults to $CODER_URL.",
+				MarkdownDescription: "URL to the Coder deployment. Defaults to `$CODER_URL`.",
 				Optional:            true,
 			},
 			"token": schema.StringAttribute{
-				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to $CODER_SESSION_TOKEN.",
+				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to `$CODER_SESSION_TOKEN`.",
 				Optional:            true,
 			},
 			"default_organization_id": schema.StringAttribute{

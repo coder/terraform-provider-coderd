@@ -27,4 +27,10 @@ resource "coderd_template" "ubuntu-main" {
       directory   = "./staging-template"
     }
   ]
+  acl = {
+    users = [{
+      id   = coderd_user.coder1.id
+      role = "admin"
+    }]
+  }
 }

@@ -343,7 +343,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             int64default.StaticInt64(0),
 			},
 			"time_til_dormant_ms": schema.Int64Attribute{
-				MarkdownDescription: "Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
@@ -361,13 +361,13 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             booldefault.StaticBool(false),
 			},
 			"deprecation_message": schema.StringAttribute{
-				MarkdownDescription: "If set, the template will be marked as deprecated and users will be blocked from creating new workspaces from it.",
+				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
 			},
 			"acl": schema.SingleNestedAttribute{
-				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added or removed by Terraform.",
+				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
 				Optional:            true,
 				Attributes: map[string]schema.Attribute{
 					"users":  permissionAttribute,
