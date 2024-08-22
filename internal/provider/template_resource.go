@@ -361,7 +361,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             booldefault.StaticBool(false),
 			},
 			"deprecation_message": schema.StringAttribute{
-				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it.",
+				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
@@ -586,8 +586,8 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		}
 		tfACL := convertResponseToACL(acl)
 		aclObj, diag := types.ObjectValueFrom(ctx, aclTypeAttr, tfACL)
-		diag.Append(diag...)
 		if diag.HasError() {
+			resp.Diagnostics.Append(diag...)
 			return
 		}
 		data.ACL = aclObj

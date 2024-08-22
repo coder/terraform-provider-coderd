@@ -47,12 +47,15 @@ resource "coderd_template" "debian-main" {
 
 ### Read-Only
 
+- `acl` (Attributes) (Enterprise) Access control list for the template. (see [below for nested schema](#nestedatt--acl))
 - `active_user_count` (Number) Number of active users using the template.
 - `active_version_id` (String) ID of the active version of the template.
 - `activity_bump_ms` (Number) Duration to bump the deadline of a workspace when it receives activity.
 - `allow_user_autostart` (Boolean) Whether users can autostart workspaces created from the template.
 - `allow_user_autostop` (Boolean) Whether users can customize autostop behavior for workspaces created from the template.
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel jobs in workspaces created from the template.
+- `auto_start_permitted_days_of_week` (Set of String) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.
+- `auto_stop_requirement` (Attributes) The auto-stop requirement for all workspaces created from this template. (see [below for nested schema](#nestedatt--auto_stop_requirement))
 - `created_at` (Number) Unix timestamp of when the template was created.
 - `created_by_user_id` (String) ID of the user who created the template.
 - `default_ttl_ms` (Number) Default time-to-live for workspaces created from the template.
@@ -62,7 +65,46 @@ resource "coderd_template" "debian-main" {
 - `display_name` (String) Display name of the template.
 - `failure_ttl_ms` (Number) Automatic cleanup TTL for failed workspace builds.
 - `icon` (String) URL of the template's icon.
+- `max_port_share_level` (String) The maximum port share level for workspaces created from the template.
 - `require_active_version` (Boolean) Whether workspaces created from the template must be up-to-date on the latest active version.
 - `time_til_dormant_autodelete_ms` (Number) Duration of inactivity after the workspace becomes dormant before a workspace is automatically deleted.
 - `time_til_dormant_ms` (Number) Duration of inactivity before a workspace is considered dormant.
 - `updated_at` (Number) Unix timestamp of when the template was last updated.
+
+<a id="nestedatt--acl"></a>
+### Nested Schema for `acl`
+
+Read-Only:
+
+- `groups` (Attributes Set) (see [below for nested schema](#nestedatt--acl--groups))
+- `users` (Attributes Set) (see [below for nested schema](#nestedatt--acl--users))
+
+<a id="nestedatt--acl--groups"></a>
+### Nested Schema for `acl.groups`
+
+Read-Only:
+
+- `id` (String)
+- `role` (String)
+
+
+<a id="nestedatt--acl--users"></a>
+### Nested Schema for `acl.users`
+
+Read-Only:
+
+- `id` (String)
+- `role` (String)
+
+
+
+<a id="nestedatt--auto_stop_requirement"></a>
+### Nested Schema for `auto_stop_requirement`
+
+Optional:
+
+- `weeks` (Number) Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.
+
+Read-Only:
+
+- `days_of_week` (Set of String) List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.

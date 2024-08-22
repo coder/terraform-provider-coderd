@@ -99,6 +99,16 @@ func TestAccTemplateDataSource(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	err = client.UpdateTemplateACL(ctx, tpl.ID, codersdk.UpdateTemplateACL{
+		UserPerms: map[string]codersdk.TemplateRole{
+			firstUser.ID.String(): codersdk.TemplateRoleAdmin,
+		},
+		GroupPerms: map[string]codersdk.TemplateRole{
+			firstUser.OrganizationIDs[0].String(): codersdk.TemplateRoleUse,
+		},
+	})
+	require.NoError(t, err)
+
 	checkFn := resource.ComposeAggregateTestCheckFunc(
 		resource.TestCheckResourceAttr("data.coderd_template.test", "organization_id", tpl.OrganizationID.String()),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "id", tpl.ID.String()),
@@ -112,6 +122,10 @@ func TestAccTemplateDataSource(t *testing.T) {
 		resource.TestCheckResourceAttr("data.coderd_template.test", "icon", tpl.Icon),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "default_ttl_ms", strconv.FormatInt(tpl.DefaultTTLMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "activity_bump_ms", strconv.FormatInt(tpl.ActivityBumpMillis, 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "auto_stop_requirement.days_of_week.#", strconv.FormatInt(int64(len(tpl.AutostopRequirement.DaysOfWeek)), 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "auto_stop_requirement.weeks", strconv.FormatInt(tpl.AutostopRequirement.Weeks, 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "auto_start_permitted_days_of_week.#", strconv.FormatInt(int64(len(tpl.AutostartRequirement.DaysOfWeek)), 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_cancel_workspace_jobs", "true"),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_autostart", strconv.FormatBool(tpl.AllowUserAutostart)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_autostop", strconv.FormatBool(tpl.AllowUserAutostop)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_cancel_workspace_jobs", strconv.FormatBool(tpl.AllowUserCancelWorkspaceJobs)),
@@ -119,9 +133,20 @@ func TestAccTemplateDataSource(t *testing.T) {
 		resource.TestCheckResourceAttr("data.coderd_template.test", "time_til_dormant_ms", strconv.FormatInt(tpl.TimeTilDormantMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "time_til_dormant_autodelete_ms", strconv.FormatInt(tpl.TimeTilDormantAutoDeleteMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "require_active_version", strconv.FormatBool(tpl.RequireActiveVersion)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "max_port_share_level", string(tpl.MaxPortShareLevel)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "created_by_user_id", firstUser.ID.String()),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "created_at", strconv.Itoa(int(tpl.CreatedAt.Unix()))),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "updated_at", strconv.Itoa(int(tpl.UpdatedAt.Unix()))),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "acl.groups.#", "1"),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "acl.users.#", "1"),
+		resource.TestMatchTypeSetElemNestedAttrs("data.coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+			"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
+			"role": regexp.MustCompile("^use$"),
+		}),
+		resource.TestMatchTypeSetElemNestedAttrs("data.coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+			"id":   regexp.MustCompile(firstUser.ID.String()),
+			"role": regexp.MustCompile("^admin$"),
+		}),
 	)
 
 	t.Run("TemplateByOrgAndNameOK", func(t *testing.T) {
