@@ -32,5 +32,6 @@ resource "coderd_template" "ubuntu-main" {
       id   = coderd_user.coder1.id
       role = "admin"
     }]
+    groups = []
   }
 }
