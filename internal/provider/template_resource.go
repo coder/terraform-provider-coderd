@@ -229,7 +229,8 @@ func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRe
 
 func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A Coder template",
+		MarkdownDescription: "A Coder template.\n\nLogs from building template versions are streamed from the provisioner " +
+			"when the `TF_LOG` environment variable is `INFO` or higher.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

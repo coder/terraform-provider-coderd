@@ -3,12 +3,15 @@
 page_title: "coderd_template Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  A Coder template
+  A Coder template.
+  Logs from building template versions are streamed from the provisioner when the TF_LOG environment variable is INFO or higher.
 ---
 
 # coderd_template (Resource)
 
-A Coder template
+A Coder template.
+
+Logs from building template versions are streamed from the provisioner when the `TF_LOG` environment variable is `INFO` or higher.
 
 ## Example Usage
 
