@@ -145,7 +145,7 @@ func TestAccTemplateResource(t *testing.T) {
 					},
 					Check: testAccCheckNumTemplateVersions(ctx, client, 3),
 				},
-				// Import
+				// Import by ID
 				{
 					Config:            cfg1.String(t),
 					ResourceName:      "coderd_template.test",
@@ -153,6 +153,14 @@ func TestAccTemplateResource(t *testing.T) {
 					ImportStateVerify: true,
 					// In the real world, `versions` needs to be added to the configuration after importing
 					// We can't import ACL as we can't currently differentiate between managed and unmanaged ACL
+					ImportStateVerifyIgnore: []string{"versions", "acl"},
+				},
+				// Import by org name and template name
+				{
+					ResourceName:            "coderd_template.test",
+					ImportState:             true,
+					ImportStateVerify:       true,
+					ImportStateId:           "default/example-template",
 					ImportStateVerifyIgnore: []string{"versions", "acl"},
 				},
 				// Change existing version directory & name, update template metadata. Creates a fourth version.

@@ -78,11 +78,18 @@ func TestAccGroupResource(t *testing.T) {
 						resource.TestCheckResourceAttr("coderd_group.test", "members.0", user1.ID.String()),
 					),
 				},
-				// Import
+				// Import by ID
 				{
-					Config:                  cfg1.String(t),
 					ResourceName:            "coderd_group.test",
 					ImportState:             true,
+					ImportStateVerify:       true,
+					ImportStateVerifyIgnore: []string{"members"},
+				},
+				// Import by org name and group name
+				{
+					ResourceName:            "coderd_group.test",
+					ImportState:             true,
+					ImportStateId:           "default/example-group",
 					ImportStateVerify:       true,
 					ImportStateVerifyIgnore: []string{"members"},
 				},

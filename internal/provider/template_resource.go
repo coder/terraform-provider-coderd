@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"cdr.dev/slog"
 	"github.com/coder/coder/v2/codersdk"
@@ -230,7 +231,8 @@ func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRe
 func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "A Coder template.\n\nLogs from building template versions are streamed from the provisioner " +
-			"when the `TF_LOG` environment variable is `INFO` or higher.",
+			"when the `TF_LOG` environment variable is `INFO` or higher.\n\n" +
+			"When importing, the ID supplied can be either a template UUID retrieved via the API or `<organization-name>/<template-name>`.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -771,7 +773,28 @@ func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteReques
 }
 
 func (r *TemplateResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	idParts := strings.Split(req.ID, "/")
+	if len(idParts) == 1 {
+		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+		return
+	} else if len(idParts) == 2 {
+		client := r.data.Client
+		org, err := client.OrganizationByName(ctx, idParts[0])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization with name %s: %s", idParts[0], err))
+			return
+		}
+		template, err := client.TemplateByName(ctx, org.ID, idParts[1])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template with name %s: %s", idParts[1], err))
+			return
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), template.ID.String())...)
+		return
+	} else {
+		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<template-name>`")
+		return
+	}
 }
 
 // ConfigValidators implements resource.ResourceWithConfigValidators.

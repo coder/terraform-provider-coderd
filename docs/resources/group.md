@@ -5,6 +5,7 @@ subcategory: ""
 description: |-
   A group on the Coder deployment.
   Creating groups requires an Enterprise license.
+  When importing, the ID supplied can be either a group UUID retrieved via the API or <organization-name>/<group-name>.
 ---
 
 # coderd_group (Resource)
@@ -12,6 +13,8 @@ description: |-
 A group on the Coder deployment.
 
 Creating groups requires an Enterprise license.
+
+When importing, the ID supplied can be either a group UUID retrieved via the API or `<organization-name>/<group-name>`.
 
 ## Example Usage
 

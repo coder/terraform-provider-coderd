@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
@@ -60,7 +61,9 @@ func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataReque
 
 func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A group on the Coder deployment.\n\nCreating groups requires an Enterprise license.",
+		MarkdownDescription: "A group on the Coder deployment.\n\n" +
+			"Creating groups requires an Enterprise license.\n\n" +
+			"When importing, the ID supplied can be either a group UUID retrieved via the API or `<organization-name>/<group-name>`.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -324,10 +327,30 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 }
 
 func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	var groupID uuid.UUID
 	client := r.data.Client
-	groupID, err := uuid.Parse(req.ID)
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse import group ID as UUID, got error: %s", err))
+	idParts := strings.Split(req.ID, "/")
+	if len(idParts) == 1 {
+		var err error
+		groupID, err = uuid.Parse(req.ID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse import group ID as UUID, got error: %s", err))
+			return
+		}
+	} else if len(idParts) == 2 {
+		org, err := client.OrganizationByName(ctx, idParts[0])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization with name %s: %s", idParts[0], err))
+			return
+		}
+		group, err := client.GroupByOrgAndName(ctx, org.ID, idParts[1])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get group with name %s: %s", idParts[1], err))
+			return
+		}
+		groupID = group.ID
+	} else {
+		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<group-name>`")
 		return
 	}
 	group, err := client.Group(ctx, groupID)
@@ -339,5 +362,5 @@ func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStat
 		resp.Diagnostics.AddError("Client Error", "Cannot import groups created via OIDC")
 		return
 	}
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), groupID.String())...)
 }

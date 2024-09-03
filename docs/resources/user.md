@@ -4,11 +4,14 @@ page_title: "coderd_user Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
   A user on the Coder deployment.
+  When importing, the ID supplied can be either a user UUID or a username.
 ---
 
 # coderd_user (Resource)
 
 A user on the Coder deployment.
+
+When importing, the ID supplied can be either a user UUID or a username.
 
 ## Example Usage
 
