@@ -60,11 +60,20 @@ func TestAccUserResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_user.test", "suspended", "false"),
 				),
 			},
-			// ImportState testing
+			// Import by ID
 			{
 				ResourceName:      "coderd_user.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				// We can't pull the password from the API.
+				ImportStateVerifyIgnore: []string{"password"},
+			},
+			// ImportState by username
+			{
+				ResourceName:      "coderd_user.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "example",
 				// We can't pull the password from the API.
 				ImportStateVerifyIgnore: []string{"password"},
 			},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -55,7 +56,8 @@ func (r *UserResource) Metadata(ctx context.Context, req resource.MetadataReques
 
 func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A user on the Coder deployment.",
+		MarkdownDescription: "A user on the Coder deployment.\n\n" +
+			"When importing, the ID supplied can be either a user UUID or a username.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -371,6 +373,18 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	tflog.Info(ctx, "successfully deleted user")
 }
 
+// Req.ID can be either a UUID or a username.
 func (r *UserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	_, err := uuid.Parse(req.ID)
+	if err == nil {
+		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+		return
+	}
+	client := r.data.Client
+	user, err := client.User(ctx, req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or a valid username")
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), user.ID.String())...)
 }

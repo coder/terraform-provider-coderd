@@ -5,6 +5,7 @@ subcategory: ""
 description: |-
   A Coder template.
   Logs from building template versions are streamed from the provisioner when the TF_LOG environment variable is INFO or higher.
+  When importing, the ID supplied can be either a template UUID retrieved via the API or <organization-name>/<template-name>.
 ---
 
 # coderd_template (Resource)
@@ -12,6 +13,8 @@ description: |-
 A Coder template.
 
 Logs from building template versions are streamed from the provisioner when the `TF_LOG` environment variable is `INFO` or higher.
+
+When importing, the ID supplied can be either a template UUID retrieved via the API or `<organization-name>/<template-name>`.
 
 ## Example Usage
 
