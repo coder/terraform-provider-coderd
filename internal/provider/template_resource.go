@@ -248,12 +248,17 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Required:            true,
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 32),
+					stringvalidator.RegexMatches(nameValidRegex, "Template names must be alphanumeric with hyphens."),
 				},
 			},
 			"display_name": schema.StringAttribute{
 				MarkdownDescription: "The display name of the template. Defaults to the template name.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 64),
+					stringvalidator.RegexMatches(displayNameRegex, "Template display names must be alphanumeric with spaces."),
+				},
 			},
 			"description": schema.StringAttribute{
 				MarkdownDescription: "A description of the template.",
@@ -394,7 +399,8 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Optional:            true,
 							Computed:            true,
 							Validators: []validator.String{
-								stringvalidator.LengthAtLeast(1),
+								stringvalidator.LengthBetween(1, 64),
+								stringvalidator.RegexMatches(templateVersionNameRegex, "Template version names must be alphanumeric with underscores and dots."),
 							},
 						},
 						"message": schema.StringAttribute{
