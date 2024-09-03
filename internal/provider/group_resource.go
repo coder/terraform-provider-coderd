@@ -77,13 +77,18 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The unique name of the group.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 36),
+					stringvalidator.RegexMatches(nameValidRegex, "Group names must be alpahnumeric with hyphens."),
+				},
 			},
 			"display_name": schema.StringAttribute{
 				MarkdownDescription: "The display name of the group. Defaults to the group name.",
 				Computed:            true,
 				Optional:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
+					stringvalidator.LengthBetween(1, 64),
+					stringvalidator.RegexMatches(displayNameRegex, "Group display names must be alphanumeric with spaces"),
 				},
 				Default: stringdefault.StaticString(""),
 			},

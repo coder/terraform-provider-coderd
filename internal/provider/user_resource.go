@@ -71,11 +71,18 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"username": schema.StringAttribute{
 				MarkdownDescription: "Username of the user.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 32),
+					stringvalidator.RegexMatches(nameValidRegex, "Username must be alphanumeric with hyphens."),
+				},
 			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: "Display name of the user. Defaults to username.",
 				Computed:            true,
 				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 128),
+				},
 			},
 			"email": schema.StringAttribute{
 				MarkdownDescription: "Email address of the user.",
