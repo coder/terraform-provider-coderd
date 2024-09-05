@@ -56,10 +56,10 @@ resource "coderd_user" "admin" {
 
 ### Optional
 
-- `login_type` (String) Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.
+- `login_type` (String) Type of login for the user. Valid types are `none`, `password`, `github`, and `oidc`.
 - `name` (String) Display name of the user. Defaults to username.
-- `password` (String, Sensitive) Password for the user. Required when login_type is 'password'. Passwords are saved into the state as plain text and should only be used for testing purposes.
-- `roles` (Set of String) Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.
+- `password` (String, Sensitive) Password for the user. Required when `login_type` is `password`. Passwords are saved into the state as plain text and should only be used for testing purposes.
+- `roles` (Set of String) Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.
 - `suspended` (Boolean) Whether the user is suspended.
 
 ### Read-Only

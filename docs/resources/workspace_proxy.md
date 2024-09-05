@@ -48,7 +48,7 @@ resource "kubernetes_deployment" "syd_wsproxy" {
 
 ### Required
 
-- `icon` (String) Relative path or external URL that specifes an icon to be displayed in the dashboard.
+- `icon` (String) Relative path or external URL that specifies an icon to be displayed in the dashboard.
 - `name` (String) Name of the workspace proxy.
 
 ### Optional

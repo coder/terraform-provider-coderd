@@ -58,7 +58,7 @@ resource "coderd_template" "example" {
 - `display_name` (String)
 - `members` (Attributes Set) Members of the group. (see [below for nested schema](#nestedatt--members))
 - `quota_allowance` (Number) The number of quota credits to allocate to each user in the group.
-- `source` (String) The source of the group. Either 'oidc' or 'user'.
+- `source` (String) The source of the group. Either `oidc` or `user`.
 
 <a id="nestedatt--members"></a>
 ### Nested Schema for `members`
@@ -69,7 +69,7 @@ Read-Only:
 - `email` (String)
 - `id` (String)
 - `last_seen_at` (Number) Unix timestamp of when the member was last seen.
-- `login_type` (String) The login type of the member. Can be 'oidc', 'token', 'password', 'github' or 'none'.
-- `status` (String) The status of the member. Can be 'active', 'dormant' or 'suspended'.
+- `login_type` (String) The login type of the member. Can be `oidc`, `token`, `password`, `github` or `none`.
+- `status` (String) The status of the member. Can be `active`, `dormant` or `suspended`.
 - `theme_preference` (String)
 - `username` (String)
