@@ -93,7 +93,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 				Computed:            true,
 			},
 			"source": schema.StringAttribute{
-				MarkdownDescription: "The source of the group. Either 'oidc' or 'user'.",
+				MarkdownDescription: "The source of the group. Either `oidc` or `user`.",
 				Computed:            true,
 			},
 			"members": schema.SetNestedAttribute{
@@ -120,11 +120,11 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 							Computed:            true,
 						},
 						"status": schema.StringAttribute{
-							MarkdownDescription: "The status of the member. Can be 'active', 'dormant' or 'suspended'.",
+							MarkdownDescription: "The status of the member. Can be `active`, `dormant` or `suspended`.",
 							Computed:            true,
 						},
 						"login_type": schema.StringAttribute{
-							MarkdownDescription: "The login type of the member. Can be 'oidc', 'token', 'password', 'github' or 'none'.",
+							MarkdownDescription: "The login type of the member. Can be `oidc`, `token`, `password`, `github` or `none`.",
 							Computed:            true,
 						},
 						"theme_preference": schema.StringAttribute{
