@@ -89,7 +89,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Required:            true,
 			},
 			"roles": schema.SetAttribute{
-				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
+				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.",
 				Computed:            true,
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -101,7 +101,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Default: setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 			},
 			"login_type": schema.StringAttribute{
-				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
+				MarkdownDescription: "Type of login for the user. Valid types are `none`, `password`, `github`, and `oidc`.",
 				Computed:            true,
 				Optional:            true,
 				Validators: []validator.String{
@@ -113,7 +113,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				},
 			},
 			"password": schema.StringAttribute{
-				MarkdownDescription: "Password for the user. Required when login_type is 'password'. Passwords are saved into the state as plain text and should only be used for testing purposes.",
+				MarkdownDescription: "Password for the user. Required when `login_type` is `password`. Passwords are saved into the state as plain text and should only be used for testing purposes.",
 				Optional:            true,
 				Sensitive:           true,
 			},

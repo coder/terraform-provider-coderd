@@ -72,12 +72,12 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				Computed:            true,
 			},
 			"roles": schema.SetAttribute{
-				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
+				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.",
 				Computed:            true,
 				ElementType:         types.StringType,
 			},
 			"login_type": schema.StringAttribute{
-				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
+				MarkdownDescription: "Type of login for the user. Valid types are `none`, `password', `github`, and `oidc`.",
 				Computed:            true,
 			},
 			"suspended": schema.BoolAttribute{

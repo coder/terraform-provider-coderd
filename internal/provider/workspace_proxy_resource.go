@@ -60,7 +60,7 @@ func (r *WorkspaceProxyResource) Schema(ctx context.Context, req resource.Schema
 				Computed:            true,
 			},
 			"icon": schema.StringAttribute{
-				MarkdownDescription: "Relative path or external URL that specifes an icon to be displayed in the dashboard.",
+				MarkdownDescription: "Relative path or external URL that specifies an icon to be displayed in the dashboard.",
 				Required:            true,
 			},
 			"session_token": schema.StringAttribute{
