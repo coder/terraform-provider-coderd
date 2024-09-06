@@ -53,7 +53,6 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool)
 		Env: []string{
 			"CODER_HTTP_ADDRESS=0.0.0.0:3000",        // Listen on all interfaces inside the container
 			"CODER_ACCESS_URL=http://localhost:3000", // Set explicitly to avoid creating try.coder.app URLs.
-			"CODER_IN_MEMORY=true",                   // We don't necessarily care about real persistence here.
 			"CODER_TELEMETRY_ENABLE=false",           // Avoid creating noise.
 		},
 		Labels:       map[string]string{},
