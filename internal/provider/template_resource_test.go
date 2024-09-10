@@ -357,6 +357,12 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
+	group, err := client.CreateGroup(ctx, firstUser.OrganizationIDs[0], codersdk.CreateGroupRequest{
+		Name:           "bosses",
+		QuotaAllowance: 200,
+	})
+	require.NoError(t, err)
+
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
@@ -366,13 +372,6 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 				// Auto-generated version name
 				Directory: PtrTo("../../integration/template-test/example-template"),
 				Active:    PtrTo(true),
-				// TODO(ethanndickson): Remove this when we add in `*.tfvars` parsing
-				TerraformVariables: []testAccTemplateKeyValueConfig{
-					{
-						Key:   PtrTo("name"),
-						Value: PtrTo("world"),
-					},
-				},
 			},
 		},
 		ACL: testAccTemplateACLConfig{
@@ -380,6 +379,10 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 				{
 					Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
 					Value: PtrTo("use"),
+				},
+				{
+					Key:   PtrTo(group.ID.String()),
+					Value: PtrTo("admin"),
 				},
 			},
 			UserACL: []testAccTemplateKeyValueConfig{
@@ -392,11 +395,14 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 	}
 
 	cfg2 := cfg1
-	cfg2.ACL.null = true
+	cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
 
 	cfg3 := cfg2
-	cfg3.AllowUserAutostart = PtrTo(false)
-	cfg3.AutostopRequirement = testAccAutostopRequirementConfig{
+	cfg3.ACL.null = true
+
+	cfg4 := cfg3
+	cfg4.AllowUserAutostart = PtrTo(false)
+	cfg4.AutostopRequirement = testAccAutostopRequirementConfig{
 		DaysOfWeek: PtrTo([]string{"monday", "tuesday"}),
 		Weeks:      PtrTo(int64(2)),
 	}
@@ -409,19 +415,33 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			{
 				Config: cfg1.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "1"),
+					resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "2"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
-						"id":   regexp.MustCompile(".+"),
+						"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
 						"role": regexp.MustCompile("^use$"),
 					}),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(group.ID.String()),
+						"role": regexp.MustCompile("^admin$"),
+					}),
+					resource.TestCheckResourceAttr("coderd_template.test", "acl.users.#", "1"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
-						"id":   regexp.MustCompile(".+"),
+						"id":   regexp.MustCompile(firstUser.ID.String()),
 						"role": regexp.MustCompile("^admin$"),
 					}),
 				),
 			},
 			{
 				Config: cfg2.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(firstUser.ID.String()),
+						"role": regexp.MustCompile("^admin$"),
+					}),
+				),
+			},
+			{
+				Config: cfg3.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
 					func(s *terraform.State) error {
@@ -439,7 +459,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 						if len(acl.Groups) != 1 {
 							return fmt.Errorf("expected 1 group ACL, got %d", len(acl.Groups))
 						}
-						if acl.Groups[0].Role != "use" && acl.Groups[0].ID != firstUser.OrganizationIDs[0] {
+						if acl.Groups[0].Role != "admin" && acl.Groups[0].ID != group.ID {
 							return fmt.Errorf("expected group ACL to be 'use' for %s, got %s", firstUser.OrganizationIDs[0].String(), acl.Groups[0].Role)
 						}
 						if len(acl.Users) != 1 {
@@ -453,7 +473,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 				),
 			},
 			{
-				Config: cfg3.String(t),
+				Config: cfg4.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
 					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),

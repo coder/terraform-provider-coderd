@@ -531,7 +531,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				if resp.Diagnostics.HasError() {
 					return
 				}
-				err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(acl))
+				err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(codersdk.TemplateACL{}, acl))
 				if err != nil {
 					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template ACL: %s", err))
 					return
@@ -684,7 +684,13 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		err := client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(acl))
+		curACL, err := client.TemplateACL(ctx, templateID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
+			return
+		}
+
+		err = client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(curACL, acl))
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
 			return
@@ -1053,14 +1059,26 @@ func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UU
 	return nil
 }
 
-func convertACLToRequest(permissions ACL) codersdk.UpdateTemplateACL {
+func convertACLToRequest(curACL codersdk.TemplateACL, newACL ACL) codersdk.UpdateTemplateACL {
 	var userPerms = make(map[string]codersdk.TemplateRole)
-	for _, perm := range permissions.UserPermissions {
+	for _, perm := range newACL.UserPermissions {
 		userPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
 	}
 	var groupPerms = make(map[string]codersdk.TemplateRole)
-	for _, perm := range permissions.GroupPermissions {
+	for _, perm := range newACL.GroupPermissions {
 		groupPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
+	}
+	// For each user or group to remove, we need to set their role to empty
+	// string.
+	for _, perm := range curACL.Users {
+		if _, ok := userPerms[perm.ID.String()]; !ok {
+			userPerms[perm.ID.String()] = ""
+		}
+	}
+	for _, perm := range curACL.Groups {
+		if _, ok := groupPerms[perm.ID.String()]; !ok {
+			groupPerms[perm.ID.String()] = ""
+		}
 	}
 	return codersdk.UpdateTemplateACL{
 		UserPerms:  userPerms,
