@@ -4,7 +4,7 @@ page_title: "coderd_template Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
   A Coder template.
-  Logs from building template versions are streamed from the provisioner when the TF_LOG environment variable is INFO or higher.
+  Logs from building template versions can be optionally streamed from the provisioner by setting the TF_LOG environment variable to INFO or higher.
   When importing, the ID supplied can be either a template UUID retrieved via the API or <organization-name>/<template-name>.
 ---
 
@@ -12,7 +12,7 @@ description: |-
 
 A Coder template.
 
-Logs from building template versions are streamed from the provisioner when the `TF_LOG` environment variable is `INFO` or higher.
+Logs from building template versions can be optionally streamed from the provisioner by setting the `TF_LOG` environment variable to `INFO` or higher.
 
 When importing, the ID supplied can be either a template UUID retrieved via the API or `<organization-name>/<template-name>`.
 
@@ -101,7 +101,7 @@ Optional:
 
 - `active` (Boolean) Whether this version is the active version of the template. Only one version can be active at a time.
 - `message` (String) A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.
-- `name` (String) The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents are updated.
+- `name` (String) The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.
 - `provisioner_tags` (Attributes Set) Provisioner tags for the template version. (see [below for nested schema](#nestedatt--versions--provisioner_tags))
 - `tf_vars` (Attributes Set) Terraform variables for the template version. (see [below for nested schema](#nestedatt--versions--tf_vars))
 

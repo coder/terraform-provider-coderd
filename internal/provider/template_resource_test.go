@@ -286,6 +286,15 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg5.Versions = slices.Clone(cfg5.Versions)
 		cfg5.Versions[1].Directory = PtrTo("../../integration/template-test/example-template/")
 
+		cfg6 := cfg5
+		cfg6.Versions = slices.Clone(cfg6.Versions)
+		cfg6.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+			{
+				Key:   PtrTo("name"),
+				Value: PtrTo("world2"),
+			},
+		}
+
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
 			IsUnitTest:               true,
@@ -341,6 +350,66 @@ func TestAccTemplateResource(t *testing.T) {
 					Config: cfg5.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
 						testAccCheckNumTemplateVersions(ctx, client, 4),
+					),
+				},
+				// Update the Terraform variables of the first version
+				{
+					Config: cfg6.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 5),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("AutoGenNameUpdateTFVars", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  PtrTo("example-template3"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					// Auto-generated version name
+					Directory: PtrTo("../../integration/template-test/example-template-2/"),
+					TerraformVariables: []testAccTemplateKeyValueConfig{
+						{
+							Key:   PtrTo("name"),
+							Value: PtrTo("world"),
+						},
+					},
+					Active: PtrTo(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
+			},
+		}
+
+		cfg2 := cfg1
+		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+			{
+				Key:   PtrTo("name"),
+				Value: PtrTo("world2"),
+			},
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				{
+					Config: cfg2.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 2),
 					),
 				},
 			},
@@ -779,14 +848,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "IdenticalDontRename",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -800,21 +871,24 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "bar",
+						ID:     aUUID,
+						Name:   "bar",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -822,14 +896,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "IdenticalRenameFirst",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -843,21 +919,24 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "baz",
+						ID:     aUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -865,14 +944,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "IdenticalHashesInState",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -886,25 +967,29 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "qux",
+						ID:     aUUID,
+						Name:   "qux",
+						TFVars: map[string]string{},
 					},
 					{
-						ID:   bUUID,
-						Name: "baz",
+						ID:     bUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(bUUID),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(bUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -912,14 +997,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "UnknownUsesStateInOrder",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringUnknown(),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringUnknown(),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -933,25 +1020,29 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "qux",
+						ID:     aUUID,
+						Name:   "qux",
+						TFVars: map[string]string{},
 					},
 					{
-						ID:   bUUID,
-						Name: "baz",
+						ID:     bUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("baz"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(bUUID),
+					Name:               types.StringValue("baz"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(bUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -959,9 +1050,10 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "NewVersionNewRandomName",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("weird_draught12"),
-					DirectoryHash: types.StringValue("bbb"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("weird_draught12"),
+					DirectoryHash:      types.StringValue("bbb"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -972,16 +1064,108 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "weird_draught12",
+						ID:     aUUID,
+						Name:   "weird_draught12",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringUnknown(),
-					DirectoryHash: types.StringValue("bbb"),
+					Name:               types.StringUnknown(),
+					DirectoryHash:      types.StringValue("bbb"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
+		{
+			Name: "IdenticalNewVars",
+			planVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
+					ID:            UUIDValue(aUUID),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:   aUUID,
+						Name: "foo",
+						TFVars: map[string]string{
+							"foo": "foo",
+						},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "IdenticalSameVars",
+			planVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
+					ID:            UUIDValue(aUUID),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:   aUUID,
+						Name: "foo",
+						TFVars: map[string]string{
+							"foo": "bar",
+						},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
+					ID:            UUIDValue(aUUID),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
 				},
 			},
 		},
