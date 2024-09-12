@@ -71,7 +71,7 @@ resource "coderd_template" "ubuntu-main" {
 - `acl` (Attributes) (Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform. (see [below for nested schema](#nestedatt--acl))
 - `activity_bump_ms` (Number) The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.
 - `allow_user_auto_start` (Boolean) (Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.
-- `allow_user_auto_stop` (Boolean) (Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.
+- `allow_user_auto_stop` (Boolean) (Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel in-progress workspace jobs using this template. Defaults to true.
 - `auto_start_permitted_days_of_week` (Set of String) (Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.
 - `auto_stop_requirement` (Attributes) (Enterprise) The auto-stop requirement for all workspaces created from this template. (see [below for nested schema](#nestedatt--auto_stop_requirement))

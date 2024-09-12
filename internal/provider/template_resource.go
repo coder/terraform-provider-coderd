@@ -339,7 +339,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_stop": schema.BoolAttribute{
-				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
+				MarkdownDescription: "(Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
