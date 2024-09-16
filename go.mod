@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	cdr.dev/slog v1.6.2-0.20240126064726-20367d4aede6
-	github.com/coder/coder/v2 v2.14.2
+	github.com/coder/coder/v2 v2.15.0
 	github.com/docker/docker v27.2.1+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/google/uuid v1.6.0
@@ -107,7 +107,6 @@ require (
 	github.com/outcaste-io/ristretto v0.2.3 // indirect
 	github.com/philhofer/fwd v1.1.2 // indirect
 	github.com/pion/transport/v2 v2.2.10 // indirect
-	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/pion/udp v0.1.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
