@@ -28,7 +28,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 	require.NoError(t, err)
 	orgID := firstUser.OrganizationIDs[0]
 
-	version, err := newVersion(ctx, client, newVersionRequest{
+	version, err, _ := newVersion(ctx, client, newVersionRequest{
 		OrganizationID: orgID,
 		Version: &TemplateVersion{
 			Name:      types.StringValue("main"),

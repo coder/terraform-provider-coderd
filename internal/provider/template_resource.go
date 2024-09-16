@@ -495,9 +495,9 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		if idx > 0 {
 			newVersionRequest.TemplateID = &templateResp.ID
 		}
-		versionResp, err := newVersion(ctx, client, newVersionRequest)
+		versionResp, err, logs := newVersion(ctx, client, newVersionRequest)
 		if err != nil {
-			resp.Diagnostics.AddError("Client Error", err.Error())
+			resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 			return
 		}
 		if idx == 0 {
@@ -701,13 +701,13 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	for idx := range newState.Versions {
 		if newState.Versions[idx].ID.IsUnknown() {
 			tflog.Info(ctx, "discovered a new or modified template version")
-			uploadResp, err := newVersion(ctx, client, newVersionRequest{
+			uploadResp, err, logs := newVersion(ctx, client, newVersionRequest{
 				Version:        &newState.Versions[idx],
 				OrganizationID: orgID,
 				TemplateID:     &templateID,
 			})
 			if err != nil {
-				resp.Diagnostics.AddError("Client Error", err.Error())
+				resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 				return
 			}
 			versionResp, err := client.TemplateVersion(ctx, uploadResp.ID)
@@ -950,13 +950,14 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 	return &resp, nil
 }
 
-func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) error {
+func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
 	const maxRetries = 3
+	var jobLogs []codersdk.ProvisionerJobLog
 	for retries := 0; retries < maxRetries; retries++ {
 		logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
 		defer closer.Close()
 		if err != nil {
-			return fmt.Errorf("begin streaming logs: %w", err)
+			return jobLogs, fmt.Errorf("begin streaming logs: %w", err)
 		}
 		for {
 			logs, ok := <-logs
@@ -970,21 +971,24 @@ func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.
 				"level":      logs.Level,
 				"created_at": logs.CreatedAt,
 			})
+			if logs.Output != "" {
+				jobLogs = append(jobLogs, logs)
+			}
 		}
 		latestResp, err := client.TemplateVersion(ctx, version.ID)
 		if err != nil {
-			return err
+			return jobLogs, err
 		}
 		if latestResp.Job.Status.Active() {
 			tflog.Warn(ctx, fmt.Sprintf("provisioner job still active, continuing to wait...: %s", latestResp.Job.Status))
 			continue
 		}
 		if latestResp.Job.Status != codersdk.ProvisionerJobSucceeded {
-			return fmt.Errorf("provisioner job did not succeed: %s (%s)", latestResp.Job.Status, latestResp.Job.Error)
+			return jobLogs, fmt.Errorf("provisioner job did not succeed: %s (%s)", latestResp.Job.Status, latestResp.Job.Error)
 		}
-		return nil
+		return jobLogs, nil
 	}
-	return fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
+	return jobLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
 }
 
 type newVersionRequest struct {
@@ -993,22 +997,23 @@ type newVersionRequest struct {
 	TemplateID     *uuid.UUID
 }
 
-func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error) {
+func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error, []codersdk.ProvisionerJobLog) {
+	var logs []codersdk.ProvisionerJobLog
 	directory := req.Version.Directory.ValueString()
 	tflog.Info(ctx, "uploading directory")
 	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to upload directory: %s", err)
+		return nil, fmt.Errorf("failed to upload directory: %s", err), logs
 	}
 	tflog.Info(ctx, "successfully uploaded directory")
 	tflog.Info(ctx, "discovering and parsing vars files")
 	varFiles, err := codersdk.DiscoverVarsFiles(directory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover vars files: %s", err)
+		return nil, fmt.Errorf("failed to discover vars files: %s", err), logs
 	}
 	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse user variable values: %s", err)
+		return nil, fmt.Errorf("failed to parse user variable values: %s", err), logs
 	}
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
@@ -1033,15 +1038,15 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	tflog.Info(ctx, "creating template version")
 	versionResp, err := client.CreateTemplateVersion(ctx, req.OrganizationID, tmplVerReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create template version: %s", err)
+		return nil, fmt.Errorf("failed to create template version: %s", err), logs
 	}
 	tflog.Info(ctx, "waiting for template version import job.")
-	err = waitForJob(ctx, client, &versionResp)
+	logs, err = waitForJob(ctx, client, &versionResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to wait for job: %s", err)
+		return nil, fmt.Errorf("failed to wait for job: %s", err), logs
 	}
 	tflog.Info(ctx, "successfully created template version")
-	return &versionResp, nil
+	return &versionResp, nil, logs
 }
 
 func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UUID, versionID uuid.UUID) error {
@@ -1308,4 +1313,16 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]
 		}
 	}
+}
+
+func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
+	var b strings.Builder
+	b.WriteString(err.Error() + "\n")
+	for _, log := range logs {
+		if !log.CreatedAt.IsZero() {
+			b.WriteString(log.CreatedAt.Local().Format("2006-01-02 15:04:05.000Z07:00") + " ")
+		}
+		b.WriteString(log.Output + "\n")
+	}
+	return b.String()
 }
