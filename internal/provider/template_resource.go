@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"cdr.dev/slog"
@@ -230,8 +231,8 @@ func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRe
 
 func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A Coder template.\n\nLogs from building template versions are streamed from the provisioner " +
-			"when the `TF_LOG` environment variable is `INFO` or higher.\n\n" +
+		MarkdownDescription: "A Coder template.\n\nLogs from building template versions can be optionally streamed from the provisioner " +
+			"by setting the `TF_LOG` environment variable to `INFO` or higher.\n\n" +
 			"When importing, the ID supplied can be either a template UUID retrieved via the API or `<organization-name>/<template-name>`.",
 
 		Attributes: map[string]schema.Attribute{
@@ -395,7 +396,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Computed:   true,
 						},
 						"name": schema.StringAttribute{
-							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents are updated.",
+							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.",
 							Optional:            true,
 							Computed:            true,
 							Validators: []validator.String{
@@ -1058,7 +1059,7 @@ func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UU
 		ID: versionID,
 	})
 	if err != nil {
-		return fmt.Errorf("Failed to update active template version: %s", err)
+		return fmt.Errorf("failed to update active template version: %s", err)
 	}
 	tflog.Info(ctx, "marked template version as active")
 	return nil
@@ -1236,8 +1237,9 @@ type LastVersionsByHash = map[string][]PreviousTemplateVersion
 var LastVersionsKey = "last_versions"
 
 type PreviousTemplateVersion struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+	ID     uuid.UUID         `json:"id"`
+	Name   string            `json:"name"`
+	TFVars map[string]string `json:"tf_vars"`
 }
 
 type privateState interface {
@@ -1249,18 +1251,24 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	lv := make(LastVersionsByHash)
 	for _, version := range v {
 		vbh, ok := lv[version.DirectoryHash.ValueString()]
+		tfVars := make(map[string]string, len(version.TerraformVariables))
+		for _, tfVar := range version.TerraformVariables {
+			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
+		}
 		// Store the IDs and names of all versions with the same directory hash,
 		// in the order they appear
 		if ok {
 			lv[version.DirectoryHash.ValueString()] = append(vbh, PreviousTemplateVersion{
-				ID:   version.ID.ValueUUID(),
-				Name: version.Name.ValueString(),
+				ID:     version.ID.ValueUUID(),
+				Name:   version.Name.ValueString(),
+				TFVars: tfVars,
 			})
 		} else {
 			lv[version.DirectoryHash.ValueString()] = []PreviousTemplateVersion{
 				{
-					ID:   version.ID.ValueUUID(),
-					Name: version.Name.ValueString(),
+					ID:     version.ID.ValueUUID(),
+					Name:   version.Name.ValueString(),
+					TFVars: tfVars,
 				},
 			}
 		}
@@ -1274,6 +1282,13 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 }
 
 func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions) {
+	// We remove versions that we've matched from `lv`, so make a copy for
+	// resolving tfvar changes at the end.
+	fullLv := make(LastVersionsByHash)
+	for k, v := range lv {
+		fullLv[k] = slices.Clone(v)
+	}
+
 	for i := range planVersions {
 		prevList, ok := lv[planVersions[i].DirectoryHash.ValueString()]
 		// If not in state, mark as known after apply since we'll create a new version.
@@ -1313,6 +1328,49 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]
 		}
 	}
+
+	// If only the Terraform variables have changed,
+	// we need to create a new version with the new variables.
+	for i := range planVersions {
+		if !planVersions[i].ID.IsUnknown() {
+			prevs, ok := fullLv[planVersions[i].DirectoryHash.ValueString()]
+			if !ok {
+				continue
+			}
+			if tfVariablesChanged(prevs, &planVersions[i]) {
+				planVersions[i].ID = NewUUIDUnknown()
+				// We could always set the name to unknown here, to generate a
+				// random one (this is what the Web UI currently does when
+				// only updating tfvars).
+				// However, I think it'd be weird if the provider just started
+				// ignoring the name you set in the config, we'll instead
+				// require that users update the name if they update the tfvars.
+				if configVersions[i].Name.IsNull() {
+					planVersions[i].Name = types.StringUnknown()
+				}
+			}
+		}
+	}
+}
+
+func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
+	for _, prev := range prevs {
+		if prev.ID == planned.ID.ValueUUID() {
+			// If the previous version has no TFVars, then it was created using
+			// an older provider version.
+			if prev.TFVars == nil {
+				return true
+			}
+			for _, tfVar := range planned.TerraformVariables {
+				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return true
+
 }
 
 func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
