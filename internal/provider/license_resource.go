@@ -150,7 +150,9 @@ func (r *LicenseResource) Read(ctx context.Context, req resource.ReadRequest, re
 		}
 	}
 	if !found {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("License with ID %d not found", data.ID.ValueInt32()))
+		resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("License with ID %d not found. Marking as deleted.", data.ID.ValueInt32()))
+		resp.State.RemoveResource(ctx)
+		return
 	}
 
 	// Save updated data into Terraform state

@@ -187,6 +187,11 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		groupID := data.ID.ValueUUID()
 		group, err = client.Group(ctx, groupID)
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group by ID, got error: %s", err))
 			return
 		}
@@ -195,6 +200,11 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	} else {
 		group, err = client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with name %s not found in organization with ID %s. Marking as deleted.", data.Name.ValueString(), data.OrganizationID.ValueString()))
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Failed to get group by name and org ID", err.Error())
 			return
 		}

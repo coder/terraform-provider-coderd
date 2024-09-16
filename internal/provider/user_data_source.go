@@ -149,6 +149,11 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 	user, err := client.User(ctx, ident)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with identifier %q not found. Marking as deleted.", ident))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 		return
 	}
