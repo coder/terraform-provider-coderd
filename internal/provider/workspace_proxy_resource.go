@@ -142,6 +142,11 @@ func (r *WorkspaceProxyResource) Read(ctx context.Context, req resource.ReadRequ
 	client := r.data.Client
 	wsp, err := client.WorkspaceProxyByID(ctx, data.ID.ValueUUID())
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Workspace proxy with ID %s not found. Marking as deleted.", data.ID.ValueString()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read workspace proxy: %v", err))
 		return
 	}

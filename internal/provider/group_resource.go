@@ -220,6 +220,11 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	group, err := client.Group(ctx, groupID)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group, got error: %s", err))
 		return
 	}

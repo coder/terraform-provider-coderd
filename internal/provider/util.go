@@ -3,11 +3,14 @@ package provider
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 )
 
@@ -112,4 +115,9 @@ func memberDiff(curMembers []uuid.UUID, plannedMembers []UUID) (add, remove []st
 		}
 	}
 	return add, remove
+}
+
+func isNotFound(err error) bool {
+	var sdkErr *codersdk.Error
+	return errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound
 }

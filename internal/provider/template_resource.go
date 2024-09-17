@@ -577,6 +577,11 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	template, err := client.Template(ctx, templateID)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Template with ID %s not found. Marking as deleted.", templateID.String()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
 		return
 	}

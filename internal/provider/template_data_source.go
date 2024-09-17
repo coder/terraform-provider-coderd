@@ -262,6 +262,11 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 		template, err = client.TemplateByName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 	}
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", "Template not found. Marking as deleted.")
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get template, got error: %s", err))
 		return
 	}
