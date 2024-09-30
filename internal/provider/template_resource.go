@@ -69,6 +69,7 @@ type TemplateResourceModel struct {
 	TimeTilDormantAutoDeleteMillis types.Int64  `tfsdk:"time_til_dormant_autodelete_ms"`
 	RequireActiveVersion           types.Bool   `tfsdk:"require_active_version"`
 	DeprecationMessage             types.String `tfsdk:"deprecation_message"`
+	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
@@ -92,7 +93,9 @@ func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceMod
 		m.FailureTTLMillis.Equal(other.FailureTTLMillis) &&
 		m.TimeTilDormantMillis.Equal(other.TimeTilDormantMillis) &&
 		m.TimeTilDormantAutoDeleteMillis.Equal(other.TimeTilDormantAutoDeleteMillis) &&
-		m.RequireActiveVersion.Equal(other.RequireActiveVersion)
+		m.RequireActiveVersion.Equal(other.RequireActiveVersion) &&
+		m.DeprecationMessage.Equal(other.DeprecationMessage) &&
+		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel)
 }
 
 func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
@@ -110,7 +113,8 @@ func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features 
 		len(m.AutostartPermittedDaysOfWeek.Elements()) != 7
 	requiresActiveVersion := m.RequireActiveVersion.ValueBool()
 	requiresACL := !m.ACL.IsNull()
-	if requiresScheduling || requiresActiveVersion || requiresACL {
+	requiresSharedPortsControl := m.MaxPortShareLevel.ValueString() != "" && m.MaxPortShareLevel.ValueString() != string(codersdk.WorkspaceAgentPortShareLevelPublic)
+	if requiresScheduling || requiresActiveVersion || requiresACL || requiresSharedPortsControl {
 		if requiresScheduling && !features[codersdk.FeatureAdvancedTemplateScheduling].Enabled {
 			diags.AddError(
 				"Feature not enabled",
@@ -129,6 +133,13 @@ func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features 
 			diags.AddError(
 				"Feature not enabled",
 				"Your license is not entitled to use template access control, so you cannot set acl.",
+			)
+			return
+		}
+		if requiresSharedPortsControl && !features[codersdk.FeatureControlSharedPorts].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use port sharing control, so you cannot set max_port_share_level.",
 			)
 			return
 		}
@@ -369,6 +380,14 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
+			"max_port_share_level": schema.StringAttribute{
+				MarkdownDescription: "(Enterprise) The maximum port share level for workspaces created from this template. Defaults to `owner` on an Enterprise deployment, or `public` otherwise.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
+				},
+			},
 			"deprecation_message": schema.StringAttribute{
 				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
 				Optional:            true,
@@ -553,6 +572,23 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
 
+	// TODO: Remove this update call once this provider requires a Coder
+	// deployment running `v2.15.0` or later.
+	if data.MaxPortShareLevel.IsUnknown() {
+		data.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
+	} else {
+		mpslReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		mpslResp, err := client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *mpslReq)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set max port share level via update: %s", err))
+			return
+		}
+		data.MaxPortShareLevel = types.StringValue(string(mpslResp.MaxPortShareLevel))
+	}
+
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -591,6 +627,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.Append(diag...)
 		return
 	}
+	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 
 	if !data.ACL.IsNull() {
 		tflog.Info(ctx, "reading template ACL")
@@ -665,11 +702,16 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 
 	client := r.data.Client
 
+	// TODO(ethanndickson): Remove this once the provider requires a Coder
+	// deployment running `v2.15.0` or later.
+	if newState.MaxPortShareLevel.IsUnknown() {
+		newState.MaxPortShareLevel = curState.MaxPortShareLevel
+	}
 	templateMetadataChanged := !newState.EqualTemplateMetadata(&curState)
 	// This is required, as the API will reject no-diff updates.
 	if templateMetadataChanged {
 		tflog.Info(ctx, "change in template metadata detected, updating.")
-		updateReq := newState.toUpdateRequest(ctx, resp)
+		updateReq := newState.toUpdateRequest(ctx, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -758,6 +800,14 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			}
 		}
 	}
+	// TODO(ethanndickson): Remove this once the provider requires a Coder
+	// deployment running `v2.15.0` or later.
+	templateResp, err := client.Template(ctx, templateID)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
+		return
+	}
+	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -1147,25 +1197,27 @@ func (r *TemplateResourceModel) readResponse(ctx context.Context, template *code
 	r.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	r.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
 	r.DeprecationMessage = types.StringValue(template.DeprecationMessage)
+	// TODO(ethanndickson): MaxPortShareLevel deliberately omitted, as it can't
+	// be set during a create request, and we call this during `Create`.
 	return nil
 }
 
-func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, resp *resource.UpdateResponse) *codersdk.UpdateTemplateMeta {
+func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.Diagnostics) *codersdk.UpdateTemplateMeta {
 	var days []string
-	resp.Diagnostics.Append(
+	diag.Append(
 		r.AutostartPermittedDaysOfWeek.ElementsAs(ctx, &days, false)...,
 	)
-	if resp.Diagnostics.HasError() {
+	if diag.HasError() {
 		return nil
 	}
 	autoStart := &codersdk.TemplateAutostartRequirement{
 		DaysOfWeek: days,
 	}
 	var reqs AutostopRequirement
-	resp.Diagnostics.Append(
+	diag.Append(
 		r.AutostopRequirement.As(ctx, &reqs, basetypes.ObjectAsOptions{})...,
 	)
-	if resp.Diagnostics.HasError() {
+	if diag.HasError() {
 		return nil
 	}
 	autoStop := &codersdk.TemplateAutostopRequirement{
@@ -1189,6 +1241,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
+		MaxPortShareLevel:              PtrTo(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
 	}

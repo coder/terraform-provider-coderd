@@ -81,6 +81,7 @@ resource "coderd_template" "ubuntu-main" {
 - `display_name` (String) The display name of the template. Defaults to the template name.
 - `failure_ttl_ms` (Number) (Enterprise) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.
 - `icon` (String) Relative path or external URL that specifes an icon to be displayed in the dashboard.
+- `max_port_share_level` (String) (Enterprise) The maximum port share level for workspaces created from this template. Defaults to `owner` on an Enterprise deployment, or `public` otherwise.
 - `organization_id` (String) The ID of the organization. Defaults to the provider's default organization
 - `require_active_version` (Boolean) (Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.
 - `time_til_dormant_autodelete_ms` (Number) (Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.
