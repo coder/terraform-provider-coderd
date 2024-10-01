@@ -113,6 +113,7 @@ func TestAccTemplateResource(t *testing.T) {
 						resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_ms", "0"),
 						resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_autodelete_ms", "0"),
 						resource.TestCheckResourceAttr("coderd_template.test", "require_active_version", "false"),
+						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 							"name":           regexp.MustCompile(".+"),
 							"id":             regexp.MustCompile(".+"),
@@ -465,9 +466,11 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 
 	cfg2 := cfg1
 	cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
+	cfg2.MaxPortShareLevel = PtrTo("owner")
 
 	cfg3 := cfg2
 	cfg3.ACL.null = true
+	cfg3.MaxPortShareLevel = PtrTo("public")
 
 	cfg4 := cfg3
 	cfg4.AllowUserAutostart = PtrTo(false)
@@ -484,6 +487,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			{
 				Config: cfg1.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
 					resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "2"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
 						"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
@@ -503,6 +507,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			{
 				Config: cfg2.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
 					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
 						"id":   regexp.MustCompile(firstUser.ID.String()),
 						"role": regexp.MustCompile("^admin$"),
@@ -512,6 +517,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			{
 				Config: cfg3.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
 					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
 					func(s *terraform.State) error {
 						templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
@@ -603,6 +609,10 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 		},
 	}
 
+	cfg7 := cfg6
+	cfg7.ACL.null = true
+	cfg7.MaxPortShareLevel = PtrTo("owner")
+
 	for _, cfg := range []testAccTemplateResourceConfig{cfg1, cfg2, cfg3, cfg4} {
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -630,6 +640,10 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 				Config:      cfg6.String(t),
 				ExpectError: regexp.MustCompile("Your license is not entitled to use template access control"),
 			},
+			{
+				Config:      cfg7.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use port sharing control"),
+			},
 		},
 	})
 }
@@ -655,6 +669,7 @@ type testAccTemplateResourceConfig struct {
 	TimeTilDormantAutodelete     *int64
 	RequireActiveVersion         *bool
 	DeprecationMessage           *string
+	MaxPortShareLevel            *string
 
 	Versions []testAccTemplateVersionConfig
 	ACL      testAccTemplateACLConfig
@@ -761,6 +776,7 @@ resource "coderd_template" "test" {
 	time_til_dormant_autodelete_ms    = {{orNull .TimeTilDormantAutodelete}}
 	require_active_version            = {{orNull .RequireActiveVersion}}
 	deprecation_message               = {{orNull .DeprecationMessage}}
+	max_port_share_level              = {{orNull .MaxPortShareLevel}}
 
 	acl = ` + c.ACL.String(t) + `
 
