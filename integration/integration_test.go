@@ -97,7 +97,7 @@ func TestIntegration(t *testing.T) {
 				assert.Equal(t, "dean", user.Username)
 
 				// Check group
-				defaultOrg, err := c.OrganizationByName(ctx, "first-organization")
+				defaultOrg, err := c.OrganizationByName(ctx, "coder")
 				assert.NoError(t, err)
 				group, err := c.GroupByOrgAndName(ctx, defaultOrg.ID, "employees")
 				assert.NoError(t, err)
@@ -109,7 +109,7 @@ func TestIntegration(t *testing.T) {
 			name: "template-test",
 			preF: func(t testing.TB, c *codersdk.Client) {},
 			assertF: func(t testing.TB, c *codersdk.Client) {
-				defaultOrg, err := c.OrganizationByName(ctx, "first-organization")
+				defaultOrg, err := c.OrganizationByName(ctx, "coder")
 				assert.NoError(t, err)
 				user, err := c.User(ctx, "ethan")
 				require.NoError(t, err)
