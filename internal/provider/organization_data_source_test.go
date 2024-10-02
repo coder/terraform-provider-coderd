@@ -26,7 +26,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 	defaultCheckFn := resource.ComposeAggregateTestCheckFunc(
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "id", firstUser.OrganizationIDs[0].String()),
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "is_default", "true"),
-		resource.TestCheckResourceAttr("data.coderd_organization.test", "name", "first-organization"),
+		resource.TestCheckResourceAttr("data.coderd_organization.test", "name", "coder"),
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "members.#", "1"),
 		resource.TestCheckTypeSetElemAttr("data.coderd_organization.test", "members.*", firstUser.ID.String()),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "created_at"),
@@ -55,7 +55,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("first-organization"),
+			Name:  PtrTo("coder"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -92,7 +92,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 			URL:       client.URL.String(),
 			Token:     client.SessionToken(),
 			IsDefault: PtrTo(true),
-			Name:      PtrTo("first-organization"),
+			Name:      PtrTo("coder"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
