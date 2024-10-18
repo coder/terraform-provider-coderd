@@ -1,8 +1,8 @@
 // Provider populated from environment variables
 provider "coderd" {}
 
-// Get the commit SHA of the configuration's git repository
-variable "TFC_CONFIGURATION_VERSION_GIT_COMMIT_SHA" {
+// Can be populated using an environment variable, or an external datasource script
+variable "COMMIT_SHA" {
   type = string
 }
 
@@ -17,12 +17,12 @@ resource "coderd_template" "ubuntu-main" {
   description = "The main template for developing on Ubuntu."
   versions = [
     {
-      name        = "stable-${var.TFC_CONFIGURATION_VERSION_GIT_COMMIT_SHA}"
+      name        = "stable-${var.COMMIT_SHA}"
       description = "The stable version of the template."
       directory   = "./stable-template"
     },
     {
-      name        = "staging-${var.TFC_CONFIGURATION_VERSION_GIT_COMMIT_SHA}"
+      name        = "staging-${var.COMMIT_SHA}"
       description = "The staging version of the template."
       directory   = "./staging-template"
     }
