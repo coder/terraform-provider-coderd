@@ -888,6 +888,10 @@ func (a *activeVersionValidator) MarkdownDescription(context.Context) string {
 
 // ValidateList implements validator.List.
 func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
 	var data []TemplateVersion
 	resp.Diagnostics.Append(req.ConfigValue.ElementsAs(ctx, &data, false)...)
 	if resp.Diagnostics.HasError() {
