@@ -243,9 +243,7 @@ func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRe
 func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "A Coder template.\n\nLogs from building template versions can be optionally streamed from the provisioner " +
-			"by setting the `TF_LOG` environment variable to `INFO` or higher.\n\n" +
-			"When importing, the ID supplied can be either a template UUID retrieved via the API or `<organization-name>/<template-name>`.",
-
+			"by setting the `TF_LOG` environment variable to `INFO` or higher.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the template.",

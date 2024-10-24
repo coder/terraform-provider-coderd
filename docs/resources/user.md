@@ -4,14 +4,11 @@ page_title: "coderd_user Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
   A user on the Coder deployment.
-  When importing, the ID supplied can be either a user UUID or a username.
 ---
 
 # coderd_user (Resource)
 
 A user on the Coder deployment.
-
-When importing, the ID supplied can be either a user UUID or a username.
 
 ## Example Usage
 
@@ -65,3 +62,21 @@ resource "coderd_user" "admin" {
 ### Read-Only
 
 - `id` (String) User ID
+
+## Import
+
+Import is supported using the following syntax:
+
+```shell
+# The ID supplied can be either a user UUID retrieved via the API
+# or a username.
+$ terraform import coderd_user.example developer
+```
+Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
+
+```terraform
+import {
+  to = coderd_user.example
+  id = "developer"
+}
+```

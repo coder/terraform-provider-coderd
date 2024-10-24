@@ -62,8 +62,7 @@ func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataReque
 func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "A group on the Coder deployment.\n\n" +
-			"Creating groups requires an Enterprise license.\n\n" +
-			"When importing, the ID supplied can be either a group UUID retrieved via the API or `<organization-name>/<group-name>`.",
+			"Creating groups requires an Enterprise license.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

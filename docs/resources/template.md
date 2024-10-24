@@ -5,7 +5,6 @@ subcategory: ""
 description: |-
   A Coder template.
   Logs from building template versions can be optionally streamed from the provisioner by setting the TF_LOG environment variable to INFO or higher.
-  When importing, the ID supplied can be either a template UUID retrieved via the API or <organization-name>/<template-name>.
 ---
 
 # coderd_template (Resource)
@@ -13,8 +12,6 @@ description: |-
 A Coder template.
 
 Logs from building template versions can be optionally streamed from the provisioner by setting the `TF_LOG` environment variable to `INFO` or higher.
-
-When importing, the ID supplied can be either a template UUID retrieved via the API or `<organization-name>/<template-name>`.
 
 ## Example Usage
 
@@ -164,3 +161,25 @@ Optional:
 
 - `days_of_week` (Set of String) List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.
 - `weeks` (Number) Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.
+
+## Import
+
+Import is supported using the following syntax:
+
+```shell
+# The ID supplied can be either a template UUID retrieved via the API
+# or a fully qualified name: `<organization-name>/<template-name>`.
+$ terraform import coderd_template.example coder/dogfood
+```
+Once imported, you'll need to manually declare in your config:
+- The `versions` list, in order to specify the source directories for new versions of the template.
+- (Enterprise) The `acl` attribute, in order to specify the users and groups that have access to the template.
+
+Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
+
+```terraform
+import {
+  to = coderd_template.example
+  id = "coder/dogfood"
+}
+```

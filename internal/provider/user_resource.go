@@ -56,8 +56,7 @@ func (r *UserResource) Metadata(ctx context.Context, req resource.MetadataReques
 
 func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A user on the Coder deployment.\n\n" +
-			"When importing, the ID supplied can be either a user UUID or a username.",
+		MarkdownDescription: "A user on the Coder deployment.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
