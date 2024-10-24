@@ -5,7 +5,6 @@ subcategory: ""
 description: |-
   A group on the Coder deployment.
   Creating groups requires an Enterprise license.
-  When importing, the ID supplied can be either a group UUID retrieved via the API or <organization-name>/<group-name>.
 ---
 
 # coderd_group (Resource)
@@ -13,8 +12,6 @@ description: |-
 A group on the Coder deployment.
 
 Creating groups requires an Enterprise license.
-
-When importing, the ID supplied can be either a group UUID retrieved via the API or `<organization-name>/<group-name>`.
 
 ## Example Usage
 
@@ -62,3 +59,21 @@ resource "coderd_group" "group1" {
 ### Read-Only
 
 - `id` (String) Group ID.
+
+## Import
+
+Import is supported using the following syntax:
+
+```shell
+# The ID supplied can be either a group UUID retrieved via the API
+# or a fully qualified name: `<organization-name>/<group-name>`.
+$ terraform import coderd_group.example coder/developers
+```
+Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
+
+```terraform
+import {
+  to = coderd_group.example
+  id = "coder/developers"
+}
+```
