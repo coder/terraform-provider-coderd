@@ -896,9 +896,27 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 		return
 	}
 
+	// Check all versions have unique names
+	uniqueNames := make(map[string]struct{})
+	for _, version := range data {
+		if version.Name.IsNull() || version.Name.IsUnknown() {
+			continue
+		}
+		if _, ok := uniqueNames[version.Name.ValueString()]; ok {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Template version names must be unique. `%s` appears twice.", version.Name.ValueString()))
+			return
+		}
+		uniqueNames[version.Name.ValueString()] = struct{}{}
+	}
+
 	// Check if only one item in Version has active set to true
 	active := false
 	for _, version := range data {
+		// `active` is required, so if it's null or unknown, this is Terraform
+		// requesting an early validation.
+		if version.Active.IsNull() || version.Active.IsUnknown() {
+			return
+		}
 		if version.Active.ValueBool() {
 			if active {
 				resp.Diagnostics.AddError("Client Error", "Only one template version can be active at a time.")
@@ -909,19 +927,6 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 	}
 	if !active {
 		resp.Diagnostics.AddError("Client Error", "At least one template version must be active.")
-	}
-
-	// Check all versions have unique names
-	uniqueNames := make(map[string]struct{})
-	for _, version := range data {
-		if version.Name.IsNull() {
-			continue
-		}
-		if _, ok := uniqueNames[version.Name.ValueString()]; ok {
-			resp.Diagnostics.AddError("Client Error", "Template version names must be unique.")
-			return
-		}
-		uniqueNames[version.Name.ValueString()] = struct{}{}
 	}
 }
 

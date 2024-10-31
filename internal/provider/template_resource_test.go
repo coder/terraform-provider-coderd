@@ -648,6 +648,62 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 	})
 }
 
+func TestAccTemplateResourceVariables(t *testing.T) {
+	cfg := `
+provider coderd {
+	url   = "%s"
+	token = "%s"
+}
+
+data "coderd_organization" "default" {
+  is_default = true
+}
+
+variable "PRIOR_GIT_COMMIT_SHA" {
+  default = "abcdef"
+}
+
+variable "CURRENT_GIT_COMMIT_SHA" {
+  default = "ghijkl"
+}
+
+variable "ACTIVE" {
+  default = true
+}
+
+resource "coderd_template" "sample" {
+  name                  = "example-template"
+  versions = [
+    {
+      name = "${var.PRIOR_GIT_COMMIT_SHA}"
+      directory = "../../integration/template-test/example-template"
+      active    = var.ACTIVE
+    },
+    {
+      name = "${var.CURRENT_GIT_COMMIT_SHA}"
+      directory = "../../integration/template-test/example-template"
+      active    = false
+    }
+  ]
+}`
+
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", false)
+
+	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+			},
+		},
+	})
+}
+
 type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string
