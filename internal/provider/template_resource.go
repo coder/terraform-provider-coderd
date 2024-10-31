@@ -38,6 +38,7 @@ import (
 var _ resource.Resource = &TemplateResource{}
 var _ resource.ResourceWithImportState = &TemplateResource{}
 var _ resource.ResourceWithConfigValidators = &TemplateResource{}
+var _ resource.ResourceWithUpgradeState = &TemplateResource{}
 
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
@@ -148,14 +149,14 @@ func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features 
 }
 
 type TemplateVersion struct {
-	ID                 UUID         `tfsdk:"id"`
-	Name               types.String `tfsdk:"name"`
-	Message            types.String `tfsdk:"message"`
-	Directory          types.String `tfsdk:"directory"`
-	DirectoryHash      types.String `tfsdk:"directory_hash"`
-	Active             types.Bool   `tfsdk:"active"`
-	TerraformVariables []Variable   `tfsdk:"tf_vars"`
-	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
+	ID                 UUID              `tfsdk:"id"`
+	Name               types.String      `tfsdk:"name"`
+	Message            types.String      `tfsdk:"message"`
+	Directory          types.String      `tfsdk:"directory"`
+	DirectoryHash      types.String      `tfsdk:"directory_hash"`
+	Active             types.Bool        `tfsdk:"active"`
+	TerraformVariables map[string]string `tfsdk:"tf_vars"`
+	ProvisionerTags    map[string]string `tfsdk:"provisioner_tags"`
 }
 
 type Versions []TemplateVersion
@@ -167,11 +168,6 @@ func (v Versions) ByID(id UUID) *TemplateVersion {
 		}
 	}
 	return nil
-}
-
-type Variable struct {
-	Name  types.String `tfsdk:"name"`
-	Value types.String `tfsdk:"value"`
 }
 
 var variableNestedObject = schema.NestedAttributeObject{
@@ -241,223 +237,7 @@ func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRe
 }
 
 func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		MarkdownDescription: "A Coder template.\n\nLogs from building template versions can be optionally streamed from the provisioner " +
-			"by setting the `TF_LOG` environment variable to `INFO` or higher.",
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				MarkdownDescription: "The ID of the template.",
-				CustomType:          UUIDType,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"name": schema.StringAttribute{
-				MarkdownDescription: "The name of the template.",
-				Required:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 32),
-					stringvalidator.RegexMatches(nameValidRegex, "Template names must be alphanumeric with hyphens."),
-				},
-			},
-			"display_name": schema.StringAttribute{
-				MarkdownDescription: "The display name of the template. Defaults to the template name.",
-				Optional:            true,
-				Computed:            true,
-				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 64),
-					stringvalidator.RegexMatches(displayNameRegex, "Template display names must be alphanumeric with spaces."),
-				},
-			},
-			"description": schema.StringAttribute{
-				MarkdownDescription: "A description of the template.",
-				Computed:            true,
-				Optional:            true,
-				Default:             stringdefault.StaticString(""),
-			},
-			"organization_id": schema.StringAttribute{
-				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
-				CustomType:          UUIDType,
-				Optional:            true,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIfConfigured(),
-				},
-			},
-			"icon": schema.StringAttribute{
-				MarkdownDescription: "Relative path or external URL that specifes an icon to be displayed in the dashboard.",
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString(""),
-			},
-			"default_ttl_ms": schema.Int64Attribute{
-				MarkdownDescription: "The default time-to-live for all workspaces created from this template, in milliseconds.",
-				Optional:            true,
-				Computed:            true,
-				Default:             int64default.StaticInt64(0),
-			},
-			"activity_bump_ms": schema.Int64Attribute{
-				MarkdownDescription: "The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.",
-				Optional:            true,
-				Computed:            true,
-				Default:             int64default.StaticInt64(3600000),
-			},
-			"auto_stop_requirement": schema.SingleNestedAttribute{
-				MarkdownDescription: "(Enterprise) The auto-stop requirement for all workspaces created from this template.",
-				Optional:            true,
-				Computed:            true,
-				Attributes: map[string]schema.Attribute{
-					"days_of_week": schema.SetAttribute{
-						MarkdownDescription: "List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.",
-						Optional:            true,
-						Computed:            true,
-						ElementType:         types.StringType,
-						Validators:          []validator.Set{weekValidator},
-						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
-					},
-					"weeks": schema.Int64Attribute{
-						MarkdownDescription: "Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.",
-						Optional:            true,
-						Computed:            true,
-						Default:             int64default.StaticInt64(1),
-					},
-				},
-				Default: objectdefault.StaticValue(types.ObjectValueMust(autostopRequirementTypeAttr, map[string]attr.Value{
-					"days_of_week": types.SetValueMust(types.StringType, []attr.Value{}),
-					"weeks":        types.Int64Value(1),
-				})),
-			},
-			"auto_start_permitted_days_of_week": schema.SetAttribute{
-				MarkdownDescription: "(Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.",
-				Optional:            true,
-				Computed:            true,
-				ElementType:         types.StringType,
-				Validators:          []validator.Set{weekValidator},
-				Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{types.StringValue("monday"), types.StringValue("tuesday"), types.StringValue("wednesday"), types.StringValue("thursday"), types.StringValue("friday"), types.StringValue("saturday"), types.StringValue("sunday")})),
-			},
-			"allow_user_cancel_workspace_jobs": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can cancel in-progress workspace jobs using this template. Defaults to true.",
-				Optional:            true,
-				Computed:            true,
-				Default:             booldefault.StaticBool(true),
-			},
-			"allow_user_auto_start": schema.BoolAttribute{
-				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
-				Optional:            true,
-				Computed:            true,
-				Default:             booldefault.StaticBool(true),
-			},
-			"allow_user_auto_stop": schema.BoolAttribute{
-				MarkdownDescription: "(Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.",
-				Optional:            true,
-				Computed:            true,
-				Default:             booldefault.StaticBool(true),
-			},
-			"failure_ttl_ms": schema.Int64Attribute{
-				MarkdownDescription: "(Enterprise) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
-				Optional:            true,
-				Computed:            true,
-				Default:             int64default.StaticInt64(0),
-			},
-			"time_til_dormant_ms": schema.Int64Attribute{
-				MarkdownDescription: "(Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
-				Optional:            true,
-				Computed:            true,
-				Default:             int64default.StaticInt64(0),
-			},
-			"time_til_dormant_autodelete_ms": schema.Int64Attribute{
-				MarkdownDescription: "(Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
-				Optional:            true,
-				Computed:            true,
-				Default:             int64default.StaticInt64(0),
-			},
-			"require_active_version": schema.BoolAttribute{
-				MarkdownDescription: "(Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.",
-				Optional:            true,
-				Computed:            true,
-				Default:             booldefault.StaticBool(false),
-			},
-			"max_port_share_level": schema.StringAttribute{
-				MarkdownDescription: "(Enterprise) The maximum port share level for workspaces created from this template. Defaults to `owner` on an Enterprise deployment, or `public` otherwise.",
-				Optional:            true,
-				Computed:            true,
-				Validators: []validator.String{
-					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
-				},
-			},
-			"deprecation_message": schema.StringAttribute{
-				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString(""),
-			},
-			"acl": schema.SingleNestedAttribute{
-				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
-				Optional:            true,
-				Attributes: map[string]schema.Attribute{
-					"users":  permissionAttribute,
-					"groups": permissionAttribute,
-				},
-			},
-			"versions": schema.ListNestedAttribute{
-				Required: true,
-				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
-					NewActiveVersionValidator(),
-				},
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							CustomType: UUIDType,
-							Computed:   true,
-						},
-						"name": schema.StringAttribute{
-							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.",
-							Optional:            true,
-							Computed:            true,
-							Validators: []validator.String{
-								stringvalidator.LengthBetween(1, 64),
-								stringvalidator.RegexMatches(templateVersionNameRegex, "Template version names must be alphanumeric with underscores and dots."),
-							},
-						},
-						"message": schema.StringAttribute{
-							MarkdownDescription: "A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.",
-							Optional:            true,
-							Computed:            true,
-							Default:             stringdefault.StaticString(""),
-						},
-						"directory": schema.StringAttribute{
-							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version.",
-							Required:            true,
-						},
-						"directory_hash": schema.StringAttribute{
-							Computed: true,
-						},
-						"active": schema.BoolAttribute{
-							MarkdownDescription: "Whether this version is the active version of the template. Only one version can be active at a time.",
-							Computed:            true,
-							Optional:            true,
-							Default:             booldefault.StaticBool(false),
-						},
-						"tf_vars": schema.SetNestedAttribute{
-							MarkdownDescription: "Terraform variables for the template version.",
-							Optional:            true,
-							NestedObject:        variableNestedObject,
-						},
-						"provisioner_tags": schema.SetNestedAttribute{
-							MarkdownDescription: "Provisioner tags for the template version.",
-							Optional:            true,
-							NestedObject:        variableNestedObject,
-						},
-					},
-				},
-				PlanModifiers: []planmodifier.List{
-					NewVersionsPlanModifier(),
-				},
-			},
-		},
-	}
+	resp.Schema = templateSchemaV1()
 }
 
 func (r *TemplateResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -1081,15 +861,11 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
 	})
-	for _, variable := range req.Version.TerraformVariables {
+	for name, value := range req.Version.TerraformVariables {
 		vars = append(vars, codersdk.VariableValue{
-			Name:  variable.Name.ValueString(),
-			Value: variable.Value.ValueString(),
+			Name:  name,
+			Value: value,
 		})
-	}
-	provTags := make(map[string]string, len(req.Version.ProvisionerTags))
-	for _, provisionerTag := range req.Version.ProvisionerTags {
-		provTags[provisionerTag.Name.ValueString()] = provisionerTag.Value.ValueString()
 	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
 		Name:               req.Version.Name.ValueString(),
@@ -1098,7 +874,7 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 		Provisioner:        codersdk.ProvisionerTypeTerraform,
 		FileID:             uploadResp.ID,
 		UserVariableValues: vars,
-		ProvisionerTags:    provTags,
+		ProvisionerTags:    req.Version.ProvisionerTags,
 	}
 	if req.TemplateID != nil {
 		tmplVerReq.TemplateID = *req.TemplateID
@@ -1322,8 +1098,8 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	for _, version := range v {
 		vbh, ok := lv[version.DirectoryHash.ValueString()]
 		tfVars := make(map[string]string, len(version.TerraformVariables))
-		for _, tfVar := range version.TerraformVariables {
-			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
+		for name, value := range version.TerraformVariables {
+			tfVars[name] = value
 		}
 		// Store the IDs and names of all versions with the same directory hash,
 		// in the order they appear
@@ -1431,8 +1207,8 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 			if prev.TFVars == nil {
 				return true
 			}
-			for _, tfVar := range planned.TerraformVariables {
-				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
+			for name, value := range planned.TerraformVariables {
+				if prev.TFVars[name] != value {
 					return true
 				}
 			}
@@ -1453,4 +1229,575 @@ func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
 		b.WriteString(log.Output + "\n")
 	}
 	return b.String()
+}
+
+func (r *TemplateResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
+	schemaV0 := templateSchemaV0()
+	return map[int64]resource.StateUpgrader{
+		0: {
+			PriorSchema:   &schemaV0,
+			StateUpgrader: upgradePasswordStateV0toV1,
+		},
+	}
+}
+
+// upgradePasswordStateV0toV1 upgrades the state from version 0 to version 1.
+// tf_vars: ListNestedAttribute{ Name: String, Value: String } -> MapAttribute{ Element: String }.
+// provisioner_tags: ListNestedAttribute{ Name: String, Value: String } -> MapAttribute{ Element: String }.
+func upgradePasswordStateV0toV1(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	type variableModelV0 struct {
+		Name  types.String `tfsdk:"name"`
+		Value types.String `tfsdk:"value"`
+	}
+	type versionModelV0 struct {
+		ID                 UUID              `tfsdk:"id"`
+		Name               types.String      `tfsdk:"name"`
+		Message            types.String      `tfsdk:"message"`
+		Directory          types.String      `tfsdk:"directory"`
+		DirectoryHash      types.String      `tfsdk:"directory_hash"`
+		Active             types.Bool        `tfsdk:"active"`
+		TerraformVariables []variableModelV0 `tfsdk:"tf_vars"`
+		ProvisionerTags    []variableModelV0 `tfsdk:"provisioner_tags"`
+	}
+	type templateModelV0 struct {
+		ID                             UUID             `tfsdk:"id"`
+		Name                           types.String     `tfsdk:"name"`
+		DisplayName                    types.String     `tfsdk:"display_name"`
+		Description                    types.String     `tfsdk:"description"`
+		OrganizationID                 UUID             `tfsdk:"organization_id"`
+		Icon                           types.String     `tfsdk:"icon"`
+		DefaultTTLMillis               types.Int64      `tfsdk:"default_ttl_ms"`
+		ActivityBumpMillis             types.Int64      `tfsdk:"activity_bump_ms"`
+		AutostopRequirement            types.Object     `tfsdk:"auto_stop_requirement"`
+		AutostartPermittedDaysOfWeek   types.Set        `tfsdk:"auto_start_permitted_days_of_week"`
+		AllowUserCancelWorkspaceJobs   types.Bool       `tfsdk:"allow_user_cancel_workspace_jobs"`
+		AllowUserAutostart             types.Bool       `tfsdk:"allow_user_auto_start"`
+		AllowUserAutostop              types.Bool       `tfsdk:"allow_user_auto_stop"`
+		FailureTTLMillis               types.Int64      `tfsdk:"failure_ttl_ms"`
+		TimeTilDormantMillis           types.Int64      `tfsdk:"time_til_dormant_ms"`
+		TimeTilDormantAutoDeleteMillis types.Int64      `tfsdk:"time_til_dormant_autodelete_ms"`
+		RequireActiveVersion           types.Bool       `tfsdk:"require_active_version"`
+		DeprecationMessage             types.String     `tfsdk:"deprecation_message"`
+		MaxPortShareLevel              types.String     `tfsdk:"max_port_share_level"`
+		ACL                            types.Object     `tfsdk:"acl"`
+		Versions                       []versionModelV0 `tfsdk:"versions"`
+	}
+
+	var dataV0 templateModelV0
+
+	resp.Diagnostics.Append(req.State.Get(ctx, &dataV0)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	versionsV1 := make([]TemplateVersion, 0, len(dataV0.Versions))
+	for _, versionV0 := range dataV0.Versions {
+		var tfVars map[string]string
+		if versionV0.TerraformVariables == nil {
+			tfVars = nil
+		} else {
+			tfVars = make(map[string]string, len(versionV0.TerraformVariables))
+			for _, v := range versionV0.TerraformVariables {
+				if v.Name.ValueString() == "" {
+					continue
+				}
+				tfVars[v.Name.ValueString()] = v.Value.ValueString()
+			}
+		}
+		var provTags map[string]string
+		if versionV0.ProvisionerTags == nil {
+			provTags = nil
+		} else {
+			provTags = make(map[string]string, len(versionV0.ProvisionerTags))
+			for _, v := range versionV0.ProvisionerTags {
+				if v.Name.ValueString() == "" {
+					continue
+				}
+				provTags[v.Name.ValueString()] = v.Value.ValueString()
+			}
+		}
+		if tfVars == nil {
+			resp.Diagnostics.AddWarning("tfvars is nil", "")
+		}
+		if provTags == nil {
+			resp.Diagnostics.AddWarning("provTags is nil", "")
+		}
+		versionsV1 = append(versionsV1, TemplateVersion{
+			ID:                 versionV0.ID,
+			Name:               versionV0.Name,
+			Message:            versionV0.Message,
+			Directory:          versionV0.Directory,
+			DirectoryHash:      versionV0.DirectoryHash,
+			Active:             versionV0.Active,
+			TerraformVariables: tfVars,
+			ProvisionerTags:    provTags,
+		})
+	}
+
+	dataV1 := TemplateResourceModel{
+		ID:                             dataV0.ID,
+		Name:                           dataV0.Name,
+		DisplayName:                    dataV0.DisplayName,
+		Description:                    dataV0.Description,
+		OrganizationID:                 dataV0.OrganizationID,
+		Icon:                           dataV0.Icon,
+		DefaultTTLMillis:               dataV0.DefaultTTLMillis,
+		ActivityBumpMillis:             dataV0.ActivityBumpMillis,
+		AutostopRequirement:            dataV0.AutostopRequirement,
+		AutostartPermittedDaysOfWeek:   dataV0.AutostartPermittedDaysOfWeek,
+		AllowUserCancelWorkspaceJobs:   dataV0.AllowUserCancelWorkspaceJobs,
+		AllowUserAutostart:             dataV0.AllowUserAutostart,
+		AllowUserAutostop:              dataV0.AllowUserAutostop,
+		FailureTTLMillis:               dataV0.FailureTTLMillis,
+		TimeTilDormantMillis:           dataV0.TimeTilDormantMillis,
+		TimeTilDormantAutoDeleteMillis: dataV0.TimeTilDormantAutoDeleteMillis,
+		RequireActiveVersion:           dataV0.RequireActiveVersion,
+		DeprecationMessage:             dataV0.DeprecationMessage,
+		MaxPortShareLevel:              dataV0.MaxPortShareLevel,
+		ACL:                            dataV0.ACL,
+		Versions:                       versionsV1,
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, dataV1)...)
+}
+
+func templateSchemaV1() schema.Schema {
+	return schema.Schema{
+		MarkdownDescription: "A Coder template.\n\nLogs from building template versions can be optionally streamed from the provisioner " +
+			"by setting the `TF_LOG` environment variable to `INFO` or higher.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the template.",
+				CustomType:          UUIDType,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"name": schema.StringAttribute{
+				MarkdownDescription: "The name of the template.",
+				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 32),
+					stringvalidator.RegexMatches(nameValidRegex, "Template names must be alphanumeric with hyphens."),
+				},
+			},
+			"display_name": schema.StringAttribute{
+				MarkdownDescription: "The display name of the template. Defaults to the template name.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 64),
+					stringvalidator.RegexMatches(displayNameRegex, "Template display names must be alphanumeric with spaces."),
+				},
+			},
+			"description": schema.StringAttribute{
+				MarkdownDescription: "A description of the template.",
+				Computed:            true,
+				Optional:            true,
+				Default:             stringdefault.StaticString(""),
+			},
+			"organization_id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
+				CustomType:          UUIDType,
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
+			},
+			"icon": schema.StringAttribute{
+				MarkdownDescription: "Relative path or external URL that specifes an icon to be displayed in the dashboard.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(""),
+			},
+			"default_ttl_ms": schema.Int64Attribute{
+				MarkdownDescription: "The default time-to-live for all workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"activity_bump_ms": schema.Int64Attribute{
+				MarkdownDescription: "The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(3600000),
+			},
+			"auto_stop_requirement": schema.SingleNestedAttribute{
+				MarkdownDescription: "(Enterprise) The auto-stop requirement for all workspaces created from this template.",
+				Optional:            true,
+				Computed:            true,
+				Attributes: map[string]schema.Attribute{
+					"days_of_week": schema.SetAttribute{
+						MarkdownDescription: "List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.",
+						Optional:            true,
+						Computed:            true,
+						ElementType:         types.StringType,
+						Validators:          []validator.Set{weekValidator},
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+					},
+					"weeks": schema.Int64Attribute{
+						MarkdownDescription: "Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.",
+						Optional:            true,
+						Computed:            true,
+						Default:             int64default.StaticInt64(1),
+					},
+				},
+				Default: objectdefault.StaticValue(types.ObjectValueMust(autostopRequirementTypeAttr, map[string]attr.Value{
+					"days_of_week": types.SetValueMust(types.StringType, []attr.Value{}),
+					"weeks":        types.Int64Value(1),
+				})),
+			},
+			"auto_start_permitted_days_of_week": schema.SetAttribute{
+				MarkdownDescription: "(Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.",
+				Optional:            true,
+				Computed:            true,
+				ElementType:         types.StringType,
+				Validators:          []validator.Set{weekValidator},
+				Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{types.StringValue("monday"), types.StringValue("tuesday"), types.StringValue("wednesday"), types.StringValue("thursday"), types.StringValue("friday"), types.StringValue("saturday"), types.StringValue("sunday")})),
+			},
+			"allow_user_cancel_workspace_jobs": schema.BoolAttribute{
+				MarkdownDescription: "Whether users can cancel in-progress workspace jobs using this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"allow_user_auto_start": schema.BoolAttribute{
+				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"allow_user_auto_stop": schema.BoolAttribute{
+				MarkdownDescription: "(Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"failure_ttl_ms": schema.Int64Attribute{
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"time_til_dormant_ms": schema.Int64Attribute{
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"time_til_dormant_autodelete_ms": schema.Int64Attribute{
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"require_active_version": schema.BoolAttribute{
+				MarkdownDescription: "(Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+			},
+			"max_port_share_level": schema.StringAttribute{
+				MarkdownDescription: "(Enterprise) The maximum port share level for workspaces created from this template. Defaults to `owner` on an Enterprise deployment, or `public` otherwise.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
+				},
+			},
+			"deprecation_message": schema.StringAttribute{
+				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(""),
+			},
+			"acl": schema.SingleNestedAttribute{
+				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
+				Optional:            true,
+				Attributes: map[string]schema.Attribute{
+					"users":  permissionAttribute,
+					"groups": permissionAttribute,
+				},
+			},
+			"versions": schema.ListNestedAttribute{
+				Required: true,
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					NewActiveVersionValidator(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							CustomType: UUIDType,
+							Computed:   true,
+						},
+						"name": schema.StringAttribute{
+							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.",
+							Optional:            true,
+							Computed:            true,
+							Validators: []validator.String{
+								stringvalidator.LengthBetween(1, 64),
+								stringvalidator.RegexMatches(templateVersionNameRegex, "Template version names must be alphanumeric with underscores and dots."),
+							},
+						},
+						"message": schema.StringAttribute{
+							MarkdownDescription: "A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.",
+							Optional:            true,
+							Computed:            true,
+							Default:             stringdefault.StaticString(""),
+						},
+						"directory": schema.StringAttribute{
+							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version.",
+							Required:            true,
+						},
+						"directory_hash": schema.StringAttribute{
+							Computed: true,
+						},
+						"active": schema.BoolAttribute{
+							MarkdownDescription: "Whether this version is the active version of the template. Only one version can be active at a time.",
+							Computed:            true,
+							Optional:            true,
+							Default:             booldefault.StaticBool(false),
+						},
+						"tf_vars": schema.MapAttribute{
+							MarkdownDescription: "Terraform variables for the template version.",
+							Optional:            true,
+							ElementType:         types.StringType,
+						},
+						"provisioner_tags": schema.MapAttribute{
+							MarkdownDescription: "Provisioner tags for the template version.",
+							Optional:            true,
+							ElementType:         types.StringType,
+						},
+					},
+				},
+				PlanModifiers: []planmodifier.List{
+					NewVersionsPlanModifier(),
+				},
+			},
+		},
+		Version: 1,
+	}
+}
+
+func templateSchemaV0() schema.Schema {
+	return schema.Schema{
+		MarkdownDescription: "A Coder template.\n\nLogs from building template versions can be optionally streamed from the provisioner " +
+			"by setting the `TF_LOG` environment variable to `INFO` or higher.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the template.",
+				CustomType:          UUIDType,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"name": schema.StringAttribute{
+				MarkdownDescription: "The name of the template.",
+				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 32),
+					stringvalidator.RegexMatches(nameValidRegex, "Template names must be alphanumeric with hyphens."),
+				},
+			},
+			"display_name": schema.StringAttribute{
+				MarkdownDescription: "The display name of the template. Defaults to the template name.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 64),
+					stringvalidator.RegexMatches(displayNameRegex, "Template display names must be alphanumeric with spaces."),
+				},
+			},
+			"description": schema.StringAttribute{
+				MarkdownDescription: "A description of the template.",
+				Computed:            true,
+				Optional:            true,
+				Default:             stringdefault.StaticString(""),
+			},
+			"organization_id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
+				CustomType:          UUIDType,
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
+			},
+			"icon": schema.StringAttribute{
+				MarkdownDescription: "Relative path or external URL that specifes an icon to be displayed in the dashboard.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(""),
+			},
+			"default_ttl_ms": schema.Int64Attribute{
+				MarkdownDescription: "The default time-to-live for all workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"activity_bump_ms": schema.Int64Attribute{
+				MarkdownDescription: "The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(3600000),
+			},
+			"auto_stop_requirement": schema.SingleNestedAttribute{
+				MarkdownDescription: "(Enterprise) The auto-stop requirement for all workspaces created from this template.",
+				Optional:            true,
+				Computed:            true,
+				Attributes: map[string]schema.Attribute{
+					"days_of_week": schema.SetAttribute{
+						MarkdownDescription: "List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.",
+						Optional:            true,
+						Computed:            true,
+						ElementType:         types.StringType,
+						Validators:          []validator.Set{weekValidator},
+						Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
+					},
+					"weeks": schema.Int64Attribute{
+						MarkdownDescription: "Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.",
+						Optional:            true,
+						Computed:            true,
+						Default:             int64default.StaticInt64(1),
+					},
+				},
+				Default: objectdefault.StaticValue(types.ObjectValueMust(autostopRequirementTypeAttr, map[string]attr.Value{
+					"days_of_week": types.SetValueMust(types.StringType, []attr.Value{}),
+					"weeks":        types.Int64Value(1),
+				})),
+			},
+			"auto_start_permitted_days_of_week": schema.SetAttribute{
+				MarkdownDescription: "(Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.",
+				Optional:            true,
+				Computed:            true,
+				ElementType:         types.StringType,
+				Validators:          []validator.Set{weekValidator},
+				Default:             setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{types.StringValue("monday"), types.StringValue("tuesday"), types.StringValue("wednesday"), types.StringValue("thursday"), types.StringValue("friday"), types.StringValue("saturday"), types.StringValue("sunday")})),
+			},
+			"allow_user_cancel_workspace_jobs": schema.BoolAttribute{
+				MarkdownDescription: "Whether users can cancel in-progress workspace jobs using this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"allow_user_auto_start": schema.BoolAttribute{
+				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"allow_user_auto_stop": schema.BoolAttribute{
+				MarkdownDescription: "(Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+			},
+			"failure_ttl_ms": schema.Int64Attribute{
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"time_til_dormant_ms": schema.Int64Attribute{
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"time_til_dormant_autodelete_ms": schema.Int64Attribute{
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+			},
+			"require_active_version": schema.BoolAttribute{
+				MarkdownDescription: "(Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+			},
+			"max_port_share_level": schema.StringAttribute{
+				MarkdownDescription: "(Enterprise) The maximum port share level for workspaces created from this template. Defaults to `owner` on an Enterprise deployment, or `public` otherwise.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
+				},
+			},
+			"deprecation_message": schema.StringAttribute{
+				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(""),
+			},
+			"acl": schema.SingleNestedAttribute{
+				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
+				Optional:            true,
+				Attributes: map[string]schema.Attribute{
+					"users":  permissionAttribute,
+					"groups": permissionAttribute,
+				},
+			},
+			"versions": schema.ListNestedAttribute{
+				Required: true,
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					NewActiveVersionValidator(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							CustomType: UUIDType,
+							Computed:   true,
+						},
+						"name": schema.StringAttribute{
+							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.",
+							Optional:            true,
+							Computed:            true,
+							Validators: []validator.String{
+								stringvalidator.LengthBetween(1, 64),
+								stringvalidator.RegexMatches(templateVersionNameRegex, "Template version names must be alphanumeric with underscores and dots."),
+							},
+						},
+						"message": schema.StringAttribute{
+							MarkdownDescription: "A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.",
+							Optional:            true,
+							Computed:            true,
+							Default:             stringdefault.StaticString(""),
+						},
+						"directory": schema.StringAttribute{
+							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version.",
+							Required:            true,
+						},
+						"directory_hash": schema.StringAttribute{
+							Computed: true,
+						},
+						"active": schema.BoolAttribute{
+							MarkdownDescription: "Whether this version is the active version of the template. Only one version can be active at a time.",
+							Computed:            true,
+							Optional:            true,
+							Default:             booldefault.StaticBool(false),
+						},
+						"tf_vars": schema.SetNestedAttribute{
+							MarkdownDescription: "Terraform variables for the template version.",
+							Optional:            true,
+							NestedObject:        variableNestedObject,
+						},
+						"provisioner_tags": schema.SetNestedAttribute{
+							MarkdownDescription: "Provisioner tags for the template version.",
+							Optional:            true,
+							NestedObject:        variableNestedObject,
+						},
+					},
+				},
+				PlanModifiers: []planmodifier.List{
+					NewVersionsPlanModifier(),
+				},
+			},
+		},
+	}
 }

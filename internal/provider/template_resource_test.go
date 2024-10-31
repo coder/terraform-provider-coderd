@@ -13,7 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
@@ -704,6 +707,175 @@ resource "coderd_template" "sample" {
 	})
 }
 
+func TestAccTemplateResource_StateUpgradeV0toV1(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	t.Parallel()
+
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", false)
+
+	exTemplateDir := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateDir)
+	require.NoError(t, err)
+
+	tests := []struct {
+		Name                     string
+		configBeforeUpgrade      string
+		configDuringUpgrade      testAccTemplateResourceConfig
+		beforeUpgradeStateChecks []statecheck.StateCheck
+		afterUpgradeStateChecks  []statecheck.StateCheck
+		beforeStateUpgrade       []resource.TestCheckFunc
+		afterStateUpgrade        []resource.TestCheckFunc
+	}{
+		{
+			Name: "PreserveNull",
+			configBeforeUpgrade: fmt.Sprintf(`
+			provider coderd {
+				url = %q
+				token = %q
+			}
+			resource "coderd_template" "test" {
+				name = "PreserveNull"
+				versions = [
+					{
+						directory = %q
+						active = true
+					}
+				]
+			}
+			`, client.URL.String(), client.SessionToken(), exTemplateDir),
+			configDuringUpgrade: testAccTemplateResourceConfig{
+				URL:   client.URL.String(),
+				Token: client.SessionToken(),
+				Name:  PtrTo("PreserveNull"),
+				ACL: testAccTemplateACLConfig{
+					null: true,
+				},
+				Versions: []testAccTemplateVersionConfig{
+					{
+						Directory: PtrTo(exTemplateDir),
+						Active:    PtrTo(true),
+					},
+				},
+			},
+			beforeUpgradeStateChecks: []statecheck.StateCheck{
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("tf_vars"), knownvalue.Null()),
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("provisioner_tags"), knownvalue.Null()),
+			},
+			afterUpgradeStateChecks: []statecheck.StateCheck{
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("tf_vars"), knownvalue.Null()),
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("provisioner_tags"), knownvalue.Null()),
+			},
+		},
+		{
+			Name: "BasicMigration",
+			configBeforeUpgrade: fmt.Sprintf(`
+			provider coderd {
+				url = %q
+				token = %q
+			}
+			resource "coderd_template" "test" {
+				name = "BasicMigration"
+				versions = [
+					{
+						directory = %q
+						active = true
+						tf_vars = [
+							{
+								name = "foo"
+								value = "bar"
+							},
+							{
+								name = "baz"
+								value = "qux"
+							},
+						]
+						provisioner_tags = [
+							{
+								name = "foo"
+								value = "bar"
+							},
+						]
+					}
+				]
+			}
+			`, client.URL.String(), client.SessionToken(), exTemplateDir),
+			configDuringUpgrade: testAccTemplateResourceConfig{
+				URL:   client.URL.String(),
+				Token: client.SessionToken(),
+				Name:  PtrTo("BasicMigration"),
+				ACL: testAccTemplateACLConfig{
+					null: true,
+				},
+				Versions: []testAccTemplateVersionConfig{
+					{
+						Directory: PtrTo(exTemplateDir),
+						Active:    PtrTo(true),
+						TerraformVariables: []testAccTemplateKeyValueConfig{
+							{
+								Key:   PtrTo("foo"),
+								Value: PtrTo("bar"),
+							},
+							{
+								Key:   PtrTo("baz"),
+								Value: PtrTo("qux"),
+							},
+						},
+						ProvisionerTags: []testAccTemplateKeyValueConfig{
+							{
+								Key:   PtrTo("foo"),
+								Value: PtrTo("bar"),
+							},
+						},
+					},
+				},
+			},
+			beforeUpgradeStateChecks: []statecheck.StateCheck{
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("tf_vars"), knownvalue.ListSizeExact(2)),
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("provisioner_tags"), knownvalue.ListSizeExact(1)),
+			},
+			afterUpgradeStateChecks: []statecheck.StateCheck{
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("tf_vars"), knownvalue.MapExact(map[string]knownvalue.Check{
+					"foo": knownvalue.StringExact("bar"),
+					"baz": knownvalue.StringExact("qux"),
+				})),
+				statecheck.ExpectKnownValue("coderd_template.test", tfjsonpath.New("versions").AtSliceIndex(0).AtMapKey("provisioner_tags"), knownvalue.MapExact(map[string]knownvalue.Check{
+					"foo": knownvalue.StringExact("bar"),
+				})),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			t.Parallel()
+
+			resource.Test(t, resource.TestCase{
+				IsUnitTest: true,
+				Steps: []resource.TestStep{
+					{
+						// Important: This gets ignored (and the test will fail)
+						// if you have an override in ~/.terraformrc
+						ExternalProviders: map[string]resource.ExternalProvider{"coderd": {
+							VersionConstraint: "0.0.6",
+							Source:            "coder/coderd",
+						}},
+						Config:            tt.configBeforeUpgrade,
+						ConfigStateChecks: tt.beforeUpgradeStateChecks,
+					},
+					{
+						ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+						Config:                   tt.configDuringUpgrade.String(t),
+						ConfigStateChecks:        tt.afterUpgradeStateChecks,
+					},
+				},
+			})
+		})
+	}
+}
+
 type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string
@@ -843,14 +1015,21 @@ resource "coderd_template" "test" {
 		directory = {{orNull .Directory}}
 		active    = {{orNull .Active}}
 
-		tf_vars = [
+		{{- if .TerraformVariables }}
+		tf_vars = {
 			{{- range .TerraformVariables }}
-			{
-				name  = {{orNull .Key}}
-				value = {{orNull .Value}}
-			},
+			{{orNull .Key}} = {{orNull .Value}}
 			{{- end}}
-		]
+		}
+		{{- end}}
+
+		{{- if .ProvisionerTags }}
+		provisioner_tags = {
+			{{- range .ProvisionerTags }}
+			{{orNull .Key}} = {{orNull .Value}}
+			{{- end}}
+		}
+		{{- end}}
 	},
 	{{- end}}
 	]
@@ -877,6 +1056,7 @@ type testAccTemplateVersionConfig struct {
 	Directory          *string
 	Active             *bool
 	TerraformVariables []testAccTemplateKeyValueConfig
+	ProvisionerTags    []testAccTemplateKeyValueConfig
 }
 
 type testAccTemplateKeyValueConfig struct {
@@ -923,13 +1103,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("bar"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -954,13 +1134,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("bar"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(aUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 		},
@@ -971,13 +1151,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("bar"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -1002,13 +1182,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(aUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("bar"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 		},
@@ -1019,13 +1199,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("bar"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -1055,13 +1235,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(aUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("bar"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(bUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 		},
@@ -1072,13 +1252,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringUnknown(),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -1108,13 +1288,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("foo"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(aUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 				{
 					Name:               types.StringValue("baz"),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(bUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 		},
@@ -1125,7 +1305,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringValue("weird_draught12"),
 					DirectoryHash:      types.StringValue("bbb"),
 					ID:                 UUIDValue(aUUID),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -1147,7 +1327,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:               types.StringUnknown(),
 					DirectoryHash:      types.StringValue("bbb"),
 					ID:                 NewUUIDUnknown(),
-					TerraformVariables: []Variable{},
+					TerraformVariables: map[string]string{},
 				},
 			},
 		},
@@ -1158,11 +1338,8 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            UUIDValue(aUUID),
-					TerraformVariables: []Variable{
-						{
-							Name:  types.StringValue("foo"),
-							Value: types.StringValue("bar"),
-						},
+					TerraformVariables: map[string]string{
+						"foo": "bar",
 					},
 				},
 			},
@@ -1187,11 +1364,8 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
-					TerraformVariables: []Variable{
-						{
-							Name:  types.StringValue("foo"),
-							Value: types.StringValue("bar"),
-						},
+					TerraformVariables: map[string]string{
+						"foo": "bar",
 					},
 				},
 			},
@@ -1203,11 +1377,8 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            UUIDValue(aUUID),
-					TerraformVariables: []Variable{
-						{
-							Name:  types.StringValue("foo"),
-							Value: types.StringValue("bar"),
-						},
+					TerraformVariables: map[string]string{
+						"foo": "bar",
 					},
 				},
 			},
@@ -1232,11 +1403,8 @@ func TestReconcileVersionIDs(t *testing.T) {
 					Name:          types.StringValue("foo"),
 					DirectoryHash: types.StringValue("aaa"),
 					ID:            UUIDValue(aUUID),
-					TerraformVariables: []Variable{
-						{
-							Name:  types.StringValue("foo"),
-							Value: types.StringValue("bar"),
-						},
+					TerraformVariables: map[string]string{
+						"foo": "bar",
 					},
 				},
 			},

@@ -38,10 +38,9 @@ resource "coderd_template" "example" {
   versions = [{
     directory = "./example-template"
     active    = true
-    tf_vars = [{
-      name  = "image_id"
-      value = "ami-12345678"
-    }]
+    tf_vars = {
+      "image_id" = "ami-12345678"
+    }
     # Version names can be randomly generated if null/omitted
   }]
   acl = {

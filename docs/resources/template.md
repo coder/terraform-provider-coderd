@@ -100,31 +100,13 @@ Optional:
 - `active` (Boolean) Whether this version is the active version of the template. Only one version can be active at a time.
 - `message` (String) A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.
 - `name` (String) The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.
-- `provisioner_tags` (Attributes Set) Provisioner tags for the template version. (see [below for nested schema](#nestedatt--versions--provisioner_tags))
-- `tf_vars` (Attributes Set) Terraform variables for the template version. (see [below for nested schema](#nestedatt--versions--tf_vars))
+- `provisioner_tags` (Map of String) Provisioner tags for the template version.
+- `tf_vars` (Map of String) Terraform variables for the template version.
 
 Read-Only:
 
 - `directory_hash` (String)
 - `id` (String)
-
-<a id="nestedatt--versions--provisioner_tags"></a>
-### Nested Schema for `versions.provisioner_tags`
-
-Required:
-
-- `name` (String)
-- `value` (String)
-
-
-<a id="nestedatt--versions--tf_vars"></a>
-### Nested Schema for `versions.tf_vars`
-
-Required:
-
-- `name` (String)
-- `value` (String)
-
 
 
 <a id="nestedatt--acl"></a>
