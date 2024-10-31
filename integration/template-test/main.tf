@@ -43,22 +43,16 @@ resource "coderd_template" "sample" {
     {
       directory = "./example-template-2"
       active    = true
-      tf_vars = [
-        {
-          name  = "name"
-          value = "world"
-        },
-      ]
+      tf_vars = {
+        name = "world"
+      }
     },
     {
       directory = "./example-template-2"
       active    = false
-      tf_vars = [
-        {
-          name  = "name"
-          value = "ethan"
-        },
-      ]
+      tf_vars = {
+        name = "ethan"
+      }
     }
   ]
 }
