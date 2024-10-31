@@ -1087,6 +1087,10 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 			Value: variable.Value.ValueString(),
 		})
 	}
+	provTags := make(map[string]string, len(req.Version.ProvisionerTags))
+	for _, provisionerTag := range req.Version.ProvisionerTags {
+		provTags[provisionerTag.Name.ValueString()] = provisionerTag.Value.ValueString()
+	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
 		Name:               req.Version.Name.ValueString(),
 		Message:            req.Version.Message.ValueString(),
@@ -1094,6 +1098,7 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 		Provisioner:        codersdk.ProvisionerTypeTerraform,
 		FileID:             uploadResp.ID,
 		UserVariableValues: vars,
+		ProvisionerTags:    provTags,
 	}
 	if req.TemplateID != nil {
 		tmplVerReq.TemplateID = *req.TemplateID
