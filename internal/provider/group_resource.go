@@ -143,9 +143,8 @@ func (r *GroupResource) Configure(ctx context.Context, req resource.ConfigureReq
 }
 
 func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data GroupResourceModel
-
 	// Read Terraform plan data into the model
+	var data GroupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 
 	if resp.Diagnostics.HasError() {

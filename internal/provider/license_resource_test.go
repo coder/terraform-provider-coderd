@@ -61,7 +61,7 @@ resource "coderd_license" "test" {
 }
 `
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}
