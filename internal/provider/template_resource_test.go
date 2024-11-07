@@ -17,6 +17,7 @@ import (
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 )
@@ -26,7 +27,7 @@ func TestAccTemplateResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "template_acc", true)
+	client := integration.StartCoder(ctx, t, "template_acc", false)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -42,66 +43,43 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("example-template"),
+			Name:  ptr.Ref("example-template"),
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    PtrTo(true),
-					// TODO(ethanndickson): Remove this when we add in `*.tfvars` parsing
-					TerraformVariables: []testAccTemplateKeyValueConfig{
-						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
-						},
-					},
+					Active:    ptr.Ref(true),
 				},
 			},
 			ACL: testAccTemplateACLConfig{
-				GroupACL: []testAccTemplateKeyValueConfig{
-					{
-						Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
-						Value: PtrTo("use"),
-					},
-				},
+				null: true,
 			},
 		}
 
 		cfg2 := cfg1
 		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Name = PtrTo("example-template-new")
-		cfg2.AllowUserAutostart = PtrTo(false)
+		cfg2.Name = ptr.Ref("example-template-new")
 		cfg2.Versions[0].Directory = &exTemplateTwo
-		cfg2.Versions[0].Name = PtrTo("new")
-		cfg2.ACL.UserACL = []testAccTemplateKeyValueConfig{
-			{
-				Key:   PtrTo(firstUser.ID.String()),
-				Value: PtrTo("admin"),
-			},
-		}
-		cfg2.AutostopRequirement = testAccAutostopRequirementConfig{
-			DaysOfWeek: PtrTo([]string{"monday", "tuesday"}),
-			Weeks:      PtrTo(int64(2)),
-		}
+		cfg2.Versions[0].Name = ptr.Ref("new")
 
 		cfg3 := cfg2
 		cfg3.Versions = slices.Clone(cfg3.Versions)
 		cfg3.Versions = append(cfg3.Versions, testAccTemplateVersionConfig{
-			Name:      PtrTo("legacy-template"),
+			Name:      ptr.Ref("legacy-template"),
 			Directory: &exTemplateOne,
-			Active:    PtrTo(false),
+			Active:    ptr.Ref(false),
 			TerraformVariables: []testAccTemplateKeyValueConfig{
 				{
-					Key:   PtrTo("name"),
-					Value: PtrTo("world"),
+					Key:   ptr.Ref("name"),
+					Value: ptr.Ref("world"),
 				},
 			},
 		})
 
 		cfg4 := cfg3
 		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Active = PtrTo(false)
-		cfg4.Versions[1].Active = PtrTo(true)
+		cfg4.Versions[0].Active = ptr.Ref(false)
+		cfg4.Versions[1].Active = ptr.Ref(true)
 
 		cfg5 := cfg4
 		cfg5.Versions = slices.Clone(cfg5.Versions)
@@ -109,9 +87,6 @@ func TestAccTemplateResource(t *testing.T) {
 
 		cfg6 := cfg4
 		cfg6.Versions = slices.Clone(cfg6.Versions[1:])
-
-		cfg7 := cfg6
-		cfg7.ACL.null = true
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -139,6 +114,7 @@ func TestAccTemplateResource(t *testing.T) {
 						resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_ms", "0"),
 						resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_autodelete_ms", "0"),
 						resource.TestCheckResourceAttr("coderd_template.test", "require_active_version", "false"),
+						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 							"name":           regexp.MustCompile(".+"),
 							"id":             regexp.MustCompile(".+"),
@@ -171,7 +147,7 @@ func TestAccTemplateResource(t *testing.T) {
 					},
 					Check: testAccCheckNumTemplateVersions(ctx, client, 3),
 				},
-				// Import
+				// Import by ID
 				{
 					Config:            cfg1.String(t),
 					ResourceName:      "coderd_template.test",
@@ -181,15 +157,20 @@ func TestAccTemplateResource(t *testing.T) {
 					// We can't import ACL as we can't currently differentiate between managed and unmanaged ACL
 					ImportStateVerifyIgnore: []string{"versions", "acl"},
 				},
+				// Import by org name and template name
+				{
+					ResourceName:            "coderd_template.test",
+					ImportState:             true,
+					ImportStateVerify:       true,
+					ImportStateId:           "default/example-template",
+					ImportStateVerifyIgnore: []string{"versions", "acl"},
+				},
 				// Change existing version directory & name, update template metadata. Creates a fourth version.
 				{
 					Config: cfg2.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
 						resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
 						resource.TestCheckResourceAttr("coderd_template.test", "name", "example-template-new"),
-						resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
-						resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
-						resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 							"name": regexp.MustCompile("new"),
 						}),
@@ -251,14 +232,6 @@ func TestAccTemplateResource(t *testing.T) {
 						}),
 					),
 				},
-				// Unmanaged ACL
-				{
-					Config: cfg7.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
-						testAccCheckNumTemplateVersions(ctx, client, 5),
-					),
-				},
 				// Resource deleted
 			},
 		})
@@ -268,49 +241,61 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("example-template2"),
+			Name:  ptr.Ref("example-template2"),
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
-					Directory: PtrTo("../../integration/template-test/example-template-2/"),
+					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
+							Key:   ptr.Ref("name"),
+							Value: ptr.Ref("world"),
 						},
 					},
-					Active: PtrTo(true),
+					Active: ptr.Ref(true),
 				},
 				{
 					// Auto-generated version name
-					Directory: PtrTo("../../integration/template-test/example-template-2/"),
+					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
+							Key:   ptr.Ref("name"),
+							Value: ptr.Ref("world"),
 						},
 					},
 				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
 			},
 		}
 
 		cfg2 := cfg1
 		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[1].Name = PtrTo("new-name")
+		cfg2.Versions[1].Name = ptr.Ref("new-name")
 
 		cfg3 := cfg2
 		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Name = PtrTo("new-name-one")
-		cfg3.Versions[1].Name = PtrTo("new-name-two")
+		cfg3.Versions[0].Name = ptr.Ref("new-name-one")
+		cfg3.Versions[1].Name = ptr.Ref("new-name-two")
 		cfg3.Versions[0], cfg3.Versions[1] = cfg3.Versions[1], cfg3.Versions[0]
 
 		cfg4 := cfg1
 		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Directory = PtrTo("../../integration/template-test/example-template/")
+		cfg4.Versions[0].Directory = ptr.Ref("../../integration/template-test/example-template/")
 
 		cfg5 := cfg4
 		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[1].Directory = PtrTo("../../integration/template-test/example-template/")
+		cfg5.Versions[1].Directory = ptr.Ref("../../integration/template-test/example-template/")
+
+		cfg6 := cfg5
+		cfg6.Versions = slices.Clone(cfg6.Versions)
+		cfg6.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+			{
+				Key:   ptr.Ref("name"),
+				Value: ptr.Ref("world2"),
+			},
+		}
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -369,8 +354,354 @@ func TestAccTemplateResource(t *testing.T) {
 						testAccCheckNumTemplateVersions(ctx, client, 4),
 					),
 				},
+				// Update the Terraform variables of the first version
+				{
+					Config: cfg6.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 5),
+					),
+				},
 			},
 		})
+	})
+
+	t.Run("AutoGenNameUpdateTFVars", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template3"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					// Auto-generated version name
+					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
+					TerraformVariables: []testAccTemplateKeyValueConfig{
+						{
+							Key:   ptr.Ref("name"),
+							Value: ptr.Ref("world"),
+						},
+					},
+					Active: ptr.Ref(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
+			},
+		}
+
+		cfg2 := cfg1
+		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+			{
+				Key:   ptr.Ref("name"),
+				Value: ptr.Ref("world2"),
+			},
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				{
+					Config: cfg2.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+					),
+				},
+			},
+		})
+	})
+}
+
+func TestAccTemplateResourceEnterprise(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", true)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	group, err := client.CreateGroup(ctx, firstUser.OrganizationIDs[0], codersdk.CreateGroupRequest{
+		Name:           "bosses",
+		QuotaAllowance: 200,
+	})
+	require.NoError(t, err)
+
+	cfg1 := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  ptr.Ref("example-template"),
+		Versions: []testAccTemplateVersionConfig{
+			{
+				// Auto-generated version name
+				Directory: ptr.Ref("../../integration/template-test/example-template"),
+				Active:    ptr.Ref(true),
+			},
+		},
+		ACL: testAccTemplateACLConfig{
+			GroupACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
+					Value: ptr.Ref("use"),
+				},
+				{
+					Key:   ptr.Ref(group.ID.String()),
+					Value: ptr.Ref("admin"),
+				},
+			},
+			UserACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   ptr.Ref(firstUser.ID.String()),
+					Value: ptr.Ref("admin"),
+				},
+			},
+		},
+	}
+
+	cfg2 := cfg1
+	cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
+	cfg2.MaxPortShareLevel = ptr.Ref("owner")
+
+	cfg3 := cfg2
+	cfg3.ACL.null = true
+	cfg3.MaxPortShareLevel = ptr.Ref("public")
+
+	cfg4 := cfg3
+	cfg4.AllowUserAutostart = ptr.Ref(false)
+	cfg4.AutostopRequirement = testAccAutostopRequirementConfig{
+		DaysOfWeek: ptr.Ref([]string{"monday", "tuesday"}),
+		Weeks:      ptr.Ref(int64(2)),
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg1.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+					resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "2"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
+						"role": regexp.MustCompile("^use$"),
+					}),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(group.ID.String()),
+						"role": regexp.MustCompile("^admin$"),
+					}),
+					resource.TestCheckResourceAttr("coderd_template.test", "acl.users.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(firstUser.ID.String()),
+						"role": regexp.MustCompile("^admin$"),
+					}),
+				),
+			},
+			{
+				Config: cfg2.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+						"id":   regexp.MustCompile(firstUser.ID.String()),
+						"role": regexp.MustCompile("^admin$"),
+					}),
+				),
+			},
+			{
+				Config: cfg3.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
+					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
+					func(s *terraform.State) error {
+						templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
+						if err != nil {
+							return err
+						}
+						if len(templates) != 1 {
+							return fmt.Errorf("expected 1 template, got %d", len(templates))
+						}
+						acl, err := client.TemplateACL(ctx, templates[0].ID)
+						if err != nil {
+							return err
+						}
+						if len(acl.Groups) != 1 {
+							return fmt.Errorf("expected 1 group ACL, got %d", len(acl.Groups))
+						}
+						if acl.Groups[0].Role != "admin" && acl.Groups[0].ID != group.ID {
+							return fmt.Errorf("expected group ACL to be 'use' for %s, got %s", firstUser.OrganizationIDs[0].String(), acl.Groups[0].Role)
+						}
+						if len(acl.Users) != 1 {
+							return fmt.Errorf("expected 1 user ACL, got %d", len(acl.Users))
+						}
+						if acl.Users[0].Role != "admin" && acl.Users[0].ID != firstUser.ID {
+							return fmt.Errorf("expected user ACL to be 'admin' for %s, got %s", firstUser.ID.String(), acl.Users[0].Role)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: cfg4.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
+					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccTemplateResourceAGPL(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", false)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	cfg1 := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  ptr.Ref("example-template"),
+		Versions: []testAccTemplateVersionConfig{
+			{
+				// Auto-generated version name
+				Directory: ptr.Ref("../../integration/template-test/example-template/"),
+				Active:    ptr.Ref(true),
+			},
+		},
+		AllowUserAutostart: ptr.Ref(false),
+	}
+
+	cfg2 := cfg1
+	cfg2.AllowUserAutostart = nil
+	cfg2.AutostopRequirement.DaysOfWeek = ptr.Ref([]string{"monday", "tuesday"})
+
+	cfg3 := cfg2
+	cfg3.AutostopRequirement.null = true
+	cfg3.AutostartRequirement = ptr.Ref([]string{})
+
+	cfg4 := cfg3
+	cfg4.FailureTTL = ptr.Ref(int64(1))
+
+	cfg5 := cfg4
+	cfg5.FailureTTL = nil
+	cfg5.AutostartRequirement = nil
+	cfg5.RequireActiveVersion = ptr.Ref(true)
+
+	cfg6 := cfg5
+	cfg6.RequireActiveVersion = nil
+	cfg6.ACL = testAccTemplateACLConfig{
+		GroupACL: []testAccTemplateKeyValueConfig{
+			{
+				Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
+				Value: ptr.Ref("use"),
+			},
+		},
+	}
+
+	cfg7 := cfg6
+	cfg7.ACL.null = true
+	cfg7.MaxPortShareLevel = ptr.Ref("owner")
+
+	for _, cfg := range []testAccTemplateResourceConfig{cfg1, cfg2, cfg3, cfg4} {
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg.String(t),
+					ExpectError: regexp.MustCompile("Your license is not entitled to use advanced template scheduling"),
+				},
+			},
+		})
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg5.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use access control"),
+			},
+			{
+				Config:      cfg6.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use template access control"),
+			},
+			{
+				Config:      cfg7.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use port sharing control"),
+			},
+		},
+	})
+}
+
+func TestAccTemplateResourceVariables(t *testing.T) {
+	cfg := `
+provider coderd {
+	url   = "%s"
+	token = "%s"
+}
+
+data "coderd_organization" "default" {
+  is_default = true
+}
+
+variable "PRIOR_GIT_COMMIT_SHA" {
+  default = "abcdef"
+}
+
+variable "CURRENT_GIT_COMMIT_SHA" {
+  default = "ghijkl"
+}
+
+variable "ACTIVE" {
+  default = true
+}
+
+resource "coderd_template" "sample" {
+  name                  = "example-template"
+  versions = [
+    {
+      name = "${var.PRIOR_GIT_COMMIT_SHA}"
+      directory = "../../integration/template-test/example-template"
+      active    = var.ACTIVE
+    },
+    {
+      name = "${var.CURRENT_GIT_COMMIT_SHA}"
+      directory = "../../integration/template-test/example-template"
+      active    = false
+    }
+  ]
+}`
+
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "template_acc", false)
+
+	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken())
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+			},
+		},
 	})
 }
 
@@ -395,6 +726,7 @@ type testAccTemplateResourceConfig struct {
 	TimeTilDormantAutodelete     *int64
 	RequireActiveVersion         *bool
 	DeprecationMessage           *string
+	MaxPortShareLevel            *string
 
 	Versions []testAccTemplateVersionConfig
 	ACL      testAccTemplateACLConfig
@@ -501,6 +833,7 @@ resource "coderd_template" "test" {
 	time_til_dormant_autodelete_ms    = {{orNull .TimeTilDormantAutodelete}}
 	require_active_version            = {{orNull .RequireActiveVersion}}
 	deprecation_message               = {{orNull .DeprecationMessage}}
+	max_port_share_level              = {{orNull .MaxPortShareLevel}}
 
 	acl = ` + c.ACL.String(t) + `
 
@@ -588,14 +921,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "IdenticalDontRename",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -609,21 +944,24 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "bar",
+						ID:     aUUID,
+						Name:   "bar",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -631,14 +969,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "IdenticalRenameFirst",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -652,21 +992,24 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "baz",
+						ID:     aUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -674,14 +1017,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "IdenticalHashesInState",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -695,25 +1040,29 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "qux",
+						ID:     aUUID,
+						Name:   "qux",
+						TFVars: map[string]string{},
 					},
 					{
-						ID:   bUUID,
-						Name: "baz",
+						ID:     bUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("bar"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(bUUID),
+					Name:               types.StringValue("bar"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(bUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -721,14 +1070,16 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "UnknownUsesStateInOrder",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringUnknown(),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            NewUUIDUnknown(),
+					Name:               types.StringUnknown(),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -742,25 +1093,29 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "qux",
+						ID:     aUUID,
+						Name:   "qux",
+						TFVars: map[string]string{},
 					},
 					{
-						ID:   bUUID,
-						Name: "baz",
+						ID:     bUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("foo"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 				{
-					Name:          types.StringValue("baz"),
-					DirectoryHash: types.StringValue("aaa"),
-					ID:            UUIDValue(bUUID),
+					Name:               types.StringValue("baz"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(bUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 		},
@@ -768,9 +1123,10 @@ func TestReconcileVersionIDs(t *testing.T) {
 			Name: "NewVersionNewRandomName",
 			planVersions: []TemplateVersion{
 				{
-					Name:          types.StringValue("weird_draught12"),
-					DirectoryHash: types.StringValue("bbb"),
-					ID:            UUIDValue(aUUID),
+					Name:               types.StringValue("weird_draught12"),
+					DirectoryHash:      types.StringValue("bbb"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
 				},
 			},
 			configVersions: []TemplateVersion{
@@ -781,16 +1137,108 @@ func TestReconcileVersionIDs(t *testing.T) {
 			inputState: map[string][]PreviousTemplateVersion{
 				"aaa": {
 					{
-						ID:   aUUID,
-						Name: "weird_draught12",
+						ID:     aUUID,
+						Name:   "weird_draught12",
+						TFVars: map[string]string{},
 					},
 				},
 			},
 			expectedVersions: []TemplateVersion{
 				{
-					Name:          types.StringUnknown(),
-					DirectoryHash: types.StringValue("bbb"),
+					Name:               types.StringUnknown(),
+					DirectoryHash:      types.StringValue("bbb"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
+		{
+			Name: "IdenticalNewVars",
+			planVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
+					ID:            UUIDValue(aUUID),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:   aUUID,
+						Name: "foo",
+						TFVars: map[string]string{
+							"foo": "foo",
+						},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
 					ID:            NewUUIDUnknown(),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "IdenticalSameVars",
+			planVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
+					ID:            UUIDValue(aUUID),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:   aUUID,
+						Name: "foo",
+						TFVars: map[string]string{
+							"foo": "bar",
+						},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:          types.StringValue("foo"),
+					DirectoryHash: types.StringValue("aaa"),
+					ID:            UUIDValue(aUUID),
+					TerraformVariables: []Variable{
+						{
+							Name:  types.StringValue("foo"),
+							Value: types.StringValue("bar"),
+						},
+					},
 				},
 			},
 		},

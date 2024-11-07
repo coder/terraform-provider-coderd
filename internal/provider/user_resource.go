@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -21,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -69,18 +71,24 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			"username": schema.StringAttribute{
 				MarkdownDescription: "Username of the user.",
 				Required:            true,
+				Validators: []validator.String{
+					codersdkvalidator.Name(),
+				},
 			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: "Display name of the user. Defaults to username.",
 				Computed:            true,
 				Optional:            true,
+				Validators: []validator.String{
+					codersdkvalidator.UserRealName(),
+				},
 			},
 			"email": schema.StringAttribute{
 				MarkdownDescription: "Email address of the user.",
 				Required:            true,
 			},
 			"roles": schema.SetAttribute{
-				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
+				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.",
 				Computed:            true,
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -92,7 +100,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Default: setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 			},
 			"login_type": schema.StringAttribute{
-				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
+				MarkdownDescription: "Type of login for the user. Valid types are `none`, `password`, `github`, and `oidc`.",
 				Computed:            true,
 				Optional:            true,
 				Validators: []validator.String{
@@ -104,7 +112,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				},
 			},
 			"password": schema.StringAttribute{
-				MarkdownDescription: "Password for the user. Required when login_type is 'password'. Passwords are saved into the state as plain text and should only be used for testing purposes.",
+				MarkdownDescription: "Password for the user. Required when `login_type` is `password`. Passwords are saved into the state as plain text and should only be used for testing purposes.",
 				Optional:            true,
 				Sensitive:           true,
 			},
@@ -159,7 +167,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	tflog.Trace(ctx, "creating user")
+	tflog.Info(ctx, "creating user")
 	loginType := codersdk.LoginType(data.LoginType.ValueString())
 	if loginType == codersdk.LoginTypePassword && data.Password.IsNull() {
 		resp.Diagnostics.AddError("Data Error", "Password is required when login_type is 'password'")
@@ -180,12 +188,12 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create user, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully created user", map[string]any{
+	tflog.Info(ctx, "successfully created user", map[string]any{
 		"id": user.ID.String(),
 	})
 	data.ID = UUIDValue(user.ID)
 
-	tflog.Trace(ctx, "updating user profile")
+	tflog.Info(ctx, "updating user profile")
 	name := data.Username
 	if data.Name.ValueString() != "" {
 		name = data.Name
@@ -198,14 +206,14 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user profile, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated user profile")
+	tflog.Info(ctx, "successfully updated user profile")
 	data.Name = types.StringValue(user.Name)
 
 	var roles []string
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Trace(ctx, "updating user roles", map[string]any{
+	tflog.Info(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
 	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
@@ -215,7 +223,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated user roles")
+	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
 		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
@@ -242,6 +250,11 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	user, err := client.User(ctx, data.ID.ValueString())
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with ID %q not found. Marking as deleted.", data.ID.ValueString()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 		return
 	}
@@ -291,7 +304,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if data.Name.ValueString() != "" {
 		name = data.Name
 	}
-	tflog.Trace(ctx, "updating user", map[string]any{
+	tflog.Info(ctx, "updating user", map[string]any{
 		"new_username": data.Username.ValueString(),
 		"new_name":     name.ValueString(),
 	})
@@ -304,13 +317,13 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 	data.Name = name
-	tflog.Trace(ctx, "successfully updated user profile")
+	tflog.Info(ctx, "successfully updated user profile")
 
 	var roles []string
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Trace(ctx, "updating user roles", map[string]any{
+	tflog.Info(ctx, "updating user roles", map[string]any{
 		"new_roles": roles,
 	})
 	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
@@ -320,10 +333,10 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated user roles")
+	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
-		tflog.Trace(ctx, "updating password")
+		tflog.Info(ctx, "updating password")
 		err = client.UpdateUserPassword(ctx, user.ID.String(), codersdk.UpdateUserPasswordRequest{
 			Password: data.Password.ValueString(),
 		})
@@ -331,7 +344,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update password, got error: %s", err))
 			return
 		}
-		tflog.Trace(ctx, "successfully updated password")
+		tflog.Info(ctx, "successfully updated password")
 	}
 
 	var statusErr error
@@ -362,15 +375,27 @@ func (r *UserResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	client := r.data.Client
 
-	tflog.Trace(ctx, "deleting user")
+	tflog.Info(ctx, "deleting user")
 	err := client.DeleteUser(ctx, data.ID.ValueUUID())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete user, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully deleted user")
+	tflog.Info(ctx, "successfully deleted user")
 }
 
+// Req.ID can be either a UUID or a username.
 func (r *UserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	_, err := uuid.Parse(req.ID)
+	if err == nil {
+		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+		return
+	}
+	client := r.data.Client
+	user, err := client.User(ctx, req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or a valid username")
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), user.ID.String())...)
 }

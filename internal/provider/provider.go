@@ -34,6 +34,7 @@ type CoderdProvider struct {
 type CoderdProviderData struct {
 	Client                *codersdk.Client
 	DefaultOrganizationID uuid.UUID
+	Features              map[codersdk.FeatureName]codersdk.Feature
 }
 
 // CoderdProviderModel describes the provider data model.
@@ -51,13 +52,19 @@ func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 
 func (p *CoderdProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		MarkdownDescription: `
+The coderd provider can be used to manage resources on a Coder deployment. The provider exposes resources and data sources for users, groups, templates, and workspace proxies.
+
+~> **Warning**
+This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.10.1) and later.
+`,
 		Attributes: map[string]schema.Attribute{
 			"url": schema.StringAttribute{
-				MarkdownDescription: "URL to the Coder deployment. Defaults to $CODER_URL.",
+				MarkdownDescription: "URL to the Coder deployment. Defaults to `$CODER_URL`.",
 				Optional:            true,
 			},
 			"token": schema.StringAttribute{
-				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to $CODER_SESSION_TOKEN.",
+				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to `$CODER_SESSION_TOKEN`.",
 				Optional:            true,
 			},
 			"default_organization_id": schema.StringAttribute{
@@ -111,9 +118,15 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		}
 		data.DefaultOrganizationID = UUIDValue(user.OrganizationIDs[0])
 	}
+	entitlements, err := client.Entitlements(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", "failed to get deployment entitlements: "+err.Error())
+	}
+
 	providerData := &CoderdProviderData{
 		Client:                client,
 		DefaultOrganizationID: data.DefaultOrganizationID.ValueUUID(),
+		Features:              entitlements.Features,
 	}
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
@@ -125,6 +138,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewGroupResource,
 		NewTemplateResource,
 		NewWorkspaceProxyResource,
+		NewLicenseResource,
 		NewOrganizationResource,
 	}
 }

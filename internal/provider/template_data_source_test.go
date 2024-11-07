@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 )
@@ -28,7 +29,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 	require.NoError(t, err)
 	orgID := firstUser.OrganizationIDs[0]
 
-	version, err := newVersion(ctx, client, newVersionRequest{
+	version, err, _ := newVersion(ctx, client, newVersionRequest{
 		OrganizationID: orgID,
 		Version: &TemplateVersion{
 			Name:      types.StringValue("main"),
@@ -49,8 +50,8 @@ func TestAccTemplateDataSource(t *testing.T) {
 		Description:        "An example template",
 		Icon:               "/path/to/icon.png",
 		VersionID:          version.ID,
-		DefaultTTLMillis:   PtrTo((10 * time.Hour).Milliseconds()),
-		ActivityBumpMillis: PtrTo((4 * time.Hour).Milliseconds()),
+		DefaultTTLMillis:   ptr.Ref((10 * time.Hour).Milliseconds()),
+		ActivityBumpMillis: ptr.Ref((4 * time.Hour).Milliseconds()),
 		AutostopRequirement: &codersdk.TemplateAutostopRequirement{
 			DaysOfWeek: []string{"sunday"},
 			Weeks:      1,
@@ -58,12 +59,12 @@ func TestAccTemplateDataSource(t *testing.T) {
 		AutostartRequirement: &codersdk.TemplateAutostartRequirement{
 			DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
 		},
-		AllowUserCancelWorkspaceJobs:   PtrTo(true),
-		AllowUserAutostart:             PtrTo(true),
-		AllowUserAutostop:              PtrTo(true),
-		FailureTTLMillis:               PtrTo((1 * time.Hour).Milliseconds()),
-		TimeTilDormantMillis:           PtrTo((7 * 24 * time.Hour).Milliseconds()),
-		TimeTilDormantAutoDeleteMillis: PtrTo((30 * 24 * time.Hour).Milliseconds()),
+		AllowUserCancelWorkspaceJobs:   ptr.Ref(true),
+		AllowUserAutostart:             ptr.Ref(true),
+		AllowUserAutostop:              ptr.Ref(true),
+		FailureTTLMillis:               ptr.Ref((1 * time.Hour).Milliseconds()),
+		TimeTilDormantMillis:           ptr.Ref((7 * 24 * time.Hour).Milliseconds()),
+		TimeTilDormantAutoDeleteMillis: ptr.Ref((30 * 24 * time.Hour).Milliseconds()),
 		DisableEveryoneGroupAccess:     true,
 		RequireActiveVersion:           true,
 	})
@@ -93,9 +94,19 @@ func TestAccTemplateDataSource(t *testing.T) {
 		UpdateWorkspaceLastUsedAt:      false,
 		UpdateWorkspaceDormantAt:       false,
 		RequireActiveVersion:           tpl.RequireActiveVersion,
-		DeprecationMessage:             PtrTo("This template is deprecated"),
+		DeprecationMessage:             ptr.Ref("This template is deprecated"),
 		DisableEveryoneGroupAccess:     true,
-		MaxPortShareLevel:              PtrTo(codersdk.WorkspaceAgentPortShareLevelOwner),
+		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevelOwner),
+	})
+	require.NoError(t, err)
+
+	err = client.UpdateTemplateACL(ctx, tpl.ID, codersdk.UpdateTemplateACL{
+		UserPerms: map[string]codersdk.TemplateRole{
+			firstUser.ID.String(): codersdk.TemplateRoleAdmin,
+		},
+		GroupPerms: map[string]codersdk.TemplateRole{
+			firstUser.OrganizationIDs[0].String(): codersdk.TemplateRoleUse,
+		},
 	})
 	require.NoError(t, err)
 
@@ -112,6 +123,10 @@ func TestAccTemplateDataSource(t *testing.T) {
 		resource.TestCheckResourceAttr("data.coderd_template.test", "icon", tpl.Icon),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "default_ttl_ms", strconv.FormatInt(tpl.DefaultTTLMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "activity_bump_ms", strconv.FormatInt(tpl.ActivityBumpMillis, 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "auto_stop_requirement.days_of_week.#", strconv.FormatInt(int64(len(tpl.AutostopRequirement.DaysOfWeek)), 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "auto_stop_requirement.weeks", strconv.FormatInt(tpl.AutostopRequirement.Weeks, 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "auto_start_permitted_days_of_week.#", strconv.FormatInt(int64(len(tpl.AutostartRequirement.DaysOfWeek)), 10)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_cancel_workspace_jobs", "true"),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_autostart", strconv.FormatBool(tpl.AllowUserAutostart)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_autostop", strconv.FormatBool(tpl.AllowUserAutostop)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "allow_user_cancel_workspace_jobs", strconv.FormatBool(tpl.AllowUserCancelWorkspaceJobs)),
@@ -119,17 +134,28 @@ func TestAccTemplateDataSource(t *testing.T) {
 		resource.TestCheckResourceAttr("data.coderd_template.test", "time_til_dormant_ms", strconv.FormatInt(tpl.TimeTilDormantMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "time_til_dormant_autodelete_ms", strconv.FormatInt(tpl.TimeTilDormantAutoDeleteMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "require_active_version", strconv.FormatBool(tpl.RequireActiveVersion)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "max_port_share_level", string(tpl.MaxPortShareLevel)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "created_by_user_id", firstUser.ID.String()),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "created_at", strconv.Itoa(int(tpl.CreatedAt.Unix()))),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "updated_at", strconv.Itoa(int(tpl.UpdatedAt.Unix()))),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "acl.groups.#", "1"),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "acl.users.#", "1"),
+		resource.TestMatchTypeSetElemNestedAttrs("data.coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+			"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
+			"role": regexp.MustCompile("^use$"),
+		}),
+		resource.TestMatchTypeSetElemNestedAttrs("data.coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+			"id":   regexp.MustCompile(firstUser.ID.String()),
+			"role": regexp.MustCompile("^admin$"),
+		}),
 	)
 
 	t.Run("TemplateByOrgAndNameOK", func(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
 			URL:            client.URL.String(),
 			Token:          client.SessionToken(),
-			OrganizationID: PtrTo(orgID.String()),
-			Name:           PtrTo(tpl.Name),
+			OrganizationID: ptr.Ref(orgID.String()),
+			Name:           ptr.Ref(tpl.Name),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -148,7 +174,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    PtrTo(tpl.ID.String()),
+			ID:    ptr.Ref(tpl.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -185,7 +211,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo(tpl.Name),
+			Name:  ptr.Ref(tpl.Name),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,

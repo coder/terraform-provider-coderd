@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 
 	"cdr.dev/slog"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
@@ -67,6 +71,7 @@ type TemplateResourceModel struct {
 	TimeTilDormantAutoDeleteMillis types.Int64  `tfsdk:"time_til_dormant_autodelete_ms"`
 	RequireActiveVersion           types.Bool   `tfsdk:"require_active_version"`
 	DeprecationMessage             types.String `tfsdk:"deprecation_message"`
+	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
@@ -74,7 +79,7 @@ type TemplateResourceModel struct {
 }
 
 // EqualTemplateMetadata returns true if two templates have identical metadata (excluding ACL).
-func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel) bool {
+func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceModel) bool {
 	return m.Name.Equal(other.Name) &&
 		m.DisplayName.Equal(other.DisplayName) &&
 		m.Description.Equal(other.Description) &&
@@ -90,7 +95,58 @@ func (m TemplateResourceModel) EqualTemplateMetadata(other TemplateResourceModel
 		m.FailureTTLMillis.Equal(other.FailureTTLMillis) &&
 		m.TimeTilDormantMillis.Equal(other.TimeTilDormantMillis) &&
 		m.TimeTilDormantAutoDeleteMillis.Equal(other.TimeTilDormantAutoDeleteMillis) &&
-		m.RequireActiveVersion.Equal(other.RequireActiveVersion)
+		m.RequireActiveVersion.Equal(other.RequireActiveVersion) &&
+		m.DeprecationMessage.Equal(other.DeprecationMessage) &&
+		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel)
+}
+
+func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
+	var autoStop AutostopRequirement
+	diags.Append(m.AutostopRequirement.As(ctx, &autoStop, basetypes.ObjectAsOptions{})...)
+	if diags.HasError() {
+		return diags
+	}
+	requiresScheduling := len(autoStop.DaysOfWeek) > 0 ||
+		!m.AllowUserAutostart.ValueBool() ||
+		!m.AllowUserAutostop.ValueBool() ||
+		m.FailureTTLMillis.ValueInt64() != 0 ||
+		m.TimeTilDormantAutoDeleteMillis.ValueInt64() != 0 ||
+		m.TimeTilDormantMillis.ValueInt64() != 0 ||
+		len(m.AutostartPermittedDaysOfWeek.Elements()) != 7
+	requiresActiveVersion := m.RequireActiveVersion.ValueBool()
+	requiresACL := !m.ACL.IsNull()
+	requiresSharedPortsControl := m.MaxPortShareLevel.ValueString() != "" && m.MaxPortShareLevel.ValueString() != string(codersdk.WorkspaceAgentPortShareLevelPublic)
+	if requiresScheduling || requiresActiveVersion || requiresACL || requiresSharedPortsControl {
+		if requiresScheduling && !features[codersdk.FeatureAdvancedTemplateScheduling].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use advanced template scheduling, so you cannot modify any of the following fields from their defaults: auto_stop_requirement, auto_start_permitted_days_of_week, allow_user_auto_start, allow_user_auto_stop, failure_ttl_ms, time_til_dormant_ms, time_til_dormant_autodelete_ms.",
+			)
+			return
+		}
+		if requiresActiveVersion && !features[codersdk.FeatureAccessControl].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use access control, so you cannot set require_active_version.",
+			)
+			return
+		}
+		if requiresACL && !features[codersdk.FeatureTemplateRBAC].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use template access control, so you cannot set acl.",
+			)
+			return
+		}
+		if requiresSharedPortsControl && !features[codersdk.FeatureControlSharedPorts].Enabled {
+			diags.AddError(
+				"Feature not enabled",
+				"Your license is not entitled to use port sharing control, so you cannot set max_port_share_level.",
+			)
+			return
+		}
+	}
+	return
 }
 
 type TemplateVersion struct {
@@ -188,8 +244,8 @@ func (r *TemplateResource) Metadata(ctx context.Context, req resource.MetadataRe
 
 func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A Coder template",
-
+		MarkdownDescription: "A Coder template.\n\nLogs from building template versions can be optionally streamed from the provisioner " +
+			"by setting the `TF_LOG` environment variable to `INFO` or higher.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the template.",
@@ -203,13 +259,16 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				MarkdownDescription: "The name of the template.",
 				Required:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 32),
+					codersdkvalidator.Name(),
 				},
 			},
 			"display_name": schema.StringAttribute{
 				MarkdownDescription: "The display name of the template. Defaults to the template name.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					codersdkvalidator.DisplayName(),
+				},
 			},
 			"description": schema.StringAttribute{
 				MarkdownDescription: "A description of the template.",
@@ -245,7 +304,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             int64default.StaticInt64(3600000),
 			},
 			"auto_stop_requirement": schema.SingleNestedAttribute{
-				MarkdownDescription: "The auto-stop requirement for all workspaces created from this template. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) The auto-stop requirement for all workspaces created from this template.",
 				Optional:            true,
 				Computed:            true,
 				Attributes: map[string]schema.Attribute{
@@ -270,7 +329,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				})),
 			},
 			"auto_start_permitted_days_of_week": schema.SetAttribute{
-				MarkdownDescription: "List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.",
 				Optional:            true,
 				Computed:            true,
 				ElementType:         types.StringType,
@@ -284,49 +343,57 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_start": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"allow_user_auto_stop": schema.BoolAttribute{
-				MarkdownDescription: "Whether users can auto-start workspaces created from this template. Defaults to true. Requires an enterprise Coder deployment.",
+				MarkdownDescription: "(Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"failure_ttl_ms": schema.Int64Attribute{
-				MarkdownDescription: "The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder stops all resources for failed workspaces created from this template, in milliseconds.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 			},
 			"time_til_dormant_ms": schema.Int64Attribute{
-				MarkdownDescription: "The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 			},
 			"time_til_dormant_autodelete_ms": schema.Int64Attribute{
-				MarkdownDescription: "The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
+				MarkdownDescription: "(Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.",
 				Optional:            true,
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 			},
 			"require_active_version": schema.BoolAttribute{
-				MarkdownDescription: "Whether workspaces must be created from the active version of this template. Defaults to false.",
+				MarkdownDescription: "(Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
+			"max_port_share_level": schema.StringAttribute{
+				MarkdownDescription: "(Enterprise) The maximum port share level for workspaces created from this template. Defaults to `owner` on an Enterprise deployment, or `public` otherwise.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
+				},
+			},
 			"deprecation_message": schema.StringAttribute{
-				MarkdownDescription: "If set, the template will be marked as deprecated and users will be blocked from creating new workspaces from it.",
+				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
 			},
 			"acl": schema.SingleNestedAttribute{
-				MarkdownDescription: "Access control list for the template. Requires an enterprise Coder deployment. If null, ACL policies will not be added or removed by Terraform.",
+				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
 				Optional:            true,
 				Attributes: map[string]schema.Attribute{
 					"users":  permissionAttribute,
@@ -346,11 +413,11 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Computed:   true,
 						},
 						"name": schema.StringAttribute{
-							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents are updated.",
+							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.",
 							Optional:            true,
 							Computed:            true,
 							Validators: []validator.String{
-								stringvalidator.LengthAtLeast(1),
+								codersdkvalidator.TemplateVersionName(),
 							},
 						},
 						"message": schema.StringAttribute{
@@ -429,6 +496,11 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.DisplayName = data.Name
 	}
 
+	resp.Diagnostics.Append(data.CheckEntitlements(ctx, r.data.Features)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	client := r.data.Client
 	orgID := data.OrganizationID.ValueUUID()
 	var templateResp codersdk.Template
@@ -440,13 +512,13 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		if idx > 0 {
 			newVersionRequest.TemplateID = &templateResp.ID
 		}
-		versionResp, err := newVersion(ctx, client, newVersionRequest)
+		versionResp, err, logs := newVersion(ctx, client, newVersionRequest)
 		if err != nil {
-			resp.Diagnostics.AddError("Client Error", err.Error())
+			resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 			return
 		}
 		if idx == 0 {
-			tflog.Trace(ctx, "creating template")
+			tflog.Info(ctx, "creating template")
 			createReq := data.toCreateRequest(ctx, resp, versionResp.ID)
 			if resp.Diagnostics.HasError() {
 				return
@@ -456,7 +528,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template: %s", err))
 				return
 			}
-			tflog.Trace(ctx, "successfully created template", map[string]any{
+			tflog.Info(ctx, "successfully created template", map[string]any{
 				"id": templateResp.ID,
 			})
 
@@ -468,7 +540,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			}
 
 			if !data.ACL.IsNull() {
-				tflog.Trace(ctx, "updating template ACL")
+				tflog.Info(ctx, "updating template ACL")
 				var acl ACL
 				resp.Diagnostics.Append(
 					data.ACL.As(ctx, &acl, basetypes.ObjectAsOptions{})...,
@@ -476,12 +548,12 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				if resp.Diagnostics.HasError() {
 					return
 				}
-				err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(acl))
+				err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(codersdk.TemplateACL{}, acl))
 				if err != nil {
 					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template ACL: %s", err))
 					return
 				}
-				tflog.Trace(ctx, "successfully updated template ACL")
+				tflog.Info(ctx, "successfully updated template ACL")
 			}
 		}
 		if version.Active.ValueBool() {
@@ -496,6 +568,23 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
+
+	// TODO: Remove this update call once this provider requires a Coder
+	// deployment running `v2.15.0` or later.
+	if data.MaxPortShareLevel.IsUnknown() {
+		data.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
+	} else {
+		mpslReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		mpslResp, err := client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *mpslReq)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set max port share level via update: %s", err))
+			return
+		}
+		data.MaxPortShareLevel = types.StringValue(string(mpslResp.MaxPortShareLevel))
+	}
 
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -521,6 +610,11 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	template, err := client.Template(ctx, templateID)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Template with ID %s not found. Marking as deleted.", templateID.String()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
 		return
 	}
@@ -530,9 +624,10 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.Append(diag...)
 		return
 	}
+	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 
 	if !data.ACL.IsNull() {
-		tflog.Trace(ctx, "reading template ACL")
+		tflog.Info(ctx, "reading template ACL")
 		acl, err := client.TemplateACL(ctx, templateID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
@@ -540,12 +635,12 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		}
 		tfACL := convertResponseToACL(acl)
 		aclObj, diag := types.ObjectValueFrom(ctx, aclTypeAttr, tfACL)
-		diag.Append(diag...)
 		if diag.HasError() {
+			resp.Diagnostics.Append(diag...)
 			return
 		}
 		data.ACL = aclObj
-		tflog.Trace(ctx, "read template ACL")
+		tflog.Info(ctx, "read template ACL")
 	}
 
 	for idx, version := range data.Versions {
@@ -593,17 +688,27 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		newState.DisplayName = newState.Name
 	}
 
+	resp.Diagnostics.Append(newState.CheckEntitlements(ctx, r.data.Features)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	orgID := newState.OrganizationID.ValueUUID()
 
 	templateID := newState.ID.ValueUUID()
 
 	client := r.data.Client
 
-	templateMetadataChanged := !newState.EqualTemplateMetadata(curState)
+	// TODO(ethanndickson): Remove this once the provider requires a Coder
+	// deployment running `v2.15.0` or later.
+	if newState.MaxPortShareLevel.IsUnknown() {
+		newState.MaxPortShareLevel = curState.MaxPortShareLevel
+	}
+	templateMetadataChanged := !newState.EqualTemplateMetadata(&curState)
 	// This is required, as the API will reject no-diff updates.
 	if templateMetadataChanged {
-		tflog.Trace(ctx, "change in template metadata detected, updating.")
-		updateReq := newState.toUpdateRequest(ctx, resp)
+		tflog.Info(ctx, "change in template metadata detected, updating.")
+		updateReq := newState.toUpdateRequest(ctx, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -613,7 +718,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			return
 		}
 
-		tflog.Trace(ctx, "successfully updated template metadata")
+		tflog.Info(ctx, "successfully updated template metadata")
 	}
 
 	// Since the everyone group always gets deleted by `DisableEveryoneGroupAccess`, we need to run this even if there
@@ -624,24 +729,30 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		err := client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(acl))
+		curACL, err := client.TemplateACL(ctx, templateID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
+			return
+		}
+
+		err = client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(curACL, acl))
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
 			return
 		}
-		tflog.Trace(ctx, "successfully updated template ACL")
+		tflog.Info(ctx, "successfully updated template ACL")
 	}
 
 	for idx := range newState.Versions {
 		if newState.Versions[idx].ID.IsUnknown() {
-			tflog.Trace(ctx, "discovered a new or modified template version")
-			uploadResp, err := newVersion(ctx, client, newVersionRequest{
+			tflog.Info(ctx, "discovered a new or modified template version")
+			uploadResp, err, logs := newVersion(ctx, client, newVersionRequest{
 				Version:        &newState.Versions[idx],
 				OrganizationID: orgID,
 				TemplateID:     &templateID,
 			})
 			if err != nil {
-				resp.Diagnostics.AddError("Client Error", err.Error())
+				resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 				return
 			}
 			versionResp, err := client.TemplateVersion(ctx, uploadResp.ID)
@@ -686,6 +797,14 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			}
 		}
 	}
+	// TODO(ethanndickson): Remove this once the provider requires a Coder
+	// deployment running `v2.15.0` or later.
+	templateResp, err := client.Template(ctx, templateID)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
+		return
+	}
+	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -710,7 +829,7 @@ func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	templateID := data.ID.ValueUUID()
 
-	tflog.Trace(ctx, "deleting template")
+	tflog.Info(ctx, "deleting template")
 	err := client.DeleteTemplate(ctx, templateID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete template: %s", err))
@@ -719,7 +838,28 @@ func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteReques
 }
 
 func (r *TemplateResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	idParts := strings.Split(req.ID, "/")
+	if len(idParts) == 1 {
+		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+		return
+	} else if len(idParts) == 2 {
+		client := r.data.Client
+		org, err := client.OrganizationByName(ctx, idParts[0])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization with name %s: %s", idParts[0], err))
+			return
+		}
+		template, err := client.TemplateByName(ctx, org.ID, idParts[1])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template with name %s: %s", idParts[1], err))
+			return
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), template.ID.String())...)
+		return
+	} else {
+		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<template-name>`")
+		return
+	}
 }
 
 // ConfigValidators implements resource.ResourceWithConfigValidators.
@@ -745,15 +885,37 @@ func (a *activeVersionValidator) MarkdownDescription(context.Context) string {
 
 // ValidateList implements validator.List.
 func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
 	var data []TemplateVersion
 	resp.Diagnostics.Append(req.ConfigValue.ElementsAs(ctx, &data, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
+	// Check all versions have unique names
+	uniqueNames := make(map[string]struct{})
+	for _, version := range data {
+		if version.Name.IsNull() || version.Name.IsUnknown() {
+			continue
+		}
+		if _, ok := uniqueNames[version.Name.ValueString()]; ok {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Template version names must be unique. `%s` appears twice.", version.Name.ValueString()))
+			return
+		}
+		uniqueNames[version.Name.ValueString()] = struct{}{}
+	}
+
 	// Check if only one item in Version has active set to true
 	active := false
 	for _, version := range data {
+		// `active` is required, so if it's null or unknown, this is Terraform
+		// requesting an early validation.
+		if version.Active.IsNull() || version.Active.IsUnknown() {
+			return
+		}
 		if version.Active.ValueBool() {
 			if active {
 				resp.Diagnostics.AddError("Client Error", "Only one template version can be active at a time.")
@@ -764,19 +926,6 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 	}
 	if !active {
 		resp.Diagnostics.AddError("Client Error", "At least one template version must be active.")
-	}
-
-	// Check all versions have unique names
-	uniqueNames := make(map[string]struct{})
-	for _, version := range data {
-		if version.Name.IsNull() {
-			continue
-		}
-		if _, ok := uniqueNames[version.Name.ValueString()]; ok {
-			resp.Diagnostics.AddError("Client Error", "Template version names must be unique.")
-			return
-		}
-		uniqueNames[version.Name.ValueString()] = struct{}{}
 	}
 }
 
@@ -863,41 +1012,45 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 	return &resp, nil
 }
 
-func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) error {
+func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
 	const maxRetries = 3
+	var jobLogs []codersdk.ProvisionerJobLog
 	for retries := 0; retries < maxRetries; retries++ {
 		logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
 		defer closer.Close()
 		if err != nil {
-			return fmt.Errorf("begin streaming logs: %w", err)
+			return jobLogs, fmt.Errorf("begin streaming logs: %w", err)
 		}
 		for {
 			logs, ok := <-logs
 			if !ok {
 				break
 			}
-			tflog.Trace(ctx, logs.Output, map[string]interface{}{
+			tflog.Info(ctx, logs.Output, map[string]interface{}{
 				"job_id":     logs.ID,
 				"job_stage":  logs.Stage,
 				"log_source": logs.Source,
 				"level":      logs.Level,
 				"created_at": logs.CreatedAt,
 			})
+			if logs.Output != "" {
+				jobLogs = append(jobLogs, logs)
+			}
 		}
 		latestResp, err := client.TemplateVersion(ctx, version.ID)
 		if err != nil {
-			return err
+			return jobLogs, err
 		}
 		if latestResp.Job.Status.Active() {
 			tflog.Warn(ctx, fmt.Sprintf("provisioner job still active, continuing to wait...: %s", latestResp.Job.Status))
 			continue
 		}
 		if latestResp.Job.Status != codersdk.ProvisionerJobSucceeded {
-			return fmt.Errorf("provisioner job did not succeed: %s (%s)", latestResp.Job.Status, latestResp.Job.Error)
+			return jobLogs, fmt.Errorf("provisioner job did not succeed: %s (%s)", latestResp.Job.Status, latestResp.Job.Error)
 		}
-		return nil
+		return jobLogs, nil
 	}
-	return fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
+	return jobLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
 }
 
 type newVersionRequest struct {
@@ -906,33 +1059,36 @@ type newVersionRequest struct {
 	TemplateID     *uuid.UUID
 }
 
-func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error) {
+func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error, []codersdk.ProvisionerJobLog) {
+	var logs []codersdk.ProvisionerJobLog
 	directory := req.Version.Directory.ValueString()
-	tflog.Trace(ctx, "uploading directory")
+	tflog.Info(ctx, "uploading directory")
 	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to upload directory: %s", err)
+		return nil, fmt.Errorf("failed to upload directory: %s", err), logs
 	}
-	tflog.Trace(ctx, "successfully uploaded directory")
-	// TODO(ethanndickson): Uncomment when a released `codersdk` exports template variable parsing
-	// tflog.Trace(ctx,"discovering and parsing vars files")
-	// varFiles, err := codersdk.DiscoverVarsFiles(directory)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to discover vars files: %s", err)
-	// }
-	// vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to parse user variable values: %s", err)
-	// }
-	// tflog.Trace(ctx,"discovered and parsed vars files", map[string]any{
-	// 	"vars": vars,
-	// })
-	vars := make([]codersdk.VariableValue, 0, len(req.Version.TerraformVariables))
+	tflog.Info(ctx, "successfully uploaded directory")
+	tflog.Info(ctx, "discovering and parsing vars files")
+	varFiles, err := codersdk.DiscoverVarsFiles(directory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover vars files: %s", err), logs
+	}
+	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user variable values: %s", err), logs
+	}
+	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
+		"vars": vars,
+	})
 	for _, variable := range req.Version.TerraformVariables {
 		vars = append(vars, codersdk.VariableValue{
 			Name:  variable.Name.ValueString(),
 			Value: variable.Value.ValueString(),
 		})
+	}
+	provTags := make(map[string]string, len(req.Version.ProvisionerTags))
+	for _, provisionerTag := range req.Version.ProvisionerTags {
+		provTags[provisionerTag.Name.ValueString()] = provisionerTag.Value.ValueString()
 	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
 		Name:               req.Version.Name.ValueString(),
@@ -941,26 +1097,27 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 		Provisioner:        codersdk.ProvisionerTypeTerraform,
 		FileID:             uploadResp.ID,
 		UserVariableValues: vars,
+		ProvisionerTags:    provTags,
 	}
 	if req.TemplateID != nil {
 		tmplVerReq.TemplateID = *req.TemplateID
 	}
-	tflog.Trace(ctx, "creating template version")
+	tflog.Info(ctx, "creating template version")
 	versionResp, err := client.CreateTemplateVersion(ctx, req.OrganizationID, tmplVerReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create template version: %s", err)
+		return nil, fmt.Errorf("failed to create template version: %s", err), logs
 	}
-	tflog.Trace(ctx, "waiting for template version import job.")
-	err = waitForJob(ctx, client, &versionResp)
+	tflog.Info(ctx, "waiting for template version import job.")
+	logs, err = waitForJob(ctx, client, &versionResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to wait for job: %s", err)
+		return nil, fmt.Errorf("failed to wait for job: %s", err), logs
 	}
-	tflog.Trace(ctx, "successfully created template version")
-	return &versionResp, nil
+	tflog.Info(ctx, "successfully created template version")
+	return &versionResp, nil, logs
 }
 
 func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UUID, versionID uuid.UUID) error {
-	tflog.Trace(ctx, "marking template version as active", map[string]any{
+	tflog.Info(ctx, "marking template version as active", map[string]any{
 		"version_id":  versionID.String(),
 		"template_id": templateID.String(),
 	})
@@ -968,20 +1125,32 @@ func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UU
 		ID: versionID,
 	})
 	if err != nil {
-		return fmt.Errorf("Failed to update active template version: %s", err)
+		return fmt.Errorf("failed to update active template version: %s", err)
 	}
-	tflog.Trace(ctx, "marked template version as active")
+	tflog.Info(ctx, "marked template version as active")
 	return nil
 }
 
-func convertACLToRequest(permissions ACL) codersdk.UpdateTemplateACL {
+func convertACLToRequest(curACL codersdk.TemplateACL, newACL ACL) codersdk.UpdateTemplateACL {
 	var userPerms = make(map[string]codersdk.TemplateRole)
-	for _, perm := range permissions.UserPermissions {
+	for _, perm := range newACL.UserPermissions {
 		userPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
 	}
 	var groupPerms = make(map[string]codersdk.TemplateRole)
-	for _, perm := range permissions.GroupPermissions {
+	for _, perm := range newACL.GroupPermissions {
 		groupPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
+	}
+	// For each user or group to remove, we need to set their role to empty
+	// string.
+	for _, perm := range curACL.Users {
+		if _, ok := userPerms[perm.ID.String()]; !ok {
+			userPerms[perm.ID.String()] = ""
+		}
+	}
+	for _, perm := range curACL.Groups {
+		if _, ok := groupPerms[perm.ID.String()]; !ok {
+			groupPerms[perm.ID.String()] = ""
+		}
 	}
 	return codersdk.UpdateTemplateACL{
 		UserPerms:  userPerms,
@@ -1039,25 +1208,27 @@ func (r *TemplateResourceModel) readResponse(ctx context.Context, template *code
 	r.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	r.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
 	r.DeprecationMessage = types.StringValue(template.DeprecationMessage)
+	// TODO(ethanndickson): MaxPortShareLevel deliberately omitted, as it can't
+	// be set during a create request, and we call this during `Create`.
 	return nil
 }
 
-func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, resp *resource.UpdateResponse) *codersdk.UpdateTemplateMeta {
+func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.Diagnostics) *codersdk.UpdateTemplateMeta {
 	var days []string
-	resp.Diagnostics.Append(
+	diag.Append(
 		r.AutostartPermittedDaysOfWeek.ElementsAs(ctx, &days, false)...,
 	)
-	if resp.Diagnostics.HasError() {
+	if diag.HasError() {
 		return nil
 	}
 	autoStart := &codersdk.TemplateAutostartRequirement{
 		DaysOfWeek: days,
 	}
 	var reqs AutostopRequirement
-	resp.Diagnostics.Append(
+	diag.Append(
 		r.AutostopRequirement.As(ctx, &reqs, basetypes.ObjectAsOptions{})...,
 	)
-	if resp.Diagnostics.HasError() {
+	if diag.HasError() {
 		return nil
 	}
 	autoStop := &codersdk.TemplateAutostopRequirement{
@@ -1081,6 +1252,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
+		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
 	}
@@ -1134,8 +1306,9 @@ type LastVersionsByHash = map[string][]PreviousTemplateVersion
 var LastVersionsKey = "last_versions"
 
 type PreviousTemplateVersion struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+	ID     uuid.UUID         `json:"id"`
+	Name   string            `json:"name"`
+	TFVars map[string]string `json:"tf_vars"`
 }
 
 type privateState interface {
@@ -1147,18 +1320,24 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	lv := make(LastVersionsByHash)
 	for _, version := range v {
 		vbh, ok := lv[version.DirectoryHash.ValueString()]
+		tfVars := make(map[string]string, len(version.TerraformVariables))
+		for _, tfVar := range version.TerraformVariables {
+			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
+		}
 		// Store the IDs and names of all versions with the same directory hash,
 		// in the order they appear
 		if ok {
 			lv[version.DirectoryHash.ValueString()] = append(vbh, PreviousTemplateVersion{
-				ID:   version.ID.ValueUUID(),
-				Name: version.Name.ValueString(),
+				ID:     version.ID.ValueUUID(),
+				Name:   version.Name.ValueString(),
+				TFVars: tfVars,
 			})
 		} else {
 			lv[version.DirectoryHash.ValueString()] = []PreviousTemplateVersion{
 				{
-					ID:   version.ID.ValueUUID(),
-					Name: version.Name.ValueString(),
+					ID:     version.ID.ValueUUID(),
+					Name:   version.Name.ValueString(),
+					TFVars: tfVars,
 				},
 			}
 		}
@@ -1172,6 +1351,13 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 }
 
 func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions) {
+	// We remove versions that we've matched from `lv`, so make a copy for
+	// resolving tfvar changes at the end.
+	fullLv := make(LastVersionsByHash)
+	for k, v := range lv {
+		fullLv[k] = slices.Clone(v)
+	}
+
 	for i := range planVersions {
 		prevList, ok := lv[planVersions[i].DirectoryHash.ValueString()]
 		// If not in state, mark as known after apply since we'll create a new version.
@@ -1211,4 +1397,59 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]
 		}
 	}
+
+	// If only the Terraform variables have changed,
+	// we need to create a new version with the new variables.
+	for i := range planVersions {
+		if !planVersions[i].ID.IsUnknown() {
+			prevs, ok := fullLv[planVersions[i].DirectoryHash.ValueString()]
+			if !ok {
+				continue
+			}
+			if tfVariablesChanged(prevs, &planVersions[i]) {
+				planVersions[i].ID = NewUUIDUnknown()
+				// We could always set the name to unknown here, to generate a
+				// random one (this is what the Web UI currently does when
+				// only updating tfvars).
+				// However, I think it'd be weird if the provider just started
+				// ignoring the name you set in the config, we'll instead
+				// require that users update the name if they update the tfvars.
+				if configVersions[i].Name.IsNull() {
+					planVersions[i].Name = types.StringUnknown()
+				}
+			}
+		}
+	}
+}
+
+func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
+	for _, prev := range prevs {
+		if prev.ID == planned.ID.ValueUUID() {
+			// If the previous version has no TFVars, then it was created using
+			// an older provider version.
+			if prev.TFVars == nil {
+				return true
+			}
+			for _, tfVar := range planned.TerraformVariables {
+				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return true
+
+}
+
+func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
+	var b strings.Builder
+	b.WriteString(err.Error() + "\n")
+	for _, log := range logs {
+		if !log.CreatedAt.IsZero() {
+			b.WriteString(log.CreatedAt.Local().Format("2006-01-02 15:04:05.000Z07:00") + " ")
+		}
+		b.WriteString(log.Output + "\n")
+	}
+	return b.String()
 }

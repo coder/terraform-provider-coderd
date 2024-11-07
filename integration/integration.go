@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *codersdk.Client {
+func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool) *codersdk.Client {
 	coderImg := os.Getenv("CODER_IMAGE")
 	if coderImg == "" {
 		coderImg = "ghcr.io/coder/coder"
@@ -28,6 +28,11 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 	coderVersion := os.Getenv("CODER_VERSION")
 	if coderVersion == "" {
 		coderVersion = "latest"
+	}
+
+	coderLicense := os.Getenv("CODER_ENTERPRISE_LICENSE")
+	if useLicense && coderLicense == "" {
+		t.Skip("Skipping tests that require a license.")
 	}
 
 	t.Logf("using coder image %s:%s", coderImg, coderVersion)
@@ -48,7 +53,6 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 		Env: []string{
 			"CODER_HTTP_ADDRESS=0.0.0.0:3000",        // Listen on all interfaces inside the container
 			"CODER_ACCESS_URL=http://localhost:3000", // Set explicitly to avoid creating try.coder.app URLs.
-			"CODER_IN_MEMORY=true",                   // We don't necessarily care about real persistence here.
 			"CODER_TELEMETRY_ENABLE=false",           // Avoid creating noise.
 		},
 		Labels:       map[string]string{},
@@ -91,12 +95,11 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 			t.Logf("not ready yet: %s", err.Error())
 		}
 		return err == nil
-	}, 10*time.Second, time.Second, "coder failed to become ready in time")
+	}, 15*time.Second, time.Second, "coder failed to become ready in time")
 	_, err = client.CreateFirstUser(ctx, codersdk.CreateFirstUserRequest{
 		Email:    testEmail,
 		Username: testUsername,
 		Password: testPassword,
-		Trial:    useTrial,
 	})
 	require.NoError(t, err, "create first user")
 	resp, err := client.LoginWithPassword(ctx, codersdk.LoginWithPasswordRequest{
@@ -105,6 +108,12 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useTrial bool) *
 	})
 	require.NoError(t, err, "login to coder instance with password")
 	client.SetSessionToken(resp.SessionToken)
+	if useLicense {
+		_, err := client.AddLicense(ctx, codersdk.AddLicenseRequest{
+			License: coderLicense,
+		})
+		require.NoError(t, err, "add license")
+	}
 	return client
 }
 

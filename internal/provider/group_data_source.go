@@ -56,7 +56,7 @@ func (d *GroupDataSource) Metadata(ctx context.Context, req datasource.MetadataR
 
 func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing group on the coder deployment.",
+		MarkdownDescription: "An existing group on the Coder deployment.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -93,7 +93,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 				Computed:            true,
 			},
 			"source": schema.StringAttribute{
-				MarkdownDescription: "The source of the group. Either 'oidc' or 'user'.",
+				MarkdownDescription: "The source of the group. Either `oidc` or `user`.",
 				Computed:            true,
 			},
 			"members": schema.SetNestedAttribute{
@@ -120,11 +120,11 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 							Computed:            true,
 						},
 						"status": schema.StringAttribute{
-							MarkdownDescription: "The status of the member. Can be 'active', 'dormant' or 'suspended'.",
+							MarkdownDescription: "The status of the member. Can be `active`, `dormant` or `suspended`.",
 							Computed:            true,
 						},
 						"login_type": schema.StringAttribute{
-							MarkdownDescription: "The login type of the member. Can be 'oidc', 'token', 'password', 'github' or 'none'.",
+							MarkdownDescription: "The login type of the member. Can be `oidc`, `token`, `password`, `github` or `none`.",
 							Computed:            true,
 						},
 						"theme_preference": schema.StringAttribute{
@@ -168,6 +168,11 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		return
 	}
 
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, d.data.Features)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	client := d.data.Client
 
 	if data.OrganizationID.IsNull() {
@@ -182,6 +187,11 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		groupID := data.ID.ValueUUID()
 		group, err = client.Group(ctx, groupID)
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group by ID, got error: %s", err))
 			return
 		}
@@ -190,6 +200,11 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	} else {
 		group, err = client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with name %s not found in organization with ID %s. Marking as deleted.", data.Name.ValueString(), data.OrganizationID.ValueString()))
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Failed to get group by name and org ID", err.Error())
 			return
 		}

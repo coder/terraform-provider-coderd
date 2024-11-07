@@ -7,6 +7,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
@@ -22,22 +23,22 @@ func TestAccUserResource(t *testing.T) {
 	cfg1 := testAccUserResourceConfig{
 		URL:       client.URL.String(),
 		Token:     client.SessionToken(),
-		Username:  PtrTo("example"),
-		Name:      PtrTo("Example User"),
-		Email:     PtrTo("example@coder.com"),
-		Roles:     PtrTo([]string{"owner", "auditor"}),
-		LoginType: PtrTo("password"),
-		Password:  PtrTo("SomeSecurePassword!"),
+		Username:  ptr.Ref("example"),
+		Name:      ptr.Ref("Example User"),
+		Email:     ptr.Ref("example@coder.com"),
+		Roles:     ptr.Ref([]string{"owner", "auditor"}),
+		LoginType: ptr.Ref("password"),
+		Password:  ptr.Ref("SomeSecurePassword!"),
 	}
 
 	cfg2 := cfg1
-	cfg2.Username = PtrTo("exampleNew")
+	cfg2.Username = ptr.Ref("exampleNew")
 
 	cfg3 := cfg2
-	cfg3.Name = PtrTo("Example New")
+	cfg3.Name = ptr.Ref("Example New")
 
 	cfg4 := cfg3
-	cfg4.LoginType = PtrTo("github")
+	cfg4.LoginType = ptr.Ref("github")
 	cfg4.Password = nil
 
 	resource.Test(t, resource.TestCase{
@@ -60,11 +61,20 @@ func TestAccUserResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_user.test", "suspended", "false"),
 				),
 			},
-			// ImportState testing
+			// Import by ID
 			{
 				ResourceName:      "coderd_user.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				// We can't pull the password from the API.
+				ImportStateVerifyIgnore: []string{"password"},
+			},
+			// ImportState by username
+			{
+				ResourceName:      "coderd_user.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateId:     "example",
 				// We can't pull the password from the API.
 				ImportStateVerifyIgnore: []string{"password"},
 			},

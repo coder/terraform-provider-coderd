@@ -8,6 +8,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -19,14 +20,14 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "org_data_acc", true)
+	client := integration.StartCoder(ctx, t, "org_data_acc", false)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
 	defaultCheckFn := resource.ComposeAggregateTestCheckFunc(
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "id", firstUser.OrganizationIDs[0].String()),
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "is_default", "true"),
-		resource.TestCheckResourceAttr("data.coderd_organization.test", "name", "first-organization"),
+		resource.TestCheckResourceAttr("data.coderd_organization.test", "name", "coder"),
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "members.#", "1"),
 		resource.TestCheckTypeSetElemAttr("data.coderd_organization.test", "members.*", firstUser.ID.String()),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "created_at"),
@@ -37,7 +38,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    PtrTo(firstUser.OrganizationIDs[0].String()),
+			ID:    ptr.Ref(firstUser.OrganizationIDs[0].String()),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -55,7 +56,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("first-organization"),
+			Name:  ptr.Ref("coder"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -73,7 +74,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:       client.URL.String(),
 			Token:     client.SessionToken(),
-			IsDefault: PtrTo(true),
+			IsDefault: ptr.Ref(true),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -91,8 +92,8 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:       client.URL.String(),
 			Token:     client.SessionToken(),
-			IsDefault: PtrTo(true),
-			Name:      PtrTo("first-organization"),
+			IsDefault: ptr.Ref(true),
+			Name:      ptr.Ref("coder"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },

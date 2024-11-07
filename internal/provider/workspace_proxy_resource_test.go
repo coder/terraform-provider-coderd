@@ -3,10 +3,12 @@ package provider
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
@@ -22,14 +24,14 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 	cfg1 := testAccWorkspaceProxyResourceConfig{
 		URL:         client.URL.String(),
 		Token:       client.SessionToken(),
-		Name:        PtrTo("example"),
-		DisplayName: PtrTo("Example WS Proxy"),
-		Icon:        PtrTo("/emojis/1f407.png"),
+		Name:        ptr.Ref("example"),
+		DisplayName: ptr.Ref("Example WS Proxy"),
+		Icon:        ptr.Ref("/emojis/1f407.png"),
 	}
 
 	cfg2 := cfg1
-	cfg2.Name = PtrTo("example-new")
-	cfg2.DisplayName = PtrTo("Example WS Proxy New")
+	cfg2.Name = ptr.Ref("example-new")
+	cfg2.DisplayName = ptr.Ref("Example WS Proxy New")
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -51,6 +53,35 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "ws_proxy_acc", false)
+
+	cfg1 := testAccWorkspaceProxyResourceConfig{
+		URL:         client.URL.String(),
+		Token:       client.SessionToken(),
+		Name:        ptr.Ref("example"),
+		DisplayName: ptr.Ref("Example WS Proxy"),
+		Icon:        ptr.Ref("/emojis/1f407.png"),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg1.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to create workspace proxies."),
+			},
+		},
+	})
+
 }
 
 type testAccWorkspaceProxyResourceConfig struct {

@@ -60,7 +60,7 @@ func (r *WorkspaceProxyResource) Schema(ctx context.Context, req resource.Schema
 				Computed:            true,
 			},
 			"icon": schema.StringAttribute{
-				MarkdownDescription: "Relative path or external URL that specifes an icon to be displayed in the dashboard.",
+				MarkdownDescription: "Relative path or external URL that specifies an icon to be displayed in the dashboard.",
 				Required:            true,
 			},
 			"session_token": schema.StringAttribute{
@@ -103,6 +103,11 @@ func (r *WorkspaceProxyResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
+	if !r.data.Features[codersdk.FeatureWorkspaceProxy].Enabled {
+		resp.Diagnostics.AddError("Feature not enabled", "Your license is not entitled to create workspace proxies.")
+		return
+	}
+
 	client := r.data.Client
 	wsp, err := client.CreateWorkspaceProxy(ctx, codersdk.CreateWorkspaceProxyRequest{
 		Name:        data.Name.ValueString(),
@@ -137,6 +142,11 @@ func (r *WorkspaceProxyResource) Read(ctx context.Context, req resource.ReadRequ
 	client := r.data.Client
 	wsp, err := client.WorkspaceProxyByID(ctx, data.ID.ValueUUID())
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Workspace proxy with ID %s not found. Marking as deleted.", data.ID.ValueString()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read workspace proxy: %v", err))
 		return
 	}

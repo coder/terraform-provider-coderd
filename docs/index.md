@@ -3,18 +3,79 @@
 page_title: "coderd Provider"
 subcategory: ""
 description: |-
-  
+  The coderd provider can be used to manage resources on a Coder deployment. The provider exposes resources and data sources for users, groups, templates, and workspace proxies.
+  ~> Warning
+  This provider is only compatible with Coder version 2.10.1 https://github.com/coder/coder/releases/tag/v2.10.1 and later.
 ---
 
 # coderd Provider
 
+The coderd provider can be used to manage resources on a Coder deployment. The provider exposes resources and data sources for users, groups, templates, and workspace proxies.
 
+~> **Warning**
+This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.10.1) and later.
 
 ## Example Usage
 
 ```terraform
+terraform {
+  required_providers {
+    coderd = {
+      source = "coder/coderd"
+    }
+  }
+}
+
 provider "coderd" {
-  # example configuration here
+  url   = "coder.example.com"
+  token = "****"
+}
+
+
+data "coderd_organization" "default" {
+  is_default = true
+}
+
+data "coderd_user" "admin" {
+  username = "admin"
+}
+
+resource "coderd_user" "manager" {
+  username = "Manager"
+  email    = "manager@example.com"
+}
+
+resource "coderd_group" "bosses" {
+  name = "group"
+  members = [
+    data.coderd_user.admin.id,
+    resource.coderd_user.manager.id
+  ]
+}
+
+resource "coderd_template" "example" {
+  name = "example-template"
+  versions = [{
+    directory = "./example-template"
+    active    = true
+    tf_vars = [{
+      name  = "image_id"
+      value = "ami-12345678"
+    }]
+    # Version names can be randomly generated if null/omitted
+  }]
+  acl = {
+    groups = [{
+      id   = data.coderd_organization.default.id
+      role = "use"
+      },
+      {
+        id   = resource.coderd_group.bosses.id
+        role = "admin"
+    }]
+    users = []
+  }
+  allow_user_cancel_workspace_jobs = false
 }
 ```
 
@@ -24,5 +85,5 @@ provider "coderd" {
 ### Optional
 
 - `default_organization_id` (String) Default organization ID to use when creating resources. Defaults to the first organization the token has access to.
-- `token` (String) API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to $CODER_SESSION_TOKEN.
-- `url` (String) URL to the Coder deployment. Defaults to $CODER_URL.
+- `token` (String) API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to `$CODER_SESSION_TOKEN`.
+- `url` (String) URL to the Coder deployment. Defaults to `$CODER_URL`.

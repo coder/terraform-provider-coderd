@@ -46,7 +46,11 @@ func (d *OrganizationDataSource) Metadata(ctx context.Context, req datasource.Me
 
 func (d *OrganizationDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing organization on the coder deployment.",
+		MarkdownDescription: `An existing organization on the Coder deployment.
+
+~> **Warning**
+This data source is only compatible with Coder version [2.13.0](https://github.com/coder/coder/releases/tag/v2.13.0) and later.
+`,
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -123,6 +127,11 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 		orgID := data.ID.ValueUUID()
 		org, err = client.Organization(ctx, orgID)
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization with ID %s not found. Marking as deleted.", data.ID.ValueString()))
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by ID, got error: %s", err))
 			return
 		}
@@ -133,6 +142,11 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	} else if data.IsDefault.ValueBool() { // Get Default
 		org, err = client.OrganizationByName(ctx, "default")
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", "Default organization not found. Marking as deleted.")
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get default organization, got error: %s", err))
 			return
 		}
@@ -143,6 +157,11 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	} else { // By Name
 		org, err = client.OrganizationByName(ctx, data.Name.ValueString())
 		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization with name %s not found. Marking as deleted.", data.Name))
+				resp.State.RemoveResource(ctx)
+				return
+			}
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by name, got error: %s", err))
 			return
 		}

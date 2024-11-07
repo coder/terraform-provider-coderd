@@ -3,10 +3,12 @@ package provider
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -17,7 +19,6 @@ func TestAccGroupResource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-
 	ctx := context.Background()
 	client := integration.StartCoder(ctx, t, "group_acc", true)
 	firstUser, err := client.User(ctx, codersdk.Me)
@@ -44,17 +45,17 @@ func TestAccGroupResource(t *testing.T) {
 	cfg1 := testAccGroupResourceconfig{
 		URL:            client.URL.String(),
 		Token:          client.SessionToken(),
-		Name:           PtrTo("example-group"),
-		DisplayName:    PtrTo("Example Group"),
-		AvatarUrl:      PtrTo("https://google.com"),
-		QuotaAllowance: PtrTo(int32(100)),
-		Members:        PtrTo([]string{user1.ID.String()}),
+		Name:           ptr.Ref("example-group"),
+		DisplayName:    ptr.Ref("Example Group"),
+		AvatarUrl:      ptr.Ref("https://google.com"),
+		QuotaAllowance: ptr.Ref(int32(100)),
+		Members:        ptr.Ref([]string{user1.ID.String()}),
 	}
 
 	cfg2 := cfg1
-	cfg2.Name = PtrTo("example-group-new")
-	cfg2.DisplayName = PtrTo("Example Group New")
-	cfg2.Members = PtrTo([]string{user2.ID.String()})
+	cfg2.Name = ptr.Ref("example-group-new")
+	cfg2.DisplayName = ptr.Ref("Example Group New")
+	cfg2.Members = ptr.Ref([]string{user2.ID.String()})
 
 	cfg3 := cfg2
 	cfg3.Members = nil
@@ -78,11 +79,18 @@ func TestAccGroupResource(t *testing.T) {
 						resource.TestCheckResourceAttr("coderd_group.test", "members.0", user1.ID.String()),
 					),
 				},
-				// Import
+				// Import by ID
 				{
-					Config:                  cfg1.String(t),
 					ResourceName:            "coderd_group.test",
 					ImportState:             true,
+					ImportStateVerify:       true,
+					ImportStateVerifyIgnore: []string{"members"},
+				},
+				// Import by org name and group name
+				{
+					ResourceName:            "coderd_group.test",
+					ImportState:             true,
+					ImportStateId:           "default/example-group",
 					ImportStateVerify:       true,
 					ImportStateVerifyIgnore: []string{"members"},
 				},
@@ -122,6 +130,39 @@ func TestAccGroupResource(t *testing.T) {
 			},
 		})
 	})
+}
+
+func TestAccGroupResourceAGPL(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := context.Background()
+	client := integration.StartCoder(ctx, t, "group_acc_agpl", false)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	cfg1 := testAccGroupResourceconfig{
+		URL:            client.URL.String(),
+		Token:          client.SessionToken(),
+		Name:           ptr.Ref("example-group"),
+		DisplayName:    ptr.Ref("Example Group"),
+		AvatarUrl:      ptr.Ref("https://google.com"),
+		QuotaAllowance: ptr.Ref(int32(100)),
+		Members:        ptr.Ref([]string{firstUser.ID.String()}),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg1.String(t),
+				ExpectError: regexp.MustCompile("Your license is not entitled to use groups."),
+			},
+		},
+	})
+
 }
 
 type testAccGroupResourceconfig struct {

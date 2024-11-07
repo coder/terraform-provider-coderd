@@ -50,7 +50,7 @@ func (d *UserDataSource) Metadata(ctx context.Context, req datasource.MetadataRe
 
 func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An existing user on the coder deployment",
+		MarkdownDescription: "An existing user on the Coder deployment",
 
 		// Validation handled by ConfigValidators
 		Attributes: map[string]schema.Attribute{
@@ -72,12 +72,12 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 				Computed:            true,
 			},
 			"roles": schema.SetAttribute{
-				MarkdownDescription: "Roles assigned to the user. Valid roles are 'owner', 'template-admin', 'user-admin', and 'auditor'.",
+				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.",
 				Computed:            true,
 				ElementType:         types.StringType,
 			},
 			"login_type": schema.StringAttribute{
-				MarkdownDescription: "Type of login for the user. Valid types are 'none', 'password', 'github', and 'oidc'.",
+				MarkdownDescription: "Type of login for the user. Valid types are `none`, `password', `github`, and `oidc`.",
 				Computed:            true,
 			},
 			"suspended": schema.BoolAttribute{
@@ -149,6 +149,11 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 	user, err := client.User(ctx, ident)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with identifier %q not found. Marking as deleted.", ident))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 		return
 	}

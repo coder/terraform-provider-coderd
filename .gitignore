@@ -39,3 +39,10 @@ terraform-provider-coderd
 integration/integration.tfrc
 
 *.tfstate
+
+# Local .terraform directories
+**/.terraform/*
+
+
+# Ignore transient lock info files created by terraform apply
+.terraform.tfstate.lock.info

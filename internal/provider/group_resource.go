@@ -3,11 +3,13 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -45,13 +47,22 @@ type GroupResourceModel struct {
 	Members        types.Set    `tfsdk:"members"`
 }
 
+func CheckGroupEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
+	if !features[codersdk.FeatureTemplateRBAC].Enabled {
+		diags.AddError("Feature not enabled", "Your license is not entitled to use groups.")
+		return
+	}
+	return nil
+}
+
 func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_group"
 }
 
 func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A group on the Coder deployment. If you want to have a group resource with unmanaged members, but still want to read the members in Terraform, use the `data.coderd_group` data source.",
+		MarkdownDescription: "A group on the Coder deployment.\n\n" +
+			"Creating groups requires an Enterprise license.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -65,13 +76,16 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The unique name of the group.",
 				Required:            true,
+				Validators: []validator.String{
+					codersdkvalidator.GroupName(),
+				},
 			},
 			"display_name": schema.StringAttribute{
 				MarkdownDescription: "The display name of the group. Defaults to the group name.",
 				Computed:            true,
 				Optional:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
+					codersdkvalidator.DisplayName(),
 				},
 				Default: stringdefault.StaticString(""),
 			},
@@ -98,7 +112,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 			"members": schema.SetAttribute{
-				MarkdownDescription: "Members of the group, by ID. If null, members will not be added or removed by Terraform.",
+				MarkdownDescription: "Members of the group, by ID. If `null`, members will not be added or removed by Terraform. To have a group resource with unmanaged members, but be able to read the members in Terraform, use `data.coderd_group`",
 				ElementType:         UUIDType,
 				Optional:            true,
 			},
@@ -136,6 +150,11 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, r.data.Features)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	client := r.data.Client
 
 	if data.OrganizationID.IsUnknown() {
@@ -144,7 +163,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	orgID := data.OrganizationID.ValueUUID()
 
-	tflog.Trace(ctx, "creating group")
+	tflog.Info(ctx, "creating group")
 	group, err := client.CreateGroup(ctx, orgID, codersdk.CreateGroupRequest{
 		Name:           data.Name.ValueString(),
 		DisplayName:    data.DisplayName.ValueString(),
@@ -155,13 +174,13 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully created group", map[string]any{
+	tflog.Info(ctx, "successfully created group", map[string]any{
 		"id": group.ID.String(),
 	})
 	data.ID = UUIDValue(group.ID)
 	data.DisplayName = types.StringValue(group.DisplayName)
 
-	tflog.Trace(ctx, "setting group members")
+	tflog.Info(ctx, "setting group members")
 	var members []string
 	resp.Diagnostics.Append(
 		data.Members.ElementsAs(ctx, &members, false)...,
@@ -176,7 +195,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to add members to group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully set group members")
+	tflog.Info(ctx, "successfully set group members")
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -198,6 +217,11 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	group, err := client.Group(ctx, groupID)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group, got error: %s", err))
 		return
 	}
@@ -256,7 +280,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 		add, remove = memberDiff(curMembers, plannedMembers)
 	}
-	tflog.Trace(ctx, "updating group", map[string]any{
+	tflog.Info(ctx, "updating group", map[string]any{
 		"id":              groupID,
 		"new_members":     add,
 		"removed_members": remove,
@@ -279,7 +303,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated group")
+	tflog.Info(ctx, "successfully updated group")
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -298,7 +322,7 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	client := r.data.Client
 	groupID := data.ID.ValueUUID()
 
-	tflog.Trace(ctx, "deleting group", map[string]any{
+	tflog.Info(ctx, "deleting group", map[string]any{
 		"id": groupID,
 	})
 	err := client.DeleteGroup(ctx, groupID)
@@ -306,14 +330,34 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete group, got error: %s", err))
 		return
 	}
-	tflog.Trace(ctx, "successfully deleted group")
+	tflog.Info(ctx, "successfully deleted group")
 }
 
 func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	var groupID uuid.UUID
 	client := r.data.Client
-	groupID, err := uuid.Parse(req.ID)
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse import group ID as UUID, got error: %s", err))
+	idParts := strings.Split(req.ID, "/")
+	if len(idParts) == 1 {
+		var err error
+		groupID, err = uuid.Parse(req.ID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to parse import group ID as UUID, got error: %s", err))
+			return
+		}
+	} else if len(idParts) == 2 {
+		org, err := client.OrganizationByName(ctx, idParts[0])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization with name %s: %s", idParts[0], err))
+			return
+		}
+		group, err := client.GroupByOrgAndName(ctx, org.ID, idParts[1])
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get group with name %s: %s", idParts[1], err))
+			return
+		}
+		groupID = group.ID
+	} else {
+		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<group-name>`")
 		return
 	}
 	group, err := client.Group(ctx, groupID)
@@ -325,5 +369,5 @@ func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStat
 		resp.Diagnostics.AddError("Client Error", "Cannot import groups created via OIDC")
 		return
 	}
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), groupID.String())...)
 }
