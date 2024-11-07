@@ -139,6 +139,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewTemplateResource,
 		NewWorkspaceProxyResource,
 		NewLicenseResource,
+		NewOrganizationResource,
 	}
 }
 
