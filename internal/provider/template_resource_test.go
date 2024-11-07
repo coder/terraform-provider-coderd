@@ -17,6 +17,7 @@ import (
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 )
@@ -42,12 +43,12 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("example-template"),
+			Name:  ptr.Ref("example-template"),
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    PtrTo(true),
+					Active:    ptr.Ref(true),
 				},
 			},
 			ACL: testAccTemplateACLConfig{
@@ -57,28 +58,28 @@ func TestAccTemplateResource(t *testing.T) {
 
 		cfg2 := cfg1
 		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Name = PtrTo("example-template-new")
+		cfg2.Name = ptr.Ref("example-template-new")
 		cfg2.Versions[0].Directory = &exTemplateTwo
-		cfg2.Versions[0].Name = PtrTo("new")
+		cfg2.Versions[0].Name = ptr.Ref("new")
 
 		cfg3 := cfg2
 		cfg3.Versions = slices.Clone(cfg3.Versions)
 		cfg3.Versions = append(cfg3.Versions, testAccTemplateVersionConfig{
-			Name:      PtrTo("legacy-template"),
+			Name:      ptr.Ref("legacy-template"),
 			Directory: &exTemplateOne,
-			Active:    PtrTo(false),
+			Active:    ptr.Ref(false),
 			TerraformVariables: []testAccTemplateKeyValueConfig{
 				{
-					Key:   PtrTo("name"),
-					Value: PtrTo("world"),
+					Key:   ptr.Ref("name"),
+					Value: ptr.Ref("world"),
 				},
 			},
 		})
 
 		cfg4 := cfg3
 		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Active = PtrTo(false)
-		cfg4.Versions[1].Active = PtrTo(true)
+		cfg4.Versions[0].Active = ptr.Ref(false)
+		cfg4.Versions[1].Active = ptr.Ref(true)
 
 		cfg5 := cfg4
 		cfg5.Versions = slices.Clone(cfg5.Versions)
@@ -240,26 +241,26 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("example-template2"),
+			Name:  ptr.Ref("example-template2"),
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
-					Directory: PtrTo("../../integration/template-test/example-template-2/"),
+					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
+							Key:   ptr.Ref("name"),
+							Value: ptr.Ref("world"),
 						},
 					},
-					Active: PtrTo(true),
+					Active: ptr.Ref(true),
 				},
 				{
 					// Auto-generated version name
-					Directory: PtrTo("../../integration/template-test/example-template-2/"),
+					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
+							Key:   ptr.Ref("name"),
+							Value: ptr.Ref("world"),
 						},
 					},
 				},
@@ -271,28 +272,28 @@ func TestAccTemplateResource(t *testing.T) {
 
 		cfg2 := cfg1
 		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[1].Name = PtrTo("new-name")
+		cfg2.Versions[1].Name = ptr.Ref("new-name")
 
 		cfg3 := cfg2
 		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Name = PtrTo("new-name-one")
-		cfg3.Versions[1].Name = PtrTo("new-name-two")
+		cfg3.Versions[0].Name = ptr.Ref("new-name-one")
+		cfg3.Versions[1].Name = ptr.Ref("new-name-two")
 		cfg3.Versions[0], cfg3.Versions[1] = cfg3.Versions[1], cfg3.Versions[0]
 
 		cfg4 := cfg1
 		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Directory = PtrTo("../../integration/template-test/example-template/")
+		cfg4.Versions[0].Directory = ptr.Ref("../../integration/template-test/example-template/")
 
 		cfg5 := cfg4
 		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[1].Directory = PtrTo("../../integration/template-test/example-template/")
+		cfg5.Versions[1].Directory = ptr.Ref("../../integration/template-test/example-template/")
 
 		cfg6 := cfg5
 		cfg6.Versions = slices.Clone(cfg6.Versions)
 		cfg6.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
-				Key:   PtrTo("name"),
-				Value: PtrTo("world2"),
+				Key:   ptr.Ref("name"),
+				Value: ptr.Ref("world2"),
 			},
 		}
 
@@ -368,18 +369,18 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo("example-template3"),
+			Name:  ptr.Ref("example-template3"),
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
-					Directory: PtrTo("../../integration/template-test/example-template-2/"),
+					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   PtrTo("name"),
-							Value: PtrTo("world"),
+							Key:   ptr.Ref("name"),
+							Value: ptr.Ref("world"),
 						},
 					},
-					Active: PtrTo(true),
+					Active: ptr.Ref(true),
 				},
 			},
 			ACL: testAccTemplateACLConfig{
@@ -391,8 +392,8 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg2.Versions = slices.Clone(cfg2.Versions)
 		cfg2.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
-				Key:   PtrTo("name"),
-				Value: PtrTo("world2"),
+				Key:   ptr.Ref("name"),
+				Value: ptr.Ref("world2"),
 			},
 		}
 
@@ -436,29 +437,29 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
-		Name:  PtrTo("example-template"),
+		Name:  ptr.Ref("example-template"),
 		Versions: []testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
-				Directory: PtrTo("../../integration/template-test/example-template"),
-				Active:    PtrTo(true),
+				Directory: ptr.Ref("../../integration/template-test/example-template"),
+				Active:    ptr.Ref(true),
 			},
 		},
 		ACL: testAccTemplateACLConfig{
 			GroupACL: []testAccTemplateKeyValueConfig{
 				{
-					Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
-					Value: PtrTo("use"),
+					Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
+					Value: ptr.Ref("use"),
 				},
 				{
-					Key:   PtrTo(group.ID.String()),
-					Value: PtrTo("admin"),
+					Key:   ptr.Ref(group.ID.String()),
+					Value: ptr.Ref("admin"),
 				},
 			},
 			UserACL: []testAccTemplateKeyValueConfig{
 				{
-					Key:   PtrTo(firstUser.ID.String()),
-					Value: PtrTo("admin"),
+					Key:   ptr.Ref(firstUser.ID.String()),
+					Value: ptr.Ref("admin"),
 				},
 			},
 		},
@@ -466,17 +467,17 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 
 	cfg2 := cfg1
 	cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
-	cfg2.MaxPortShareLevel = PtrTo("owner")
+	cfg2.MaxPortShareLevel = ptr.Ref("owner")
 
 	cfg3 := cfg2
 	cfg3.ACL.null = true
-	cfg3.MaxPortShareLevel = PtrTo("public")
+	cfg3.MaxPortShareLevel = ptr.Ref("public")
 
 	cfg4 := cfg3
-	cfg4.AllowUserAutostart = PtrTo(false)
+	cfg4.AllowUserAutostart = ptr.Ref(false)
 	cfg4.AutostopRequirement = testAccAutostopRequirementConfig{
-		DaysOfWeek: PtrTo([]string{"monday", "tuesday"}),
-		Weeks:      PtrTo(int64(2)),
+		DaysOfWeek: ptr.Ref([]string{"monday", "tuesday"}),
+		Weeks:      ptr.Ref(int64(2)),
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -571,47 +572,47 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
-		Name:  PtrTo("example-template"),
+		Name:  ptr.Ref("example-template"),
 		Versions: []testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
-				Directory: PtrTo("../../integration/template-test/example-template/"),
-				Active:    PtrTo(true),
+				Directory: ptr.Ref("../../integration/template-test/example-template/"),
+				Active:    ptr.Ref(true),
 			},
 		},
-		AllowUserAutostart: PtrTo(false),
+		AllowUserAutostart: ptr.Ref(false),
 	}
 
 	cfg2 := cfg1
 	cfg2.AllowUserAutostart = nil
-	cfg2.AutostopRequirement.DaysOfWeek = PtrTo([]string{"monday", "tuesday"})
+	cfg2.AutostopRequirement.DaysOfWeek = ptr.Ref([]string{"monday", "tuesday"})
 
 	cfg3 := cfg2
 	cfg3.AutostopRequirement.null = true
-	cfg3.AutostartRequirement = PtrTo([]string{})
+	cfg3.AutostartRequirement = ptr.Ref([]string{})
 
 	cfg4 := cfg3
-	cfg4.FailureTTL = PtrTo(int64(1))
+	cfg4.FailureTTL = ptr.Ref(int64(1))
 
 	cfg5 := cfg4
 	cfg5.FailureTTL = nil
 	cfg5.AutostartRequirement = nil
-	cfg5.RequireActiveVersion = PtrTo(true)
+	cfg5.RequireActiveVersion = ptr.Ref(true)
 
 	cfg6 := cfg5
 	cfg6.RequireActiveVersion = nil
 	cfg6.ACL = testAccTemplateACLConfig{
 		GroupACL: []testAccTemplateKeyValueConfig{
 			{
-				Key:   PtrTo(firstUser.OrganizationIDs[0].String()),
-				Value: PtrTo("use"),
+				Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
+				Value: ptr.Ref("use"),
 			},
 		},
 	}
 
 	cfg7 := cfg6
 	cfg7.ACL.null = true
-	cfg7.MaxPortShareLevel = PtrTo("owner")
+	cfg7.MaxPortShareLevel = ptr.Ref("owner")
 
 	for _, cfg := range []testAccTemplateResourceConfig{cfg1, cfg2, cfg3, cfg4} {
 		resource.Test(t, resource.TestCase{

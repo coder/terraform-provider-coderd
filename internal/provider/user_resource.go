@@ -22,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -71,8 +72,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				MarkdownDescription: "Username of the user.",
 				Required:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 32),
-					stringvalidator.RegexMatches(nameValidRegex, "Username must be alphanumeric with hyphens."),
+					codersdkvalidator.Name(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -80,7 +80,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Computed:            true,
 				Optional:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 128),
+					codersdkvalidator.UserRealName(),
 				},
 			},
 			"email": schema.StringAttribute{
