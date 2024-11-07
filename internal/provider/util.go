@@ -8,21 +8,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 )
-
-var (
-	nameValidRegex           = regexp.MustCompile("^[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$")
-	templateVersionNameRegex = regexp.MustCompile(`^[a-zA-Z0-9]+(?:[_.-]{1}[a-zA-Z0-9]+)*$`)
-	displayNameRegex         = regexp.MustCompile(`^[^\s](.*[^\s])?$`)
-)
-
-func PtrTo[T any](v T) *T {
-	return &v
-}
 
 func PrintOrNull(v any) string {
 	if v == nil {

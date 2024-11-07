@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -77,8 +77,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				MarkdownDescription: "The unique name of the group.",
 				Required:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 36),
-					stringvalidator.RegexMatches(nameValidRegex, "Group names must be alpahnumeric with hyphens."),
+					codersdkvalidator.GroupName(),
 				},
 			},
 			"display_name": schema.StringAttribute{
@@ -86,8 +85,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Computed:            true,
 				Optional:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 64),
-					stringvalidator.RegexMatches(displayNameRegex, "Group display names must be alphanumeric with spaces"),
+					codersdkvalidator.DisplayName(),
 				},
 				Default: stringdefault.StaticString(""),
 			},

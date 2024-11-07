@@ -10,8 +10,10 @@ import (
 	"strings"
 
 	"cdr.dev/slog"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
@@ -257,8 +259,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				MarkdownDescription: "The name of the template.",
 				Required:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 32),
-					stringvalidator.RegexMatches(nameValidRegex, "Template names must be alphanumeric with hyphens."),
+					codersdkvalidator.Name(),
 				},
 			},
 			"display_name": schema.StringAttribute{
@@ -266,8 +267,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 64),
-					stringvalidator.RegexMatches(displayNameRegex, "Template display names must be alphanumeric with spaces."),
+					codersdkvalidator.DisplayName(),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -417,8 +417,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Optional:            true,
 							Computed:            true,
 							Validators: []validator.String{
-								stringvalidator.LengthBetween(1, 64),
-								stringvalidator.RegexMatches(templateVersionNameRegex, "Template version names must be alphanumeric with underscores and dots."),
+								codersdkvalidator.TemplateVersionName(),
 							},
 						},
 						"message": schema.StringAttribute{
@@ -1253,7 +1252,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
-		MaxPortShareLevel:              PtrTo(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
+		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
 	}
