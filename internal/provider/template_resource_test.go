@@ -764,7 +764,7 @@ func (c testAccTemplateACLConfig) String(t *testing.T) string {
 	`
 
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}
@@ -794,7 +794,7 @@ func (c testAccAutostopRequirementConfig) String(t *testing.T) string {
 	}
 	`
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}
@@ -859,7 +859,7 @@ resource "coderd_template" "test" {
 `
 
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -29,8 +30,8 @@ type UserDataSource struct {
 // UserDataSourceModel describes the data source data model.
 type UserDataSourceModel struct {
 	// Username or ID must be set
-	ID       UUID         `tfsdk:"id"`
-	Username types.String `tfsdk:"username"`
+	ID       internal.UUID `tfsdk:"id"`
+	Username types.String  `tfsdk:"username"`
 
 	Name            types.String `tfsdk:"name"`
 	Email           types.String `tfsdk:"email"`
@@ -55,7 +56,7 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 		// Validation handled by ConfigValidators
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username is supplied.",
 				Optional:            true,
 			},
@@ -91,7 +92,7 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			"organization_ids": schema.SetAttribute{
 				MarkdownDescription: "IDs of organizations the user is associated with.",
 				Computed:            true,
-				ElementType:         UUIDType,
+				ElementType:         internal.UUIDType,
 			},
 			"created_at": schema.Int64Attribute{
 				MarkdownDescription: "Unix timestamp of when the user was created.",
@@ -149,7 +150,7 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 	user, err := client.User(ctx, ident)
 	if err != nil {
-		if isNotFound(err) {
+		if internal.IsNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with identifier %q not found. Marking as deleted.", ident))
 			resp.State.RemoveResource(ctx)
 			return
@@ -169,7 +170,7 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		return
 	}
 
-	data.ID = UUIDValue(user.ID)
+	data.ID = internal.UUIDValue(user.ID)
 	data.Username = types.StringValue(user.Username)
 	data.Name = types.StringValue(user.Name)
 	data.Email = types.StringValue(user.Email)
@@ -183,9 +184,9 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 
 	orgIDs := make([]attr.Value, 0, len(user.OrganizationIDs))
 	for _, orgID := range user.OrganizationIDs {
-		orgIDs = append(orgIDs, UUIDValue(orgID))
+		orgIDs = append(orgIDs, internal.UUIDValue(orgID))
 	}
-	data.OrganizationIDs = types.SetValueMust(UUIDType, orgIDs)
+	data.OrganizationIDs = types.SetValueMust(internal.UUIDType, orgIDs)
 	data.CreatedAt = types.Int64Value(user.CreatedAt.Unix())
 	data.LastSeenAt = types.Int64Value(user.LastSeenAt.Unix())
 	data.ThemePreference = types.StringValue(user.ThemePreference)

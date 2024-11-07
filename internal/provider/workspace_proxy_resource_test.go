@@ -109,7 +109,7 @@ resource "coderd_workspace_proxy" "test" {
 `
 	// Define template functions
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}

@@ -1,4 +1,4 @@
-package provider
+package internal
 
 import (
 	"crypto/sha256"
@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
@@ -57,35 +58,43 @@ func PrintOrNull(v any) string {
 	}
 }
 
-func computeDirectoryHash(directory string) (string, error) {
-	var files []string
+func DirectoryHash(directory string) (string, error) {
+	hash := sha256.New()
+	count := 0
+
+	// filepath.Walk always proceeds in lexical order, so we don't need to worry
+	// about order variance from call to call producing different hash results.
 	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
-			files = append(files, path)
+		if info.IsDir() {
+			return nil
 		}
+
+		count++
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		hash.Write([]byte(path))
+		hash.Write(data)
+
 		return nil
 	})
+
 	if err != nil {
 		return "", err
 	}
 
-	hash := sha256.New()
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return "", err
-		}
-		hash.Write(data)
-	}
+	hash.Write([]byte(strconv.Itoa(count)))
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// memberDiff returns the members to add and remove from the group, given the current members and the planned members.
+// MemberDiff returns the members to add and remove from the group, given the current members and the planned members.
 // plannedMembers is deliberately our custom type, as Terraform cannot automatically produce `[]uuid.UUID` from a set.
-func memberDiff(curMembers []uuid.UUID, plannedMembers []UUID) (add, remove []string) {
+func MemberDiff(curMembers []uuid.UUID, plannedMembers []UUID) (add, remove []string) {
 	curSet := make(map[uuid.UUID]struct{}, len(curMembers))
 	planSet := make(map[uuid.UUID]struct{}, len(plannedMembers))
 
@@ -106,7 +115,7 @@ func memberDiff(curMembers []uuid.UUID, plannedMembers []UUID) (add, remove []st
 	return add, remove
 }
 
-func isNotFound(err error) bool {
+func IsNotFound(err error) bool {
 	var sdkErr *codersdk.Error
 	return errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound
 }

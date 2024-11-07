@@ -1,4 +1,4 @@
-package provider
+package internal
 
 import (
 	"context"
@@ -25,7 +25,7 @@ func (t uuidType) String() string {
 	return "UUID"
 }
 
-func (t uuidType) ValueType(ctx context.Context) attr.Value {
+func (t uuidType) ValueType(_ context.Context) attr.Value {
 	return UUID{}
 }
 
@@ -38,7 +38,7 @@ func (t uuidType) Equal(o attr.Type) bool {
 }
 
 // ValueFromString implements basetypes.StringTypable.
-func (t uuidType) ValueFromString(ctx context.Context, in basetypes.StringValue) (basetypes.StringValuable, diag.Diagnostics) {
+func (t uuidType) ValueFromString(_ context.Context, in basetypes.StringValue) (basetypes.StringValuable, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	if in.IsNull() {

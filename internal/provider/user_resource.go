@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -20,9 +23,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-
-	"github.com/coder/coder/v2/codersdk"
-	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -40,7 +40,7 @@ type UserResource struct {
 
 // UserResourceModel describes the resource data model.
 type UserResourceModel struct {
-	ID UUID `tfsdk:"id"`
+	ID internal.UUID `tfsdk:"id"`
 
 	Username  types.String `tfsdk:"username"`
 	Name      types.String `tfsdk:"name"`
@@ -61,7 +61,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Computed:            true,
 				MarkdownDescription: "User ID",
 				PlanModifiers: []planmodifier.String{
@@ -191,7 +191,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	tflog.Info(ctx, "successfully created user", map[string]any{
 		"id": user.ID.String(),
 	})
-	data.ID = UUIDValue(user.ID)
+	data.ID = internal.UUIDValue(user.ID)
 
 	tflog.Info(ctx, "updating user profile")
 	name := data.Username
@@ -250,7 +250,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	user, err := client.User(ctx, data.ID.ValueString())
 	if err != nil {
-		if isNotFound(err) {
+		if internal.IsNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with ID %q not found. Marking as deleted.", data.ID.ValueString()))
 			resp.State.RemoveResource(ctx)
 			return

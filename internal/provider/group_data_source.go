@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -28,9 +29,9 @@ type GroupDataSource struct {
 // GroupDataSourceModel describes the data source data model.
 type GroupDataSourceModel struct {
 	// ID or name and organization ID must be set
-	ID             UUID         `tfsdk:"id"`
-	Name           types.String `tfsdk:"name"`
-	OrganizationID UUID         `tfsdk:"organization_id"`
+	ID             internal.UUID `tfsdk:"id"`
+	Name           types.String  `tfsdk:"name"`
+	OrganizationID internal.UUID `tfsdk:"organization_id"`
 
 	DisplayName    types.String `tfsdk:"display_name"`
 	AvatarURL      types.String `tfsdk:"avatar_url"`
@@ -40,14 +41,14 @@ type GroupDataSourceModel struct {
 }
 
 type Member struct {
-	ID              UUID         `tfsdk:"id"`
-	Username        types.String `tfsdk:"username"`
-	Email           types.String `tfsdk:"email"`
-	CreatedAt       types.Int64  `tfsdk:"created_at"`
-	LastSeenAt      types.Int64  `tfsdk:"last_seen_at"`
-	Status          types.String `tfsdk:"status"`
-	LoginType       types.String `tfsdk:"login_type"`
-	ThemePreference types.String `tfsdk:"theme_preference"`
+	ID              internal.UUID `tfsdk:"id"`
+	Username        types.String  `tfsdk:"username"`
+	Email           types.String  `tfsdk:"email"`
+	CreatedAt       types.Int64   `tfsdk:"created_at"`
+	LastSeenAt      types.Int64   `tfsdk:"last_seen_at"`
+	Status          types.String  `tfsdk:"status"`
+	LoginType       types.String  `tfsdk:"login_type"`
+	ThemePreference types.String  `tfsdk:"theme_preference"`
 }
 
 func (d *GroupDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -63,7 +64,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 				MarkdownDescription: "The ID of the group to retrieve. This field will be populated if a name and organization ID is supplied.",
 				Optional:            true,
 				Computed:            true,
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Validators: []validator.String{
 					stringvalidator.AtLeastOneOf(path.Expressions{
 						path.MatchRoot("name"),
@@ -78,7 +79,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The organization ID that the group belongs to. This field will be populated if an ID is supplied. Defaults to the provider default organization ID.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Optional:            true,
 				Computed:            true,
 			},
@@ -102,7 +103,7 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
-							CustomType: UUIDType,
+							CustomType: internal.UUIDType,
 							Computed:   true,
 						},
 						"username": schema.StringAttribute{
@@ -176,7 +177,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	client := d.data.Client
 
 	if data.OrganizationID.IsNull() {
-		data.OrganizationID = UUIDValue(d.data.DefaultOrganizationID)
+		data.OrganizationID = internal.UUIDValue(d.data.DefaultOrganizationID)
 	}
 
 	var (
@@ -187,7 +188,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		groupID := data.ID.ValueUUID()
 		group, err = client.Group(ctx, groupID)
 		if err != nil {
-			if isNotFound(err) {
+			if internal.IsNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
 				resp.State.RemoveResource(ctx)
 				return
@@ -196,11 +197,11 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 			return
 		}
 		data.Name = types.StringValue(group.Name)
-		data.OrganizationID = UUIDValue(group.OrganizationID)
+		data.OrganizationID = internal.UUIDValue(group.OrganizationID)
 	} else {
 		group, err = client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 		if err != nil {
-			if isNotFound(err) {
+			if internal.IsNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with name %s not found in organization with ID %s. Marking as deleted.", data.Name.ValueString(), data.OrganizationID.ValueString()))
 				resp.State.RemoveResource(ctx)
 				return
@@ -208,7 +209,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 			resp.Diagnostics.AddError("Failed to get group by name and org ID", err.Error())
 			return
 		}
-		data.ID = UUIDValue(group.ID)
+		data.ID = internal.UUIDValue(group.ID)
 	}
 
 	data.DisplayName = types.StringValue(group.DisplayName)
@@ -217,7 +218,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	members := make([]Member, 0, len(group.Members))
 	for _, member := range group.Members {
 		members = append(members, Member{
-			ID:              UUIDValue(member.ID),
+			ID:              internal.UUIDValue(member.ID),
 			Username:        types.StringValue(member.Username),
 			Email:           types.StringValue(member.Email),
 			CreatedAt:       types.Int64Value(member.CreatedAt.Unix()),

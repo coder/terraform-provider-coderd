@@ -13,6 +13,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -52,26 +53,26 @@ type TemplateResource struct {
 
 // TemplateResourceModel describes the resource data model.
 type TemplateResourceModel struct {
-	ID UUID `tfsdk:"id"`
+	ID internal.UUID `tfsdk:"id"`
 
-	Name                           types.String `tfsdk:"name"`
-	DisplayName                    types.String `tfsdk:"display_name"`
-	Description                    types.String `tfsdk:"description"`
-	OrganizationID                 UUID         `tfsdk:"organization_id"`
-	Icon                           types.String `tfsdk:"icon"`
-	DefaultTTLMillis               types.Int64  `tfsdk:"default_ttl_ms"`
-	ActivityBumpMillis             types.Int64  `tfsdk:"activity_bump_ms"`
-	AutostopRequirement            types.Object `tfsdk:"auto_stop_requirement"`
-	AutostartPermittedDaysOfWeek   types.Set    `tfsdk:"auto_start_permitted_days_of_week"`
-	AllowUserCancelWorkspaceJobs   types.Bool   `tfsdk:"allow_user_cancel_workspace_jobs"`
-	AllowUserAutostart             types.Bool   `tfsdk:"allow_user_auto_start"`
-	AllowUserAutostop              types.Bool   `tfsdk:"allow_user_auto_stop"`
-	FailureTTLMillis               types.Int64  `tfsdk:"failure_ttl_ms"`
-	TimeTilDormantMillis           types.Int64  `tfsdk:"time_til_dormant_ms"`
-	TimeTilDormantAutoDeleteMillis types.Int64  `tfsdk:"time_til_dormant_autodelete_ms"`
-	RequireActiveVersion           types.Bool   `tfsdk:"require_active_version"`
-	DeprecationMessage             types.String `tfsdk:"deprecation_message"`
-	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
+	Name                           types.String  `tfsdk:"name"`
+	DisplayName                    types.String  `tfsdk:"display_name"`
+	Description                    types.String  `tfsdk:"description"`
+	OrganizationID                 internal.UUID `tfsdk:"organization_id"`
+	Icon                           types.String  `tfsdk:"icon"`
+	DefaultTTLMillis               types.Int64   `tfsdk:"default_ttl_ms"`
+	ActivityBumpMillis             types.Int64   `tfsdk:"activity_bump_ms"`
+	AutostopRequirement            types.Object  `tfsdk:"auto_stop_requirement"`
+	AutostartPermittedDaysOfWeek   types.Set     `tfsdk:"auto_start_permitted_days_of_week"`
+	AllowUserCancelWorkspaceJobs   types.Bool    `tfsdk:"allow_user_cancel_workspace_jobs"`
+	AllowUserAutostart             types.Bool    `tfsdk:"allow_user_auto_start"`
+	AllowUserAutostop              types.Bool    `tfsdk:"allow_user_auto_stop"`
+	FailureTTLMillis               types.Int64   `tfsdk:"failure_ttl_ms"`
+	TimeTilDormantMillis           types.Int64   `tfsdk:"time_til_dormant_ms"`
+	TimeTilDormantAutoDeleteMillis types.Int64   `tfsdk:"time_til_dormant_autodelete_ms"`
+	RequireActiveVersion           types.Bool    `tfsdk:"require_active_version"`
+	DeprecationMessage             types.String  `tfsdk:"deprecation_message"`
+	MaxPortShareLevel              types.String  `tfsdk:"max_port_share_level"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
@@ -150,19 +151,19 @@ func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features 
 }
 
 type TemplateVersion struct {
-	ID                 UUID         `tfsdk:"id"`
-	Name               types.String `tfsdk:"name"`
-	Message            types.String `tfsdk:"message"`
-	Directory          types.String `tfsdk:"directory"`
-	DirectoryHash      types.String `tfsdk:"directory_hash"`
-	Active             types.Bool   `tfsdk:"active"`
-	TerraformVariables []Variable   `tfsdk:"tf_vars"`
-	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
+	ID                 internal.UUID `tfsdk:"id"`
+	Name               types.String  `tfsdk:"name"`
+	Message            types.String  `tfsdk:"message"`
+	Directory          types.String  `tfsdk:"directory"`
+	DirectoryHash      types.String  `tfsdk:"directory_hash"`
+	Active             types.Bool    `tfsdk:"active"`
+	TerraformVariables []Variable    `tfsdk:"tf_vars"`
+	ProvisionerTags    []Variable    `tfsdk:"provisioner_tags"`
 }
 
 type Versions []TemplateVersion
 
-func (v Versions) ByID(id UUID) *TemplateVersion {
+func (v Versions) ByID(id internal.UUID) *TemplateVersion {
 	for _, m := range v {
 		if m.ID.Equal(id) {
 			return &m
@@ -249,7 +250,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the template.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -278,7 +279,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -409,7 +410,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
-							CustomType: UUIDType,
+							CustomType: internal.UUIDType,
 							Computed:   true,
 						},
 						"name": schema.StringAttribute{
@@ -489,7 +490,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+		data.OrganizationID = internal.UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	if data.DisplayName.IsUnknown() {
@@ -563,10 +564,10 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				return
 			}
 		}
-		data.Versions[idx].ID = UUIDValue(versionResp.ID)
+		data.Versions[idx].ID = internal.UUIDValue(versionResp.ID)
 		data.Versions[idx].Name = types.StringValue(versionResp.Name)
 	}
-	data.ID = UUIDValue(templateResp.ID)
+	data.ID = internal.UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
 
 	// TODO: Remove this update call once this provider requires a Coder
@@ -610,7 +611,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	template, err := client.Template(ctx, templateID)
 	if err != nil {
-		if isNotFound(err) {
+		if internal.IsNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Template with ID %s not found. Marking as deleted.", templateID.String()))
 			resp.State.RemoveResource(ctx)
 			return
@@ -681,7 +682,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	if newState.OrganizationID.IsUnknown() {
-		newState.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+		newState.OrganizationID = internal.UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	if newState.DisplayName.IsUnknown() {
@@ -760,7 +761,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
 				return
 			}
-			newState.Versions[idx].ID = UUIDValue(versionResp.ID)
+			newState.Versions[idx].ID = internal.UUIDValue(versionResp.ID)
 			newState.Versions[idx].Name = types.StringValue(versionResp.Name)
 			if newState.Versions[idx].Active.ValueBool() {
 				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
@@ -957,7 +958,7 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 	}
 
 	for i := range planVersions {
-		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
+		hash, err := internal.DirectoryHash(planVersions[i].Directory.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
 			return
@@ -1063,7 +1064,7 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	var logs []codersdk.ProvisionerJobLog
 	directory := req.Version.Directory.ValueString()
 	tflog.Info(ctx, "uploading directory")
-	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
+	uploadResp, err := uploadDirectory(ctx, client, slog.Make(internal.NewLogSink(ctx)), directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload directory: %s", err), logs
 	}
@@ -1183,7 +1184,7 @@ func (r *TemplateResourceModel) readResponse(ctx context.Context, template *code
 	r.Name = types.StringValue(template.Name)
 	r.DisplayName = types.StringValue(template.DisplayName)
 	r.Description = types.StringValue(template.Description)
-	r.OrganizationID = UUIDValue(template.OrganizationID)
+	r.OrganizationID = internal.UUIDValue(template.OrganizationID)
 	r.Icon = types.StringValue(template.Icon)
 	r.DefaultTTLMillis = types.Int64Value(template.DefaultTTLMillis)
 	r.ActivityBumpMillis = types.Int64Value(template.ActivityBumpMillis)
@@ -1364,7 +1365,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 		// Versions whose Terraform configuration has not changed will have known
 		// IDs at this point, so we need to set this manually.
 		if !ok {
-			planVersions[i].ID = NewUUIDUnknown()
+			planVersions[i].ID = internal.NewUUIDUnknown()
 			// We might have the old randomly generated name in the plan,
 			// so unless the user has set it to a new one, we need to set it to
 			// unknown so that a new one is generated
@@ -1377,7 +1378,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 				// If the name is the same, use the existing ID, and remove
 				// it from the previous version candidates
 				if planVersions[i].Name.ValueString() == prev.Name {
-					planVersions[i].ID = UUIDValue(prev.ID)
+					planVersions[i].ID = internal.UUIDValue(prev.ID)
 					lv[planVersions[i].DirectoryHash.ValueString()] = append(prevList[:j], prevList[j+1:]...)
 					break
 				}
@@ -1390,7 +1391,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 	for i := range planVersions {
 		prevList := lv[planVersions[i].DirectoryHash.ValueString()]
 		if len(prevList) > 0 && planVersions[i].ID.IsUnknown() {
-			planVersions[i].ID = UUIDValue(prevList[0].ID)
+			planVersions[i].ID = internal.UUIDValue(prevList[0].ID)
 			if planVersions[i].Name.IsUnknown() {
 				planVersions[i].Name = types.StringValue(prevList[0].Name)
 			}
@@ -1407,7 +1408,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 				continue
 			}
 			if tfVariablesChanged(prevs, &planVersions[i]) {
-				planVersions[i].ID = NewUUIDUnknown()
+				planVersions[i].ID = internal.NewUUIDUnknown()
 				// We could always set the name to unknown here, to generate a
 				// random one (this is what the Web UI currently does when
 				// only updating tfvars).

@@ -195,7 +195,7 @@ resource "coderd_group" "test" {
 }
 `
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}

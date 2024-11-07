@@ -1,4 +1,4 @@
-package provider
+package internal
 
 import (
 	"context"
@@ -7,19 +7,19 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-var _ slog.Sink = &tfLogSink{}
+var _ slog.Sink = &tflogSink{}
 
-type tfLogSink struct {
-	tfCtx context.Context
+type tflogSink struct {
+	ctx context.Context
 }
 
-func newTFLogSink(tfCtx context.Context) *tfLogSink {
-	return &tfLogSink{
-		tfCtx: tfCtx,
+func NewLogSink(ctx context.Context) slog.Sink {
+	return &tflogSink{
+		ctx: ctx,
 	}
 }
 
-func (s *tfLogSink) LogEntry(ctx context.Context, e slog.SinkEntry) {
+func (s *tflogSink) LogEntry(ctx context.Context, e slog.SinkEntry) {
 	var logFn func(ctx context.Context, msg string, additionalFields ...map[string]interface{})
 	switch e.Level {
 	case slog.LevelDebug:
@@ -31,10 +31,10 @@ func (s *tfLogSink) LogEntry(ctx context.Context, e slog.SinkEntry) {
 	default:
 		logFn = tflog.Error
 	}
-	logFn(s.tfCtx, e.Message, mapToFields(e.Fields))
+	logFn(s.ctx, e.Message, mapToFields(e.Fields))
 }
 
-func (s *tfLogSink) Sync() {}
+func (s *tflogSink) Sync() {}
 
 func mapToFields(m slog.Map) map[string]interface{} {
 	fields := make(map[string]interface{}, len(m))

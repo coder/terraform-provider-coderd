@@ -11,6 +11,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
 )
@@ -188,7 +189,7 @@ data "coderd_group" "test" {
 `
 
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": internal.PrintOrNull,
 	}
 
 	buf := strings.Builder{}

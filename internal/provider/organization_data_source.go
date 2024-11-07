@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -29,9 +30,9 @@ type OrganizationDataSource struct {
 // OrganizationDataSourceModel describes the data source data model.
 type OrganizationDataSourceModel struct {
 	// Exactly one of ID, IsDefault, or Name must be set.
-	ID        UUID         `tfsdk:"id"`
-	IsDefault types.Bool   `tfsdk:"is_default"`
-	Name      types.String `tfsdk:"name"`
+	ID        internal.UUID `tfsdk:"id"`
+	IsDefault types.Bool    `tfsdk:"is_default"`
+	Name      types.String  `tfsdk:"name"`
 
 	CreatedAt types.Int64 `tfsdk:"created_at"`
 	UpdatedAt types.Int64 `tfsdk:"updated_at"`
@@ -55,7 +56,7 @@ This data source is only compatible with Coder version [2.13.0](https://github.c
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the organization to retrieve. This field will be populated if the organization is found by name, or if the default organization is requested.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Optional:            true,
 				Computed:            true,
 			},
@@ -81,7 +82,7 @@ This data source is only compatible with Coder version [2.13.0](https://github.c
 			"members": schema.SetAttribute{
 				MarkdownDescription: "Members of the organization, by ID",
 				Computed:            true,
-				ElementType:         UUIDType,
+				ElementType:         internal.UUIDType,
 			},
 		},
 	}
@@ -127,7 +128,7 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 		orgID := data.ID.ValueUUID()
 		org, err = client.Organization(ctx, orgID)
 		if err != nil {
-			if isNotFound(err) {
+			if internal.IsNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization with ID %s not found. Marking as deleted.", data.ID.ValueString()))
 				resp.State.RemoveResource(ctx)
 				return
@@ -142,7 +143,7 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	} else if data.IsDefault.ValueBool() { // Get Default
 		org, err = client.OrganizationByName(ctx, "default")
 		if err != nil {
-			if isNotFound(err) {
+			if internal.IsNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", "Default organization not found. Marking as deleted.")
 				resp.State.RemoveResource(ctx)
 				return
@@ -157,7 +158,7 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	} else { // By Name
 		org, err = client.OrganizationByName(ctx, data.Name.ValueString())
 		if err != nil {
-			if isNotFound(err) {
+			if internal.IsNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization with name %s not found. Marking as deleted.", data.Name))
 				resp.State.RemoveResource(ctx)
 				return
@@ -170,7 +171,7 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 			return
 		}
 	}
-	data.ID = UUIDValue(org.ID)
+	data.ID = internal.UUIDValue(org.ID)
 	data.Name = types.StringValue(org.Name)
 	data.IsDefault = types.BoolValue(org.IsDefault)
 	data.CreatedAt = types.Int64Value(org.CreatedAt.Unix())
@@ -182,9 +183,9 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	}
 	memberIDs := make([]attr.Value, 0, len(members))
 	for _, member := range members {
-		memberIDs = append(memberIDs, UUIDValue(member.UserID))
+		memberIDs = append(memberIDs, internal.UUIDValue(member.UserID))
 	}
-	data.Members = types.SetValueMust(UUIDType, memberIDs)
+	data.Members = types.SetValueMust(internal.UUIDType, memberIDs)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

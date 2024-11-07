@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -37,14 +38,14 @@ type GroupResource struct {
 
 // GroupResourceModel describes the resource data model.
 type GroupResourceModel struct {
-	ID UUID `tfsdk:"id"`
+	ID internal.UUID `tfsdk:"id"`
 
-	Name           types.String `tfsdk:"name"`
-	DisplayName    types.String `tfsdk:"display_name"`
-	AvatarURL      types.String `tfsdk:"avatar_url"`
-	QuotaAllowance types.Int32  `tfsdk:"quota_allowance"`
-	OrganizationID UUID         `tfsdk:"organization_id"`
-	Members        types.Set    `tfsdk:"members"`
+	Name           types.String  `tfsdk:"name"`
+	DisplayName    types.String  `tfsdk:"display_name"`
+	AvatarURL      types.String  `tfsdk:"avatar_url"`
+	QuotaAllowance types.Int32   `tfsdk:"quota_allowance"`
+	OrganizationID internal.UUID `tfsdk:"organization_id"`
+	Members        types.Set     `tfsdk:"members"`
 }
 
 func CheckGroupEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
@@ -67,7 +68,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Group ID.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -104,7 +105,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The organization ID that the group belongs to. Defaults to the provider default organization ID.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -113,7 +114,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			},
 			"members": schema.SetAttribute{
 				MarkdownDescription: "Members of the group, by ID. If `null`, members will not be added or removed by Terraform. To have a group resource with unmanaged members, but be able to read the members in Terraform, use `data.coderd_group`",
-				ElementType:         UUIDType,
+				ElementType:         internal.UUIDType,
 				Optional:            true,
 			},
 		},
@@ -141,9 +142,8 @@ func (r *GroupResource) Configure(ctx context.Context, req resource.ConfigureReq
 }
 
 func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data GroupResourceModel
-
 	// Read Terraform plan data into the model
+	var data GroupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 
 	if resp.Diagnostics.HasError() {
@@ -158,7 +158,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	client := r.data.Client
 
 	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+		data.OrganizationID = internal.UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	orgID := data.OrganizationID.ValueUUID()
@@ -177,7 +177,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	tflog.Info(ctx, "successfully created group", map[string]any{
 		"id": group.ID.String(),
 	})
-	data.ID = UUIDValue(group.ID)
+	data.ID = internal.UUIDValue(group.ID)
 	data.DisplayName = types.StringValue(group.DisplayName)
 
 	tflog.Info(ctx, "setting group members")
@@ -217,7 +217,7 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	group, err := client.Group(ctx, groupID)
 	if err != nil {
-		if isNotFound(err) {
+		if internal.IsNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
 			resp.State.RemoveResource(ctx)
 			return
@@ -230,13 +230,13 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	data.DisplayName = types.StringValue(group.DisplayName)
 	data.AvatarURL = types.StringValue(group.AvatarURL)
 	data.QuotaAllowance = types.Int32Value(int32(group.QuotaAllowance))
-	data.OrganizationID = UUIDValue(group.OrganizationID)
+	data.OrganizationID = internal.UUIDValue(group.OrganizationID)
 	if !data.Members.IsNull() {
 		members := make([]attr.Value, 0, len(group.Members))
 		for _, member := range group.Members {
-			members = append(members, UUIDValue(member.ID))
+			members = append(members, internal.UUIDValue(member.ID))
 		}
-		data.Members = types.SetValueMust(UUIDType, members)
+		data.Members = types.SetValueMust(internal.UUIDType, members)
 	}
 
 	// Save updated data into Terraform state
@@ -255,7 +255,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	client := r.data.Client
 	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+		data.OrganizationID = internal.UUIDValue(r.data.DefaultOrganizationID)
 	}
 	groupID := data.ID.ValueUUID()
 
@@ -267,7 +267,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	var add []string
 	var remove []string
 	if !data.Members.IsNull() {
-		var plannedMembers []UUID
+		var plannedMembers []internal.UUID
 		resp.Diagnostics.Append(
 			data.Members.ElementsAs(ctx, &plannedMembers, false)...,
 		)

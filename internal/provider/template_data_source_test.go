@@ -251,7 +251,7 @@ data "coderd_template" "test" {
 }`
 
 	funcMap := template.FuncMap{
-		"orNull": PrintOrNull,
+		"orNull": printOrNull,
 	}
 
 	buf := strings.Builder{}

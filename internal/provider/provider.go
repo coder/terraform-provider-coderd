@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 )
 
 // Ensure CoderdProvider satisfies various provider interfaces.
@@ -42,7 +43,7 @@ type CoderdProviderModel struct {
 	URL   types.String `tfsdk:"url"`
 	Token types.String `tfsdk:"token"`
 
-	DefaultOrganizationID UUID `tfsdk:"default_organization_id"`
+	DefaultOrganizationID internal.UUID `tfsdk:"default_organization_id"`
 }
 
 func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -78,7 +79,6 @@ This provider is only compatible with Coder version [2.10.1](https://github.com/
 
 func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var data CoderdProviderModel
-
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 
 	if resp.Diagnostics.HasError() {

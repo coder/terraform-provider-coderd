@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -30,18 +31,18 @@ type TemplateDataSource struct {
 // TemplateDataSourceModel describes the data source data model.
 type TemplateDataSourceModel struct {
 	// ((Organization and Name) or ID) must be set
-	OrganizationID UUID         `tfsdk:"organization_id"`
-	ID             UUID         `tfsdk:"id"`
-	Name           types.String `tfsdk:"name"`
+	OrganizationID internal.UUID `tfsdk:"organization_id"`
+	ID             internal.UUID `tfsdk:"id"`
+	Name           types.String  `tfsdk:"name"`
 
 	DisplayName types.String `tfsdk:"display_name"`
 	// TODO: Provisioner
-	Description        types.String `tfsdk:"description"`
-	ActiveVersionID    UUID         `tfsdk:"active_version_id"`
-	ActiveUserCount    types.Int64  `tfsdk:"active_user_count"`
-	Deprecated         types.Bool   `tfsdk:"deprecated"`
-	DeprecationMessage types.String `tfsdk:"deprecation_message"`
-	Icon               types.String `tfsdk:"icon"`
+	Description        types.String  `tfsdk:"description"`
+	ActiveVersionID    internal.UUID `tfsdk:"active_version_id"`
+	ActiveUserCount    types.Int64   `tfsdk:"active_user_count"`
+	Deprecated         types.Bool    `tfsdk:"deprecated"`
+	DeprecationMessage types.String  `tfsdk:"deprecation_message"`
+	Icon               types.String  `tfsdk:"icon"`
 
 	DefaultTTLMillis             types.Int64  `tfsdk:"default_ttl_ms"`
 	ActivityBumpMillis           types.Int64  `tfsdk:"activity_bump_ms"`
@@ -59,9 +60,9 @@ type TemplateDataSourceModel struct {
 	RequireActiveVersion types.Bool   `tfsdk:"require_active_version"`
 	MaxPortShareLevel    types.String `tfsdk:"max_port_share_level"`
 
-	CreatedByUserID UUID        `tfsdk:"created_by_user_id"`
-	CreatedAt       types.Int64 `tfsdk:"created_at"` // Unix timestamp
-	UpdatedAt       types.Int64 `tfsdk:"updated_at"` // Unix timestamp
+	CreatedByUserID internal.UUID `tfsdk:"created_by_user_id"`
+	CreatedAt       types.Int64   `tfsdk:"created_at"` // Unix timestamp
+	UpdatedAt       types.Int64   `tfsdk:"updated_at"` // Unix timestamp
 
 	ACL types.Object `tfsdk:"acl"`
 }
@@ -77,13 +78,13 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 		Attributes: map[string]schema.Attribute{
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the organization the template is associated with. This field will be populated if an ID is supplied. Defaults to the provider default organization ID.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Optional:            true,
 				Computed:            true,
 			},
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the template to retrieve. This field will be populated if a template name is supplied.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
@@ -108,7 +109,7 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			},
 			"active_version_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the active version of the template.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Computed:            true,
 			},
 			"active_user_count": schema.Int64Attribute{
@@ -190,7 +191,7 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			},
 			"created_by_user_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the user who created the template.",
-				CustomType:          UUIDType,
+				CustomType:          internal.UUIDType,
 				Computed:            true,
 			},
 			"created_at": schema.Int64Attribute{
@@ -253,7 +254,7 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 		template, err = client.Template(ctx, data.ID.ValueUUID())
 	} else {
 		if data.OrganizationID.ValueUUID() == uuid.Nil {
-			data.OrganizationID = UUIDValue(d.data.DefaultOrganizationID)
+			data.OrganizationID = internal.UUIDValue(d.data.DefaultOrganizationID)
 		}
 		if data.OrganizationID.ValueUUID() == uuid.Nil {
 			resp.Diagnostics.AddError("Client Error", "name requires organization_id to be set")
@@ -262,7 +263,7 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 		template, err = client.TemplateByName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 	}
 	if err != nil {
-		if isNotFound(err) {
+		if internal.IsNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", "Template not found. Marking as deleted.")
 			resp.State.RemoveResource(ctx)
 			return
@@ -310,12 +311,12 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.ACL = aclObj
 	data.AutostartPermittedDaysOfWeek = types.SetValueMust(types.StringType, autoStartDays)
 	data.AutostopRequirement = asrObj
-	data.OrganizationID = UUIDValue(template.OrganizationID)
-	data.ID = UUIDValue(template.ID)
+	data.OrganizationID = internal.UUIDValue(template.OrganizationID)
+	data.ID = internal.UUIDValue(template.ID)
 	data.Name = types.StringValue(template.Name)
 	data.DisplayName = types.StringValue(template.DisplayName)
 	data.Description = types.StringValue(template.Description)
-	data.ActiveVersionID = UUIDValue(template.ActiveVersionID)
+	data.ActiveVersionID = internal.UUIDValue(template.ActiveVersionID)
 	data.ActiveUserCount = types.Int64Value(int64(template.ActiveUserCount))
 	data.Deprecated = types.BoolValue(template.Deprecated)
 	data.DeprecationMessage = types.StringValue(template.DeprecationMessage)
@@ -330,7 +331,7 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	data.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
-	data.CreatedByUserID = UUIDValue(template.CreatedByID)
+	data.CreatedByUserID = internal.UUIDValue(template.CreatedByID)
 	data.CreatedAt = types.Int64Value(template.CreatedAt.Unix())
 	data.UpdatedAt = types.Int64Value(template.UpdatedAt.Unix())
 
