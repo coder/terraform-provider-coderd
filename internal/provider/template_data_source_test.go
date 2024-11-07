@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 )
@@ -49,8 +50,8 @@ func TestAccTemplateDataSource(t *testing.T) {
 		Description:        "An example template",
 		Icon:               "/path/to/icon.png",
 		VersionID:          version.ID,
-		DefaultTTLMillis:   PtrTo((10 * time.Hour).Milliseconds()),
-		ActivityBumpMillis: PtrTo((4 * time.Hour).Milliseconds()),
+		DefaultTTLMillis:   ptr.Ref((10 * time.Hour).Milliseconds()),
+		ActivityBumpMillis: ptr.Ref((4 * time.Hour).Milliseconds()),
 		AutostopRequirement: &codersdk.TemplateAutostopRequirement{
 			DaysOfWeek: []string{"sunday"},
 			Weeks:      1,
@@ -58,12 +59,12 @@ func TestAccTemplateDataSource(t *testing.T) {
 		AutostartRequirement: &codersdk.TemplateAutostartRequirement{
 			DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
 		},
-		AllowUserCancelWorkspaceJobs:   PtrTo(true),
-		AllowUserAutostart:             PtrTo(true),
-		AllowUserAutostop:              PtrTo(true),
-		FailureTTLMillis:               PtrTo((1 * time.Hour).Milliseconds()),
-		TimeTilDormantMillis:           PtrTo((7 * 24 * time.Hour).Milliseconds()),
-		TimeTilDormantAutoDeleteMillis: PtrTo((30 * 24 * time.Hour).Milliseconds()),
+		AllowUserCancelWorkspaceJobs:   ptr.Ref(true),
+		AllowUserAutostart:             ptr.Ref(true),
+		AllowUserAutostop:              ptr.Ref(true),
+		FailureTTLMillis:               ptr.Ref((1 * time.Hour).Milliseconds()),
+		TimeTilDormantMillis:           ptr.Ref((7 * 24 * time.Hour).Milliseconds()),
+		TimeTilDormantAutoDeleteMillis: ptr.Ref((30 * 24 * time.Hour).Milliseconds()),
 		DisableEveryoneGroupAccess:     true,
 		RequireActiveVersion:           true,
 	})
@@ -93,9 +94,9 @@ func TestAccTemplateDataSource(t *testing.T) {
 		UpdateWorkspaceLastUsedAt:      false,
 		UpdateWorkspaceDormantAt:       false,
 		RequireActiveVersion:           tpl.RequireActiveVersion,
-		DeprecationMessage:             PtrTo("This template is deprecated"),
+		DeprecationMessage:             ptr.Ref("This template is deprecated"),
 		DisableEveryoneGroupAccess:     true,
-		MaxPortShareLevel:              PtrTo(codersdk.WorkspaceAgentPortShareLevelOwner),
+		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevelOwner),
 	})
 	require.NoError(t, err)
 
@@ -153,8 +154,8 @@ func TestAccTemplateDataSource(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
 			URL:            client.URL.String(),
 			Token:          client.SessionToken(),
-			OrganizationID: PtrTo(orgID.String()),
-			Name:           PtrTo(tpl.Name),
+			OrganizationID: ptr.Ref(orgID.String()),
+			Name:           ptr.Ref(tpl.Name),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -173,7 +174,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    PtrTo(tpl.ID.String()),
+			ID:    ptr.Ref(tpl.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -210,7 +211,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  PtrTo(tpl.Name),
+			Name:  ptr.Ref(tpl.Name),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,

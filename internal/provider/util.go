@@ -20,10 +20,6 @@ var (
 	displayNameRegex         = regexp.MustCompile(`^[^\s](.*[^\s])?$`)
 )
 
-func PtrTo[T any](v T) *T {
-	return &v
-}
-
 func PrintOrNull(v any) string {
 	if v == nil {
 		return "null"
