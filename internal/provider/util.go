@@ -13,10 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func PtrTo[T any](v T) *T {
-	return &v
-}
-
 func PrintOrNull(v any) string {
 	if v == nil {
 		return "null"

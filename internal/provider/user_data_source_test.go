@@ -8,6 +8,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -53,7 +54,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:      client.URL.String(),
 			Token:    client.SessionToken(),
-			Username: PtrTo(user.Username),
+			Username: ptr.Ref(user.Username),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -71,7 +72,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    PtrTo(user.ID.String()),
+			ID:    ptr.Ref(user.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },

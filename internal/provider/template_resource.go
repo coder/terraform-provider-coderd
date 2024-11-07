@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cdr.dev/slog"
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
@@ -1251,7 +1252,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
-		MaxPortShareLevel:              PtrTo(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
+		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
 	}
