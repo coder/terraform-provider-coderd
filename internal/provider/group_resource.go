@@ -77,7 +77,7 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 				MarkdownDescription: "The unique name of the group.",
 				Required:            true,
 				Validators: []validator.String{
-					codersdkvalidator.Name(),
+					codersdkvalidator.GroupName(),
 				},
 			},
 			"display_name": schema.StringAttribute{

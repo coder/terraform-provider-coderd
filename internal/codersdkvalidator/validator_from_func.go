@@ -43,7 +43,7 @@ func (v functionValidator) Description(_ context.Context) string {
 	if v.err != nil {
 		return v.err.Error()
 	}
-	return "value must be a valid name"
+	return v.defaultMessage
 }
 
 func (v functionValidator) MarkdownDescription(ctx context.Context) string {
