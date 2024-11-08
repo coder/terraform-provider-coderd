@@ -84,6 +84,5 @@ resource "coderd_template" "example" {
 
 ### Optional
 
-- `default_organization_id` (String) Default organization ID to use when creating resources. Defaults to the first organization the token has access to.
 - `token` (String) API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to `$CODER_SESSION_TOKEN`.
 - `url` (String) URL to the Coder deployment. Defaults to `$CODER_URL`.

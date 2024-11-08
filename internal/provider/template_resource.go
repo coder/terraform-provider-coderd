@@ -278,6 +278,8 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the organization that this template belongs to.",
+				Computed:            true,
+				Optional:            true,
 				CustomType:          UUIDType,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplaceIfConfigured(),
