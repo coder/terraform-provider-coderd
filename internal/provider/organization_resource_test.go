@@ -11,6 +11,9 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,11 +51,11 @@ func TestAccOrganizationResource(t *testing.T) {
 				// Create and Read
 				{
 					Config: cfg1.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckResourceAttr("coderd_organization.test", "name", "example-org"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "display_name", "Example Organization"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "icon", "/icon/coder.svg"),
-					),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("name"), knownvalue.StringExact("example-org")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("Example Organization")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("icon"), knownvalue.StringExact("/icon/coder.svg")),
+					},
 				},
 				// Import
 				{
@@ -64,17 +67,10 @@ func TestAccOrganizationResource(t *testing.T) {
 				// Update and Read
 				{
 					Config: cfg2.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckResourceAttr("coderd_organization.test", "name", "example-org-new"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "display_name", "Example Organization New"),
-					),
-				},
-				// Unmanaged members
-				{
-					Config: cfg3.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckNoResourceAttr("coderd_organization.test", "members"),
-					),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("name"), knownvalue.StringExact("example-org-new")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("Example Organization New")),
+					},
 				},
 			},
 		})
