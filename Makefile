@@ -1,7 +1,11 @@
 default: testacc
 
 fmt:
+	go fmt ./...
 	terraform fmt -recursive
+
+vet:
+	go vet ./...
 
 gen:
 	go generate ./...

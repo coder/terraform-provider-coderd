@@ -24,7 +24,6 @@ An organization on the Coder deployment
 - `description` (String)
 - `display_name` (String) Display name of the organization. Defaults to name.
 - `icon` (String)
-- `members` (Set of String) Members of the organization, by ID. If null, members will not be added or removed by Terraform.
 
 ### Read-Only
 
