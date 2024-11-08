@@ -21,25 +21,7 @@ func TestAccOrganizationResource(t *testing.T) {
 
 	ctx := context.Background()
 	client := integration.StartCoder(ctx, t, "group_acc", true)
-	firstUser, err := client.User(ctx, codersdk.Me)
-	require.NoError(t, err)
-
-	user1, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-		Email:          "example@coder.com",
-		Username:       "example",
-		Password:       "SomeSecurePassword!",
-		UserLoginType:  "password",
-		OrganizationID: firstUser.OrganizationIDs[0],
-	})
-	require.NoError(t, err)
-
-	user2, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-		Email:          "example2@coder.com",
-		Username:       "example2",
-		Password:       "SomeSecurePassword!",
-		UserLoginType:  "password",
-		OrganizationID: firstUser.OrganizationIDs[0],
-	})
+	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
 	cfg1 := testAccOrganizationResourceConfig{
@@ -49,16 +31,13 @@ func TestAccOrganizationResource(t *testing.T) {
 		DisplayName: ptr.Ref("Example Organization"),
 		Description: ptr.Ref("This is an example organization"),
 		Icon:        ptr.Ref("/icon/coder.svg"),
-		Members:     ptr.Ref([]string{user1.ID.String()}),
 	}
 
 	cfg2 := cfg1
 	cfg2.Name = ptr.Ref("example-org-new")
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
-	cfg2.Members = ptr.Ref([]string{user2.ID.String()})
 
 	cfg3 := cfg2
-	cfg3.Members = nil
 
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
@@ -77,11 +56,10 @@ func TestAccOrganizationResource(t *testing.T) {
 				},
 				// Import
 				{
-					Config:                  cfg1.String(t),
-					ResourceName:            "coderd_organization.test",
-					ImportState:             true,
-					ImportStateVerify:       true,
-					ImportStateVerifyIgnore: []string{"members"},
+					Config:            cfg1.String(t),
+					ResourceName:      "coderd_organization.test",
+					ImportState:       true,
+					ImportStateVerify: true,
 				},
 				// Update and Read
 				{
@@ -127,7 +105,6 @@ type testAccOrganizationResourceConfig struct {
 	DisplayName *string
 	Description *string
 	Icon        *string
-	Members     *[]string
 }
 
 func (c testAccOrganizationResourceConfig) String(t *testing.T) string {
@@ -143,7 +120,6 @@ resource "coderd_organization" "test" {
 	display_name = {{orNull .DisplayName}}
 	description  = {{orNull .Description}}
 	icon         = {{orNull .Icon}}
-	members      = {{orNull .Members}}
 }
 `
 	funcMap := template.FuncMap{

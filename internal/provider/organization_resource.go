@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/coder/coder/v2/coderd/util/slice"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
-	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -36,7 +33,6 @@ type OrganizationResourceModel struct {
 	DisplayName types.String `tfsdk:"display_name"`
 	Description types.String `tfsdk:"description"`
 	Icon        types.String `tfsdk:"icon"`
-	Members     types.Set    `tfsdk:"members"`
 }
 
 func NewOrganizationResource() resource.Resource {
@@ -85,11 +81,6 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 				Computed: true,
 				Default:  stringdefault.StaticString(""),
 			},
-			"members": schema.SetAttribute{
-				MarkdownDescription: "Members of the organization, by ID. If null, members will not be added or removed by Terraform.",
-				ElementType:         UUIDType,
-				Optional:            true,
-			},
 		},
 	}
 }
@@ -136,18 +127,6 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 	data.DisplayName = types.StringValue(org.DisplayName)
 	data.Description = types.StringValue(org.Description)
 	data.Icon = types.StringValue(org.Icon)
-	if !data.Members.IsNull() {
-		members, err := r.Client.OrganizationMembers(ctx, orgID)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization members, got error: %s", err))
-			return
-		}
-		memberIDs := make([]attr.Value, 0, len(members))
-		for _, member := range members {
-			memberIDs = append(memberIDs, UUIDValue(member.UserID))
-		}
-		data.Members = types.SetValueMust(UUIDType, memberIDs)
-	}
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -180,42 +159,6 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 	// We also fill in  `DisplayName`, since it's optional but the backend will
 	// default it.
 	data.DisplayName = types.StringValue(org.DisplayName)
-
-	// Only configure members if they're specified
-	if !data.Members.IsNull() {
-		tflog.Trace(ctx, "setting organization members")
-		var members []UUID
-		resp.Diagnostics.Append(data.Members.ElementsAs(ctx, &members, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-
-		for _, memberID := range members {
-			_, err = r.Client.PostOrganizationMember(ctx, org.ID, memberID.ValueString())
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to add member %s to organization %s, got error: %s", memberID, org.ID, err))
-				return
-			}
-		}
-
-		// Coder adds the user who creates the organization by default, but we may
-		// actually be connected as a user who isn't in the list of members. If so
-		// we should remove them!
-		me, err := r.Client.User(ctx, codersdk.Me)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
-			return
-		}
-		if !slice.Contains(members, UUIDValue(me.ID)) {
-			err = r.Client.DeleteOrganizationMember(ctx, org.ID, codersdk.Me)
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete self from new organization: %s", err))
-				return
-			}
-		}
-
-		tflog.Trace(ctx, "successfully set organization members")
-	}
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -250,46 +193,6 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 	tflog.Trace(ctx, "successfully updated organization")
-
-	// If the organization membership is managed, update them.
-	if !data.Members.IsNull() {
-		orgMembers, err := r.Client.OrganizationMembers(ctx, orgID)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization members , got error: %s", err))
-			return
-		}
-		currentMembers := make([]uuid.UUID, 0, len(orgMembers))
-		for _, member := range orgMembers {
-			currentMembers = append(currentMembers, member.UserID)
-		}
-
-		var plannedMembers []UUID
-		resp.Diagnostics.Append(data.Members.ElementsAs(ctx, &plannedMembers, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-
-		add, remove := memberDiff(currentMembers, plannedMembers)
-		tflog.Trace(ctx, "updating organization members", map[string]any{
-			"new_members":     add,
-			"removed_members": remove,
-		})
-		for _, memberID := range add {
-			_, err := r.Client.PostOrganizationMember(ctx, orgID, memberID)
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to add member %s to organization %s, got error: %s", memberID, orgID, err))
-				return
-			}
-		}
-		for _, memberID := range remove {
-			err := r.Client.DeleteOrganizationMember(ctx, orgID, memberID)
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to remove member %s from organization %s, got error: %s", memberID, orgID, err))
-				return
-			}
-		}
-		tflog.Trace(ctx, "successfully updated organization members")
-	}
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
