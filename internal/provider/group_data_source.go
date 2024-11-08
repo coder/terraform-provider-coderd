@@ -22,7 +22,7 @@ func NewGroupDataSource() datasource.DataSource {
 
 // GroupDataSource defines the data source implementation.
 type GroupDataSource struct {
-	data *CoderdProviderData
+	*CoderdProviderData
 }
 
 // GroupDataSourceModel describes the data source data model.
@@ -155,28 +155,20 @@ func (d *GroupDataSource) Configure(ctx context.Context, req datasource.Configur
 		return
 	}
 
-	d.data = data
+	d.CoderdProviderData = data
 }
 
 func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var data GroupDataSourceModel
-
 	// Read Terraform configuration data into the model
+	var data GroupDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, d.data.Features)...)
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, d.Features)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	client := d.data.Client
-
-	if data.OrganizationID.IsNull() {
-		data.OrganizationID = UUIDValue(d.data.DefaultOrganizationID)
 	}
 
 	var (
@@ -185,7 +177,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	)
 	if !data.ID.IsNull() {
 		groupID := data.ID.ValueUUID()
-		group, err = client.Group(ctx, groupID)
+		group, err = r.Client.Group(ctx, groupID)
 		if err != nil {
 			if isNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
@@ -198,7 +190,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		data.Name = types.StringValue(group.Name)
 		data.OrganizationID = UUIDValue(group.OrganizationID)
 	} else {
-		group, err = client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
+		group, err = r.Client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 		if err != nil {
 			if isNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with name %s not found in organization with ID %s. Marking as deleted.", data.Name.ValueString(), data.OrganizationID.ValueString()))

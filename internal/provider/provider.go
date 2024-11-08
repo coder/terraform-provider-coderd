@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"cdr.dev/slog"
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -32,17 +31,14 @@ type CoderdProvider struct {
 }
 
 type CoderdProviderData struct {
-	Client                *codersdk.Client
-	DefaultOrganizationID uuid.UUID
-	Features              map[codersdk.FeatureName]codersdk.Feature
+	Client   *codersdk.Client
+	Features map[codersdk.FeatureName]codersdk.Feature
 }
 
 // CoderdProviderModel describes the provider data model.
 type CoderdProviderModel struct {
 	URL   types.String `tfsdk:"url"`
 	Token types.String `tfsdk:"token"`
-
-	DefaultOrganizationID UUID `tfsdk:"default_organization_id"`
 }
 
 func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -67,20 +63,13 @@ This provider is only compatible with Coder version [2.10.1](https://github.com/
 				MarkdownDescription: "API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to `$CODER_SESSION_TOKEN`.",
 				Optional:            true,
 			},
-			"default_organization_id": schema.StringAttribute{
-				MarkdownDescription: "Default organization ID to use when creating resources. Defaults to the first organization the token has access to.",
-				CustomType:          UUIDType,
-				Optional:            true,
-			},
 		},
 	}
 }
 
 func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var data CoderdProviderModel
-
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -110,23 +99,14 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	client := codersdk.New(url)
 	client.SetLogger(slog.Make(tfslog{}).Leveled(slog.LevelDebug))
 	client.SetSessionToken(data.Token.ValueString())
-	if data.DefaultOrganizationID.IsNull() {
-		user, err := client.User(ctx, codersdk.Me)
-		if err != nil {
-			resp.Diagnostics.AddError("default_organization_id", "failed to get default organization ID: "+err.Error())
-			return
-		}
-		data.DefaultOrganizationID = UUIDValue(user.OrganizationIDs[0])
-	}
 	entitlements, err := client.Entitlements(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", "failed to get deployment entitlements: "+err.Error())
 	}
 
 	providerData := &CoderdProviderData{
-		Client:                client,
-		DefaultOrganizationID: data.DefaultOrganizationID.ValueUUID(),
-		Features:              entitlements.Features,
+		Client:   client,
+		Features: entitlements.Features,
 	}
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
