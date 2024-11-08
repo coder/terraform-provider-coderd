@@ -206,7 +206,7 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
 			return
 		}
-		if slice.Contains(members, UUIDValue(me.ID)) {
+		if !slice.Contains(members, UUIDValue(me.ID)) {
 			err = r.Client.DeleteOrganizationMember(ctx, org.ID, codersdk.Me)
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete self from new organization: %s", err))
