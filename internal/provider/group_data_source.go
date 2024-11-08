@@ -177,7 +177,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	)
 	if !data.ID.IsNull() {
 		groupID := data.ID.ValueUUID()
-		group, err = r.Client.Group(ctx, groupID)
+		group, err = d.Client.Group(ctx, groupID)
 		if err != nil {
 			if isNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
@@ -190,7 +190,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		data.Name = types.StringValue(group.Name)
 		data.OrganizationID = UUIDValue(group.OrganizationID)
 	} else {
-		group, err = r.Client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
+		group, err = d.Client.GroupByOrgAndName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 		if err != nil {
 			if isNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with name %s not found in organization with ID %s. Marking as deleted.", data.Name.ValueString(), data.OrganizationID.ValueString()))
