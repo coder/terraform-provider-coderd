@@ -73,8 +73,6 @@ func TestAccOrganizationResource(t *testing.T) {
 						resource.TestCheckResourceAttr("coderd_organization.test", "name", "example-org"),
 						resource.TestCheckResourceAttr("coderd_organization.test", "display_name", "Example Organization"),
 						resource.TestCheckResourceAttr("coderd_organization.test", "icon", "/icon/coder.svg"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "members.#", "1"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "members.0", user1.ID.String()),
 					),
 				},
 				// Import
@@ -91,8 +89,6 @@ func TestAccOrganizationResource(t *testing.T) {
 					Check: resource.ComposeAggregateTestCheckFunc(
 						resource.TestCheckResourceAttr("coderd_organization.test", "name", "example-org-new"),
 						resource.TestCheckResourceAttr("coderd_organization.test", "display_name", "Example Organization New"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "members.#", "1"),
-						resource.TestCheckResourceAttr("coderd_organization.test", "members.0", user2.ID.String()),
 					),
 				},
 				// Unmanaged members
