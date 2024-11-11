@@ -85,8 +85,8 @@ github.com/chenzhuoyu/iasm v0.9.0 h1:9fhXjVzq5hUy2gkhhgHl95zG2cEAhw9OSGs8toWWAwo
 github.com/chenzhuoyu/iasm v0.9.0/go.mod h1:Xjy2NpN3h7aUqeqM+woSuuvxmIe6+DDsiNLIrkAmYog=
 github.com/cloudflare/circl v1.3.7 h1:qlCDlTPz2n9fu58M0Nh1J/JzcFpfgkFHHX3O35r5vcU=
 github.com/cloudflare/circl v1.3.7/go.mod h1:sRTcRWXGLrKw6yIGJ+l7amYJFfAXbZG0kBSc8r4zxgA=
-github.com/coder/coder/v2 v2.17.0 h1:U59FfsE++IitesBaCUzAX6/9A+VpnXQKO81RzefWVww=
-github.com/coder/coder/v2 v2.17.0/go.mod h1:5Fu0xCkdXPuFLwYq6ThyI4DAv4v//Sx5saM/M5CAU2w=
+github.com/coder/coder/v2 v2.17.1 h1:GdaMIZh8OdXWeZjfT1c2ONXnnq4GseTw13ZGznhpRpY=
+github.com/coder/coder/v2 v2.17.1/go.mod h1:5Fu0xCkdXPuFLwYq6ThyI4DAv4v//Sx5saM/M5CAU2w=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 h1:3A0ES21Ke+FxEM8CXx9n47SZOKOpgSE1bbJzlE4qPVs=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0/go.mod h1:5UuS2Ts+nTToAMeOjNlnHFkPahrtDkmpydBen/3wgZc=
 github.com/coder/serpent v0.8.0 h1:6OR+k6fekhSeEDmwwzBgnSjaa7FfGGrMlc3GoAEH9dg=
