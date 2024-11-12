@@ -114,11 +114,23 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	orgName := data.Name.ValueString()
-	org, err := r.Client.OrganizationByName(ctx, orgName)
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by ID, got error: %s", err))
-		return
+	var org codersdk.Organization
+	var err error
+	if data.ID.IsNull() {
+		orgName := data.Name.ValueString()
+		org, err = r.Client.OrganizationByName(ctx, orgName)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by name, got error: %s", err))
+			return
+		}
+		data.ID = UUIDValue(org.ID)
+	} else {
+		orgID := data.ID.ValueUUID()
+		org, err = r.Client.Organization(ctx, orgID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by ID, got error: %s", err))
+			return
+		}
 	}
 
 	// We've fetched the organization ID from state, and the latest values for
