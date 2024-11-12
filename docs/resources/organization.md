@@ -17,7 +17,7 @@ An organization on the Coder deployment
 
 ### Required
 
-- `name` (String) Username of the organization.
+- `name` (String) Name of the organization.
 
 ### Optional
 
