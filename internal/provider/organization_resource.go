@@ -114,8 +114,8 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	orgID := data.ID.ValueUUID()
-	org, err := r.Client.Organization(ctx, orgID)
+	orgName := data.Name.ValueString()
+	org, err := r.Client.OrganizationByName(ctx, orgName)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization by ID, got error: %s", err))
 		return

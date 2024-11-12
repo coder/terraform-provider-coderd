@@ -28,3 +28,12 @@ An organization on the Coder deployment
 ### Read-Only
 
 - `id` (String) Organization ID
+
+## Import
+
+Import is supported using the following syntax:
+
+```shell
+# Organizations can be imported by their name
+terraform import coderd_organization.our_org our_org
+```

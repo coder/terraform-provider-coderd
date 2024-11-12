@@ -40,8 +40,6 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2.Name = ptr.Ref("example-org-new")
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
 
-	cfg3 := cfg2
-
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
