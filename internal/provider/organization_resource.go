@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -33,6 +35,9 @@ type OrganizationResourceModel struct {
 	DisplayName types.String `tfsdk:"display_name"`
 	Description types.String `tfsdk:"description"`
 	Icon        types.String `tfsdk:"icon"`
+
+	GroupSync types.Object `tfsdk:"group_sync"`
+	RoleSync  types.Object `tfsdk:"role_sync"`
 }
 
 func NewOrganizationResource() resource.Resource {
@@ -81,6 +86,13 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(""),
+			},
+
+			"group_sync": schema.ObjectAttribute{
+				Optional: true,
+			},
+			"role_sync": schema.ObjectAttribute{
+				Optional: true,
 			},
 		},
 	}
@@ -207,6 +219,14 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 	}
 	tflog.Trace(ctx, "successfully updated organization")
 
+	if data.GroupSync.IsNull() {
+		err = r.patchGroupSync(ctx, orgID, data.GroupSync)
+		if err != nil {
+			resp.Diagnostics.AddError("Group Sync Update error", "uh oh john")
+			return
+		}
+	}
+
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -239,4 +259,53 @@ func (r *OrganizationResource) ImportState(ctx context.Context, req resource.Imp
 	// Terraform will eventually `Read` in the rest of the fields after we have
 	// set the `name` attribute.
 	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
+}
+
+func (r *OrganizationResource) patchGroupSync(
+	ctx context.Context,
+	orgID uuid.UUID,
+	groupSyncAttr types.Object,
+) error {
+	var settings codersdk.GroupSyncSettings
+
+	field, ok := groupSyncAttr.Attributes()["field"].(types.String)
+	if !ok {
+		return fmt.Errorf("oh jeez")
+	}
+	settings.Field = field.ValueString()
+
+	mappingMap, ok := groupSyncAttr.Attributes()["mapping"].(types.Map)
+	if !ok {
+		return fmt.Errorf("oh jeez")
+	}
+	var mapping map[string][]uuid.UUID
+	diags := mappingMap.ElementsAs(ctx, mapping, false)
+	if diags.HasError() {
+		return fmt.Errorf("oh jeez")
+	}
+	settings.Mapping = mapping
+
+	regexFilterStr, ok := groupSyncAttr.Attributes()["regex_filter"].(types.String)
+	if !ok {
+		return fmt.Errorf("oh jeez")
+	}
+	regexFilter, err := regexp.Compile(regexFilterStr.ValueString())
+	if err != nil {
+		return err
+	}
+	settings.RegexFilter = regexFilter
+
+	legacyMappingMap, ok := groupSyncAttr.Attributes()["legacy_group_name_mapping"].(types.Map)
+	if !ok {
+		return fmt.Errorf("oh jeez")
+	}
+	var legacyMapping map[string]string
+	diags = legacyMappingMap.ElementsAs(ctx, legacyMapping, false)
+	if diags.HasError() {
+		return fmt.Errorf("oh jeez")
+	}
+	settings.LegacyNameMapping = legacyMapping
+
+	_, err = r.Client.PatchGroupIDPSyncSettings(ctx, orgID.String(), settings)
+	return err
 }
