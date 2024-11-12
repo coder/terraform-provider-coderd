@@ -57,7 +57,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 				},
 			},
 			"name": schema.StringAttribute{
-				MarkdownDescription: "Username of the organization.",
+				MarkdownDescription: "Name of the organization.",
 				Required:            true,
 				Validators: []validator.String{
 					codersdkvalidator.Name(),
@@ -67,6 +67,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 				MarkdownDescription: "Display name of the organization. Defaults to name.",
 				Computed:            true,
 				Optional:            true,
+				Default:             stringdefault.StaticString(""),
 				Validators: []validator.String{
 					codersdkvalidator.DisplayName(),
 				},
@@ -224,6 +225,6 @@ func (r *OrganizationResource) Delete(ctx context.Context, req resource.DeleteRe
 
 func (r *OrganizationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Terraform will eventually `Read` in the rest of the fields after we have
-	// set the `id` attribute.
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// set the `name` attribute.
+	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }

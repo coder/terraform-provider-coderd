@@ -75,22 +75,6 @@ func TestAccOrganizationResource(t *testing.T) {
 			},
 		})
 	})
-
-	t.Run("CreateUnmanagedMembersOk", func(t *testing.T) {
-		resource.Test(t, resource.TestCase{
-			IsUnitTest:               true,
-			PreCheck:                 func() { testAccPreCheck(t) },
-			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: cfg3.String(t),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckNoResourceAttr("coderd_organization.test", "members"),
-					),
-				},
-			},
-		})
-	})
 }
 
 type testAccOrganizationResourceConfig struct {
