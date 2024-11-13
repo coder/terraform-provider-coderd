@@ -39,9 +39,12 @@ func (r *LicenseResource) Metadata(ctx context.Context, req resource.MetadataReq
 
 func (r *LicenseResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "A license for a Coder deployment.\n\nIt's recommended to create multiple instances of this " +
-			"resource when updating a license. Modifying an existing license will cause the resource to be replaced, " +
-			"which may result in a brief unlicensed period.\n\n" +
+		MarkdownDescription: "A license for a Coder deployment.\n\nIt's recommended to set " +
+			"[`create_before_destroy`](https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle#create_before_destroy) " +
+			"on license resources. Without setting this, Terraform will remove the old " +
+			"license before adding the updated license. This will result in a temporary " +
+			"disruption to your users; during which they may be unable to use features " +
+			"that require a license.\n\n" +
 			"Terraform does not guarantee this resource " +
 			"will be created before other resources or attributes that require a licensed deployment. " +
 			"The `depends_on` meta-argument is instead recommended.",
