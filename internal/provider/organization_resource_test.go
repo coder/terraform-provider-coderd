@@ -57,11 +57,11 @@ func TestAccOrganizationResource(t *testing.T) {
 				},
 				// Import
 				{
-					Config:            cfg2.String(t),
+					Config:            cfg1.String(t),
 					ResourceName:      "coderd_organization.test",
 					ImportState:       true,
 					ImportStateVerify: true,
-					ImportStateId:     *cfg2.Name,
+					ImportStateId:     *cfg1.Name,
 				},
 				// Update and Read
 				{
