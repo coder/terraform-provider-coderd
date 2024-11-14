@@ -61,7 +61,7 @@ func TestAccOrganizationResource(t *testing.T) {
 					ResourceName:      "coderd_organization.test",
 					ImportState:       true,
 					ImportStateVerify: true,
-					ImportStateId:     "name",
+					ImportStateId:     *cfg2.Name,
 				},
 				// Update and Read
 				{
