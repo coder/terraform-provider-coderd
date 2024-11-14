@@ -153,7 +153,13 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	tflog.Trace(ctx, "creating organization")
+	tflog.Trace(ctx, "creating organization", map[string]any{
+		"id":           data.ID.ValueUUID(),
+		"name":         data.Name.ValueString(),
+		"display_name": data.DisplayName.ValueString(),
+		"description":  data.Description.ValueString(),
+		"icon":         data.Icon.ValueString(),
+	})
 	org, err := r.Client.CreateOrganization(ctx, codersdk.CreateOrganizationRequest{
 		Name:        data.Name.ValueString(),
 		DisplayName: data.DisplayName.ValueString(),
@@ -165,7 +171,11 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 	tflog.Trace(ctx, "successfully created organization", map[string]any{
-		"id": org.ID,
+		"id":           org.ID,
+		"name":         org.Name,
+		"display_name": org.DisplayName,
+		"description":  org.Description,
+		"icon":         org.Icon,
 	})
 	// Fill in `ID` since it must be "computed".
 	data.ID = UUIDValue(org.ID)
@@ -190,12 +200,12 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 	// Update the organization metadata
 	tflog.Trace(ctx, "updating organization", map[string]any{
 		"id":               orgID,
-		"new_name":         data.Name,
-		"new_display_name": data.DisplayName,
-		"new_description":  data.Description,
-		"new_icon":         data.Icon,
+		"new_name":         data.Name.ValueString(),
+		"new_display_name": data.DisplayName.ValueString(),
+		"new_description":  data.Description.ValueString(),
+		"new_icon":         data.Icon.ValueString(),
 	})
-	_, err := r.Client.UpdateOrganization(ctx, orgID.String(), codersdk.UpdateOrganizationRequest{
+	org, err := r.Client.UpdateOrganization(ctx, orgID.String(), codersdk.UpdateOrganizationRequest{
 		Name:        data.Name.ValueString(),
 		DisplayName: data.DisplayName.ValueString(),
 		Description: data.Description.ValueStringPointer(),
@@ -205,7 +215,13 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update organization %s, got error: %s", orgID, err))
 		return
 	}
-	tflog.Trace(ctx, "successfully updated organization")
+	tflog.Trace(ctx, "successfully updated organization", map[string]any{
+		"id":           orgID,
+		"name":         org.Name,
+		"display_name": org.DisplayName,
+		"description":  org.Description,
+		"icon":         org.Icon,
+	})
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -222,14 +238,18 @@ func (r *OrganizationResource) Delete(ctx context.Context, req resource.DeleteRe
 	orgID := data.ID.ValueUUID()
 
 	tflog.Trace(ctx, "deleting organization", map[string]any{
-		"id": orgID,
+		"id":   orgID,
+		"name": data.Name.ValueString(),
 	})
 	err := r.Client.DeleteOrganization(ctx, orgID.String())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete organization %s, got error: %s", orgID, err))
 		return
 	}
-	tflog.Trace(ctx, "successfully deleted organization")
+	tflog.Trace(ctx, "successfully deleted organization", map[string]any{
+		"id":   orgID,
+		"name": data.Name.ValueString(),
+	})
 
 	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
