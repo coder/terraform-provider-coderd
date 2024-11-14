@@ -78,7 +78,6 @@ This provider is only compatible with Coder version [2.10.1](https://github.com/
 
 func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var data CoderdProviderModel
-
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 
 	if resp.Diagnostics.HasError() {
@@ -139,6 +138,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewTemplateResource,
 		NewWorkspaceProxyResource,
 		NewLicenseResource,
+		NewOrganizationResource,
 	}
 }
 
