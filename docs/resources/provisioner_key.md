@@ -22,8 +22,8 @@ A provisioner key for a Coder deployment.
 
 ### Optional
 
-- `tags` (Map of String) The tags that the provisioner will accept jobs for.
+- `tags` (Map of String) The tags that provisioners connected with this key will accept jobs for.
 
 ### Read-Only
 
-- `key` (String, Sensitive) A provisionerkey key for Coder.
+- `key` (String, Sensitive) The acquired provisioner key

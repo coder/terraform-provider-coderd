@@ -59,7 +59,7 @@ func (r *ProvisionerKeyResource) Schema(ctx context.Context, req resource.Schema
 				},
 			},
 			"tags": schema.MapAttribute{
-				MarkdownDescription: "The tags that the provisioner will accept jobs for.",
+				MarkdownDescription: "The tags that provisioners connected with this key will accept jobs for.",
 				ElementType:         types.StringType,
 				Optional:            true,
 				PlanModifiers: []planmodifier.Map{
@@ -67,7 +67,7 @@ func (r *ProvisionerKeyResource) Schema(ctx context.Context, req resource.Schema
 				},
 			},
 			"key": schema.StringAttribute{
-				MarkdownDescription: "A provisionerkey key for Coder.",
+				MarkdownDescription: "The acquired provisioner key",
 				Computed:            true,
 				Sensitive:           true,
 			},
