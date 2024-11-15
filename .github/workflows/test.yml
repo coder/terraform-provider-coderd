@@ -54,8 +54,10 @@ jobs:
 
       - name: git diff
         run: |
-          git diff --compact-summary --exit-code || \
-            (echo; echo "Unexpected difference in directories after code generation. Run 'go generate ./...' command and commit."; exit 1)
+          if [[ -n $(git ls-files --other --modified --exclude-standard) ]]; then
+            echo "Unexpected difference in directories after code generation. Run 'make gen' and include the output in the commit."
+            exit 1
+          fi
 
   # Run acceptance tests in a matrix with Terraform CLI versions
   test:
