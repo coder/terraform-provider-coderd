@@ -23,11 +23,6 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 	require.NoError(t, err)
 	firstOrg := orgs[0].ID
 
-	license := os.Getenv("CODER_ENTERPRISE_LICENSE")
-	if license == "" {
-		t.Skip("No license found for license resource tests, skipping")
-	}
-
 	cfg1 := testAccProvisionerKeyResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
