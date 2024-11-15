@@ -424,7 +424,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "template_acc", true)
+	client := integration.StartCoder(ctx, t, "template_resource_acc", true)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -565,7 +565,7 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "template_acc", false)
+	client := integration.StartCoder(ctx, t, "template_resource_agpl_acc", false)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -689,7 +689,7 @@ resource "coderd_template" "sample" {
 }`
 
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "template_acc", false)
+	client := integration.StartCoder(ctx, t, "template_resource_variables_acc", false)
 
 	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken())
 
