@@ -134,7 +134,7 @@ func (r *ProvisionerKeyResource) Read(ctx context.Context, req resource.ReadRequ
 
 func (r *ProvisionerKeyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// Provisioner keys are immutable, updating is always invalid.
-	resp.Diagnostics.Append(diag.NewErrorDiagnostic("invalid update", "terraform is attempting to update a resource which must be replaced"))
+	resp.Diagnostics.AddError("Invalid Update", "Terraform is attempting to update a resource which must be replaced")
 }
 
 func (r *ProvisionerKeyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
