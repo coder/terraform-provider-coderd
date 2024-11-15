@@ -103,9 +103,11 @@ func (r *ProvisionerKeyResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
+	var tags map[string]string
+	resp.Diagnostics.Append(data.Tags.ElementsAs(ctx, &tags, false)...)
 	createKeyResult, err := r.Client.CreateProvisionerKey(ctx, data.OrganizationID.ValueUUID(), codersdk.CreateProvisionerKeyRequest{
 		Name: data.Name.ValueString(),
-		Tags: map[string]string{},
+		Tags: tags,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create provisioner_key, got error: %s", err))

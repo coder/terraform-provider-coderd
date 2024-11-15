@@ -7,9 +7,11 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,15 +29,17 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
 
-		OrganizationID: firstOrg,
-		Name:           "example-provisioner-key",
+		OrganizationID: &firstOrg,
+		Name:           ptr.Ref("example-provisioner-key"),
 	}
 
 	cfg2 := cfg1
-	cfg2.Name = "different-provisioner-key"
-	cfg2.Tags = map[string]string{
+	cfg2.Tags = ptr.Ref(map[string]string{
 		"wibble": "wobble",
-	}
+	})
+
+	cfg3 := cfg2
+	cfg3.Name = ptr.Ref("different-provisioner-key")
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -47,6 +51,27 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 			},
 			{
 				Config: cfg2.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_provisioner_key.test", plancheck.ResourceActionReplace),
+					},
+				},
+			},
+			{
+				Config: cfg2.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_provisioner_key.test", plancheck.ResourceActionReplace),
+					},
+				},
+			},
+			{
+				Config: cfg3.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_provisioner_key.test", plancheck.ResourceActionReplace),
+					},
+				},
 			},
 		},
 	})
@@ -56,9 +81,9 @@ type testAccProvisionerKeyResourceConfig struct {
 	URL   string
 	Token string
 
-	OrganizationID uuid.UUID
-	Name           string
-	Tags           map[string]string
+	OrganizationID *uuid.UUID
+	Name           *string
+	Tags           *map[string]string
 }
 
 func (c testAccProvisionerKeyResourceConfig) String(t *testing.T) string {
