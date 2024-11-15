@@ -24,7 +24,7 @@ func TestAccLicenseResource(t *testing.T) {
 		t.Skip("No license found for license resource tests, skipping")
 	}
 
-	cfg1 := testAccLicenseResourceconfig{
+	cfg1 := testAccLicenseResourceConfig{
 		URL:     client.URL.String(),
 		Token:   client.SessionToken(),
 		License: license,
@@ -42,13 +42,13 @@ func TestAccLicenseResource(t *testing.T) {
 	})
 }
 
-type testAccLicenseResourceconfig struct {
+type testAccLicenseResourceConfig struct {
 	URL     string
 	Token   string
 	License string
 }
 
-func (c testAccLicenseResourceconfig) String(t *testing.T) string {
+func (c testAccLicenseResourceConfig) String(t *testing.T) string {
 	t.Helper()
 	tpl := `
 provider coderd {

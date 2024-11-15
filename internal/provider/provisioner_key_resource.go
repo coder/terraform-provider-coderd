@@ -47,18 +47,21 @@ func (r *ProvisionerKeyResource) Schema(ctx context.Context, req resource.Schema
 			"organization_id": schema.StringAttribute{
 				CustomType:          UUIDType,
 				MarkdownDescription: "The organization that provisioners connected with this key will be connected to.",
+				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: "The name of the key.",
+				Required:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"tags": schema.MapAttribute{
 				ElementType:         types.StringType,
+				Optional:            true,
 				MarkdownDescription: "The tags that the provisioner will accept jobs for.",
 				PlanModifiers: []planmodifier.Map{
 					mapplanmodifier.RequiresReplace(),
