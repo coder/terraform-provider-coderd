@@ -59,9 +59,9 @@ func (r *ProvisionerKeyResource) Schema(ctx context.Context, req resource.Schema
 				},
 			},
 			"tags": schema.MapAttribute{
+				MarkdownDescription: "The tags that the provisioner will accept jobs for.",
 				ElementType:         types.StringType,
 				Optional:            true,
-				MarkdownDescription: "The tags that the provisioner will accept jobs for.",
 				PlanModifiers: []planmodifier.Map{
 					mapplanmodifier.RequiresReplace(),
 				},
