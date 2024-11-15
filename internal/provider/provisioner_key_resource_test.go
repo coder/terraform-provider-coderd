@@ -7,11 +7,13 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +22,7 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "license_acc", true)
+	client := integration.StartCoder(ctx, t, "provisioner_key_acc", true)
 	orgs, err := client.Organizations(ctx)
 	require.NoError(t, err)
 	firstOrg := orgs[0].ID
@@ -29,17 +31,17 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
 
-		OrganizationID: &firstOrg,
-		Name:           ptr.Ref("example-provisioner-key"),
+		OrganizationID: firstOrg,
+		Name:           "example-provisioner-key",
 	}
 
 	cfg2 := cfg1
-	cfg2.Tags = ptr.Ref(map[string]string{
+	cfg2.Tags = map[string]string{
 		"wibble": "wobble",
-	})
+	}
 
 	cfg3 := cfg2
-	cfg3.Name = ptr.Ref("different-provisioner-key")
+	cfg3.Name = "different-provisioner-key"
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -56,13 +58,8 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 						plancheck.ExpectResourceAction("coderd_provisioner_key.test", plancheck.ResourceActionReplace),
 					},
 				},
-			},
-			{
-				Config: cfg2.String(t),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("coderd_provisioner_key.test", plancheck.ResourceActionReplace),
-					},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_provisioner_key.test", tfjsonpath.New("tags").AtMapKey("wibble"), knownvalue.StringExact("wobble")),
 				},
 			},
 			{
@@ -81,13 +78,14 @@ type testAccProvisionerKeyResourceConfig struct {
 	URL   string
 	Token string
 
-	OrganizationID *uuid.UUID
-	Name           *string
-	Tags           *map[string]string
+	OrganizationID uuid.UUID
+	Name           string
+	Tags           map[string]string
 }
 
 func (c testAccProvisionerKeyResourceConfig) String(t *testing.T) string {
 	t.Helper()
+
 	tpl := `
 provider coderd {
 	url   = "{{.URL}}"
