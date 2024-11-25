@@ -8,6 +8,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -87,12 +88,57 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 				Computed: true,
 				Default:  stringdefault.StaticString(""),
 			},
+		},
 
-			"group_sync": schema.ObjectAttribute{
-				Optional: true,
+		Blocks: map[string]schema.Block{
+			"group_sync": schema.SingleNestedBlock{
+				Attributes: map[string]schema.Attribute{
+					"field": schema.StringAttribute{
+						Required: true,
+						MarkdownDescription: "The claim field that specifies what groups " +
+							"a user should be in.",
+						Validators: []validator.String{
+							stringvalidator.LengthAtLeast(1),
+						},
+					},
+					"regex": schema.StringAttribute{
+						Required: true,
+						MarkdownDescription: "A regular expression that will be used to " +
+							"filter the groups returned by the OIDC provider. Any group " +
+							"not matched will be ignored.",
+						Validators: []validator.String{
+							stringvalidator.LengthAtLeast(1),
+						},
+					},
+					"auto_create_missing": schema.BoolAttribute{
+						Required: true,
+						MarkdownDescription: "Controls whether groups will be created if " +
+							"they are missing.",
+					},
+					"mapping": schema.MapAttribute{
+						ElementType:         UUIDType,
+						Required:            true,
+						MarkdownDescription: "A map from OIDC group name to Coder group ID.",
+					},
+				},
 			},
-			"role_sync": schema.ObjectAttribute{
-				Optional: true,
+			"role_sync": schema.SingleNestedBlock{
+				Attributes: map[string]schema.Attribute{
+					"field": schema.StringAttribute{
+						Required: true,
+						MarkdownDescription: "The claim field that specifies what " +
+							"organization roles a user should be given.",
+						Validators: []validator.String{
+							stringvalidator.LengthAtLeast(1),
+						},
+					},
+					"mapping": schema.MapAttribute{
+						ElementType: UUIDType,
+						Required:    true,
+						MarkdownDescription: "A map from OIDC group name to Coder " +
+							"organization role.",
+					},
+				},
 			},
 		},
 	}
