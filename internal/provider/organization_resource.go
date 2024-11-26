@@ -8,7 +8,10 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -17,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -39,6 +43,18 @@ type OrganizationResourceModel struct {
 
 	GroupSync types.Object `tfsdk:"group_sync"`
 	RoleSync  types.Object `tfsdk:"role_sync"`
+}
+
+type GroupSyncModel struct {
+	Field             types.String `tfsdk:"field"`
+	RegexFilter       types.String `tfsdk:"regex_filter"`
+	AutoCreateMissing types.Bool   `tfsdk:"auto_create_missing"`
+	Mapping           types.Map    `tfsdk:"mapping"`
+}
+
+type RoleSyncModel struct {
+	Field   types.String `tfsdk:"field"`
+	Mapping types.Map    `tfsdk:"mapping"`
 }
 
 func NewOrganizationResource() resource.Resource {
@@ -101,7 +117,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 							stringvalidator.LengthAtLeast(1),
 						},
 					},
-					"regex": schema.StringAttribute{
+					"regex_filter": schema.StringAttribute{
 						Optional: true,
 						MarkdownDescription: "A regular expression that will be used to " +
 							"filter the groups returned by the OIDC provider. Any group " +
@@ -116,9 +132,12 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 							"they are missing.",
 					},
 					"mapping": schema.MapAttribute{
-						ElementType:         UUIDType,
+						ElementType:         types.ListType{ElemType: UUIDType},
 						Optional:            true,
 						MarkdownDescription: "A map from OIDC group name to Coder group ID.",
+						Validators: []validator.Map{
+							mapvalidator.ValueListsAre(listvalidator.ValueStringsAre(stringvalidator.Any())),
+						},
 					},
 				},
 			},
@@ -133,10 +152,13 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 						},
 					},
 					"mapping": schema.MapAttribute{
-						ElementType: UUIDType,
+						ElementType: types.ListType{ElemType: UUIDType},
 						Optional:    true,
 						MarkdownDescription: "A map from OIDC group name to Coder " +
 							"organization role.",
+						Validators: []validator.Map{
+							mapvalidator.ValueListsAre(listvalidator.ValueStringsAre(stringvalidator.Any())),
+						},
 					},
 				},
 			},
@@ -191,6 +213,26 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 		}
 	}
 
+	if !data.GroupSync.IsNull() {
+		_, err := r.Client.GroupIDPSyncSettings(ctx, data.ID.ValueUUID().String())
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("unable to get organization group sync settings, got error: %s", err))
+			return
+		}
+
+		// data.GroupSync = ???
+	}
+
+	if !data.RoleSync.IsNull() {
+		_, err := r.Client.RoleIDPSyncSettings(ctx, data.ID.ValueUUID().String())
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("unable to get organization role sync settings, got error: %s", err))
+			return
+		}
+
+		// data.RoleSync = ???
+	}
+
 	// We've fetched the organization ID from state, and the latest values for
 	// everything else from the backend. Ensure that any mutable data is synced
 	// with the backend.
@@ -241,6 +283,21 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 	// default it.
 	data.DisplayName = types.StringValue(org.DisplayName)
 
+	// Now apply group and role sync settings, if specified
+	orgID := data.ID.ValueUUID()
+	tflog.Trace(ctx, "updating group sync", map[string]any{
+		"orgID": orgID,
+	})
+	if !data.GroupSync.IsNull() {
+		r.patchGroupSync(ctx, orgID, data.GroupSync)
+	}
+	tflog.Trace(ctx, "updating role sync", map[string]any{
+		"orgID": orgID,
+	})
+	if !data.RoleSync.IsNull() {
+		r.patchRoleSync(ctx, orgID, data.RoleSync)
+	}
+
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -282,12 +339,17 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		"icon":         org.Icon,
 	})
 
-	if data.GroupSync.IsNull() {
-		err = r.patchGroupSync(ctx, orgID, data.GroupSync)
-		if err != nil {
-			resp.Diagnostics.AddError("Group Sync Update error", err.Error())
-			return
-		}
+	tflog.Trace(ctx, "updating group sync", map[string]any{
+		"orgID": orgID,
+	})
+	if !data.GroupSync.IsNull() {
+		r.patchGroupSync(ctx, orgID, data.GroupSync)
+	}
+	tflog.Trace(ctx, "updating role sync", map[string]any{
+		"orgID": orgID,
+	})
+	if !data.RoleSync.IsNull() {
+		r.patchRoleSync(ctx, orgID, data.RoleSync)
 	}
 
 	// Save updated data into Terraform state
@@ -331,48 +393,65 @@ func (r *OrganizationResource) ImportState(ctx context.Context, req resource.Imp
 func (r *OrganizationResource) patchGroupSync(
 	ctx context.Context,
 	orgID uuid.UUID,
-	groupSyncAttr types.Object,
-) error {
-	var settings codersdk.GroupSyncSettings
+	groupSyncObject types.Object,
+) diag.Diagnostics {
+	var diags diag.Diagnostics
 
-	field, ok := groupSyncAttr.Attributes()["field"].(types.String)
-	if !ok {
-		return fmt.Errorf("oh jeez")
-	}
-	settings.Field = field.ValueString()
-
-	mappingMap, ok := groupSyncAttr.Attributes()["mapping"].(types.Map)
-	if !ok {
-		return fmt.Errorf("oh jeez")
-	}
-	var mapping map[string][]uuid.UUID
-	diags := mappingMap.ElementsAs(ctx, mapping, false)
+	// Read values from Terraform
+	var groupSyncData GroupSyncModel
+	diags.Append(groupSyncObject.As(ctx, &groupSyncData, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
-		return fmt.Errorf("oh jeez")
+		return diags
 	}
-	settings.Mapping = mapping
 
-	regexFilterStr, ok := groupSyncAttr.Attributes()["regex_filter"].(types.String)
-	if !ok {
-		return fmt.Errorf("oh jeez")
+	// Convert that into the type used to send the PATCH to the backend
+	var groupSync codersdk.GroupSyncSettings
+	groupSync.Field = groupSyncData.Field.ValueString()
+	groupSync.RegexFilter = regexp.MustCompile(groupSyncData.RegexFilter.ValueString())
+	groupSync.AutoCreateMissing = groupSyncData.AutoCreateMissing.ValueBool()
+	diags.Append(groupSyncData.Mapping.ElementsAs(ctx, &groupSync.Mapping, false)...)
+	if diags.HasError() {
+		return diags
 	}
-	regexFilter, err := regexp.Compile(regexFilterStr.ValueString())
+
+	// Perform the PATCH
+	_, err := r.Client.PatchGroupIDPSyncSettings(ctx, orgID.String(), groupSync)
 	if err != nil {
-		return err
+		diags.AddError("Group Sync Update error", err.Error())
+		return diags
 	}
-	settings.RegexFilter = regexFilter
 
-	legacyMappingMap, ok := groupSyncAttr.Attributes()["legacy_group_name_mapping"].(types.Map)
-	if !ok {
-		return fmt.Errorf("oh jeez")
-	}
-	var legacyMapping map[string]string
-	diags = legacyMappingMap.ElementsAs(ctx, legacyMapping, false)
+	return diags
+}
+
+func (r *OrganizationResource) patchRoleSync(
+	ctx context.Context,
+	orgID uuid.UUID,
+	roleSyncObject types.Object,
+) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	// Read values from Terraform
+	var roleSyncData RoleSyncModel
+	diags.Append(roleSyncObject.As(ctx, &roleSyncData, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
-		return fmt.Errorf("oh jeez")
+		return diags
 	}
-	settings.LegacyNameMapping = legacyMapping
 
-	_, err = r.Client.PatchGroupIDPSyncSettings(ctx, orgID.String(), settings)
-	return err
+	// Convert that into the type used to send the PATCH to the backend
+	var roleSync codersdk.RoleSyncSettings
+	roleSync.Field = roleSyncData.Field.ValueString()
+	diags.Append(roleSyncData.Mapping.ElementsAs(ctx, &roleSync.Mapping, false)...)
+	if diags.HasError() {
+		return diags
+	}
+
+	// Perform the PATCH
+	_, err := r.Client.PatchRoleIDPSyncSettings(ctx, orgID.String(), roleSync)
+	if err != nil {
+		diags.AddError("Role Sync Update error", err.Error())
+		return diags
+	}
+
+	return diags
 }

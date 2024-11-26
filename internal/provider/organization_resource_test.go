@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -42,7 +41,7 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2.Name = ptr.Ref("example-org-new")
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
 
-	cfg3 := cfg1
+	cfg3 := cfg2
 	cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
 		Field: "wibble",
 		Mapping: map[string][]uuid.UUID{
@@ -50,13 +49,11 @@ func TestAccOrganizationResource(t *testing.T) {
 		},
 	})
 	cfg3.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
-		Field: "wibble",
+		Field: "wobble",
 		Mapping: map[string][]string{
-			"wibble": {"wobble"},
+			"wobble": {"wobbly"},
 		},
 	})
-
-	fmt.Println(cfg3)
 
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
@@ -87,6 +84,14 @@ func TestAccOrganizationResource(t *testing.T) {
 					ConfigStateChecks: []statecheck.StateCheck{
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("name"), knownvalue.StringExact("example-org-new")),
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("Example Organization New")),
+					},
+				},
+				// Add group and role sync
+				{
+					Config: cfg3.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync.field"), knownvalue.StringExact("wibble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync.field"), knownvalue.StringExact("wobble")),
 					},
 				},
 			},
@@ -126,7 +131,7 @@ resource "coderd_organization" "test" {
 		field = "{{.GroupSync.Field}}"
 		mapping = {
 			{{- range $key, $value := .GroupSync.Mapping}}
-			{{$key}} = "{{$value}}"
+			{{$key}} = {{printf "%q" $value}}
 			{{- end}}
 		}
 	}
@@ -137,7 +142,7 @@ resource "coderd_organization" "test" {
 		field = "{{.RoleSync.Field}}"
 		mapping = {
 			{{- range $key, $value := .RoleSync.Mapping}}
-			{{$key}} = "{{$value}}"
+			{{$key}} = {{printf "%q" $value}}
 			{{- end}}
 		}
 	}
