@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
@@ -39,6 +41,22 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2 := cfg1
 	cfg2.Name = ptr.Ref("example-org-new")
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
+
+	cfg3 := cfg1
+	cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
+		Field: "wibble",
+		Mapping: map[string][]uuid.UUID{
+			"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
+		},
+	})
+	cfg3.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
+		Field: "wibble",
+		Mapping: map[string][]string{
+			"wibble": {"wobble"},
+		},
+	})
+
+	fmt.Println(cfg3)
 
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
@@ -84,6 +102,9 @@ type testAccOrganizationResourceConfig struct {
 	DisplayName *string
 	Description *string
 	Icon        *string
+
+	GroupSync *codersdk.GroupSyncSettings
+	RoleSync  *codersdk.RoleSyncSettings
 }
 
 func (c testAccOrganizationResourceConfig) String(t *testing.T) string {
@@ -99,6 +120,28 @@ resource "coderd_organization" "test" {
 	display_name = {{orNull .DisplayName}}
 	description  = {{orNull .Description}}
 	icon         = {{orNull .Icon}}
+
+	{{- if .GroupSync}}
+	group_sync {
+		field = "{{.GroupSync.Field}}"
+		mapping = {
+			{{- range $key, $value := .GroupSync.Mapping}}
+			{{$key}} = "{{$value}}"
+			{{- end}}
+		}
+	}
+	{{- end}}
+
+	{{- if .RoleSync}}
+	role_sync {
+		field = "{{.RoleSync.Field}}"
+		mapping = {
+			{{- range $key, $value := .RoleSync.Mapping}}
+			{{$key}} = "{{$value}}"
+			{{- end}}
+		}
+	}
+	{{- end}}
 }
 `
 	funcMap := template.FuncMap{

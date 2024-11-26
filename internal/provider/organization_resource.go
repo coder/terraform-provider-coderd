@@ -94,7 +94,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 			"group_sync": schema.SingleNestedBlock{
 				Attributes: map[string]schema.Attribute{
 					"field": schema.StringAttribute{
-						Required: true,
+						Optional: true,
 						MarkdownDescription: "The claim field that specifies what groups " +
 							"a user should be in.",
 						Validators: []validator.String{
@@ -102,7 +102,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 						},
 					},
 					"regex": schema.StringAttribute{
-						Required: true,
+						Optional: true,
 						MarkdownDescription: "A regular expression that will be used to " +
 							"filter the groups returned by the OIDC provider. Any group " +
 							"not matched will be ignored.",
@@ -111,13 +111,13 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 						},
 					},
 					"auto_create_missing": schema.BoolAttribute{
-						Required: true,
+						Optional: true,
 						MarkdownDescription: "Controls whether groups will be created if " +
 							"they are missing.",
 					},
 					"mapping": schema.MapAttribute{
 						ElementType:         UUIDType,
-						Required:            true,
+						Optional:            true,
 						MarkdownDescription: "A map from OIDC group name to Coder group ID.",
 					},
 				},
@@ -125,7 +125,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 			"role_sync": schema.SingleNestedBlock{
 				Attributes: map[string]schema.Attribute{
 					"field": schema.StringAttribute{
-						Required: true,
+						Optional: true,
 						MarkdownDescription: "The claim field that specifies what " +
 							"organization roles a user should be given.",
 						Validators: []validator.String{
@@ -134,7 +134,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 					},
 					"mapping": schema.MapAttribute{
 						ElementType: UUIDType,
-						Required:    true,
+						Optional:    true,
 						MarkdownDescription: "A map from OIDC group name to Coder " +
 							"organization role.",
 					},
@@ -285,7 +285,7 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 	if data.GroupSync.IsNull() {
 		err = r.patchGroupSync(ctx, orgID, data.GroupSync)
 		if err != nil {
-			resp.Diagnostics.AddError("Group Sync Update error", "uh oh john")
+			resp.Diagnostics.AddError("Group Sync Update error", err.Error())
 			return
 		}
 	}
