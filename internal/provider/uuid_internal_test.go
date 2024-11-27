@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/stretchr/testify/require"
 )
@@ -37,9 +38,12 @@ func TestUUIDTypeValueFromTerraform(t *testing.T) {
 			expected: UUIDValue(ValidUUID),
 		},
 		{
-			name:     "invalid UUID",
-			input:    tftypes.NewValue(tftypes.String, "invalid"),
-			expected: NewUUIDUnknown(),
+			name:  "invalid UUID",
+			input: tftypes.NewValue(tftypes.String, "invalid"),
+			expected: UUID{
+				StringValue: basetypes.NewStringValue("invalid"),
+				value:       uuid.Nil,
+			},
 		},
 	}
 

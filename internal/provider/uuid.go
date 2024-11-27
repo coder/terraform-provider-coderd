@@ -48,16 +48,16 @@ func (t uuidType) ValueFromString(ctx context.Context, in basetypes.StringValue)
 		return NewUUIDUnknown(), diags
 	}
 
-	value, err := uuid.Parse(in.ValueString())
-	if err != nil {
-		// The framework doesn't want us to return validation errors here
-		// for some reason. They get caught by `ValidateAttribute` instead,
-		// and this function isn't called directly by our provider - UUIDValue
-		// takes a valid UUID instead of a string.
-		return NewUUIDUnknown(), diags
-	}
-
-	return UUIDValue(value), diags
+	// This function deliberately does not handle invalid UUIDs.
+	// Instead, `ValidateAttribute` will be called
+	// on the stored string during `validate` `plan` and `apply`,
+	// which will also create an error diagnostic.
+	// For that reason, storing the zero UUID is fine.
+	v, _ := uuid.Parse(in.ValueString())
+	return UUID{
+		StringValue: in,
+		value:       v,
+	}, diags
 }
 
 // ValueFromTerraform implements basetypes.StringTypable.
