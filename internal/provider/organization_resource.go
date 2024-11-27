@@ -8,8 +8,6 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -135,9 +133,6 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 						ElementType:         types.ListType{ElemType: UUIDType},
 						Optional:            true,
 						MarkdownDescription: "A map from OIDC group name to Coder group ID.",
-						Validators: []validator.Map{
-							mapvalidator.ValueListsAre(listvalidator.ValueStringsAre(stringvalidator.Any())),
-						},
 					},
 				},
 			},
@@ -152,13 +147,10 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 						},
 					},
 					"mapping": schema.MapAttribute{
-						ElementType: types.ListType{ElemType: UUIDType},
+						ElementType: types.ListType{ElemType: types.StringType},
 						Optional:    true,
 						MarkdownDescription: "A map from OIDC group name to Coder " +
 							"organization role.",
-						Validators: []validator.Map{
-							mapvalidator.ValueListsAre(listvalidator.ValueStringsAre(stringvalidator.Any())),
-						},
 					},
 				},
 			},
@@ -289,13 +281,19 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 		"orgID": orgID,
 	})
 	if !data.GroupSync.IsNull() {
-		r.patchGroupSync(ctx, orgID, data.GroupSync)
+		resp.Diagnostics.Append(r.patchGroupSync(ctx, orgID, data.GroupSync)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 	tflog.Trace(ctx, "updating role sync", map[string]any{
 		"orgID": orgID,
 	})
 	if !data.RoleSync.IsNull() {
-		r.patchRoleSync(ctx, orgID, data.RoleSync)
+		resp.Diagnostics.Append(r.patchRoleSync(ctx, orgID, data.RoleSync)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	// Save data into Terraform state
@@ -343,13 +341,19 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		"orgID": orgID,
 	})
 	if !data.GroupSync.IsNull() {
-		r.patchGroupSync(ctx, orgID, data.GroupSync)
+		resp.Diagnostics.Append(r.patchGroupSync(ctx, orgID, data.GroupSync)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 	tflog.Trace(ctx, "updating role sync", map[string]any{
 		"orgID": orgID,
 	})
 	if !data.RoleSync.IsNull() {
-		r.patchRoleSync(ctx, orgID, data.RoleSync)
+		resp.Diagnostics.Append(r.patchRoleSync(ctx, orgID, data.RoleSync)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	// Save updated data into Terraform state
