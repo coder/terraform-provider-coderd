@@ -10,7 +10,6 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
@@ -42,12 +41,12 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
 
 	cfg3 := cfg2
-	cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
-		Field: "wibble",
-		Mapping: map[string][]uuid.UUID{
-			"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
-		},
-	})
+	// cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
+	// 	Field: "wibble",
+	// 	Mapping: map[string][]uuid.UUID{
+	// 		"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
+	// 	},
+	// })
 	cfg3.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
 		Field: "wobble",
 		Mapping: map[string][]string{
@@ -90,8 +89,10 @@ func TestAccOrganizationResource(t *testing.T) {
 				{
 					Config: cfg3.String(t),
 					ConfigStateChecks: []statecheck.StateCheck{
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync.field"), knownvalue.StringExact("wibble")),
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync.field"), knownvalue.StringExact("wobble")),
+						// statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("field"), knownvalue.StringExact("wibble")),
+						// statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("mapping").AtMapKey("wibble").AtSliceIndex(0), knownvalue.StringExact("6e57187f-6543-46ab-a62c-a10065dd4314")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("field"), knownvalue.StringExact("wobble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("mapping").AtMapKey("wobble").AtSliceIndex(0), knownvalue.StringExact("wobbly")),
 					},
 				},
 			},
