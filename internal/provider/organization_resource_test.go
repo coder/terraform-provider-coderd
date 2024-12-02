@@ -24,7 +24,7 @@ func TestAccOrganizationResource(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "group_acc", true)
+	client := integration.StartCoder(ctx, t, "organization_acc", true)
 	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
