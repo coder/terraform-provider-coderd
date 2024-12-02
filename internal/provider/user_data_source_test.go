@@ -57,6 +57,7 @@ func TestAccUserDataSource(t *testing.T) {
 			Username: ptr.Ref(user.Username),
 		}
 		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -75,6 +76,7 @@ func TestAccUserDataSource(t *testing.T) {
 			ID:    ptr.Ref(user.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			// User by ID
@@ -92,6 +94,7 @@ func TestAccUserDataSource(t *testing.T) {
 			Token: client.SessionToken(),
 		}
 		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			// Neither ID nor Username
@@ -104,6 +107,24 @@ func TestAccUserDataSource(t *testing.T) {
 		})
 	})
 
+	t.Run("InvalidUUIDError", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			ID:    ptr.Ref("invalid-uuid"),
+		}
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg.String(t),
+					ExpectError: regexp.MustCompile(`The provided value cannot be parsed as a UUID`),
+				},
+			},
+		})
+	})
 }
 
 type testAccUserDataSourceConfig struct {
