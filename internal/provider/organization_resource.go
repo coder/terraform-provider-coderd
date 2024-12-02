@@ -413,9 +413,18 @@ func (r *OrganizationResource) patchGroupSync(
 	groupSync.Field = groupSyncData.Field.ValueString()
 	groupSync.RegexFilter = regexp.MustCompile(groupSyncData.RegexFilter.ValueString())
 	groupSync.AutoCreateMissing = groupSyncData.AutoCreateMissing.ValueBool()
-	diags.Append(groupSyncData.Mapping.ElementsAs(ctx, &groupSync.Mapping, false)...)
+	groupSync.Mapping = make(map[string][]uuid.UUID)
+	// Terraform doesn't know how to turn one our `UUID` Terraform values into a
+	// `uuid.UUID`, so we have to do the unwrapping manually here.
+	var mapping map[string][]UUID
+	diags.Append(groupSyncData.Mapping.ElementsAs(ctx, &mapping, false)...)
 	if diags.HasError() {
 		return diags
+	}
+	for key, ids := range mapping {
+		for _, id := range ids {
+			groupSync.Mapping[key] = append(groupSync.Mapping[key], id.ValueUUID())
+		}
 	}
 
 	// Perform the PATCH
