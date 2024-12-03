@@ -151,6 +151,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 							"not matched will be ignored.",
 						Validators: []validator.String{
 							stringvalidator.LengthAtLeast(1),
+							codersdkvalidator.Regexp(),
 						},
 					},
 					"auto_create_missing": schema.BoolAttribute{
