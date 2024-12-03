@@ -23,11 +23,32 @@ An organization on the Coder deployment
 
 - `description` (String)
 - `display_name` (String) Display name of the organization. Defaults to name.
+- `group_sync` (Block, Optional) (see [below for nested schema](#nestedblock--group_sync))
 - `icon` (String)
+- `role_sync` (Block, Optional) (see [below for nested schema](#nestedblock--role_sync))
 
 ### Read-Only
 
 - `id` (String) Organization ID
+
+<a id="nestedblock--group_sync"></a>
+### Nested Schema for `group_sync`
+
+Optional:
+
+- `auto_create_missing` (Boolean) Controls whether groups will be created if they are missing.
+- `field` (String) The claim field that specifies what groups a user should be in.
+- `mapping` (Map of List of String) A map from OIDC group name to Coder group ID.
+- `regex_filter` (String) A regular expression that will be used to filter the groups returned by the OIDC provider. Any group not matched will be ignored.
+
+
+<a id="nestedblock--role_sync"></a>
+### Nested Schema for `role_sync`
+
+Optional:
+
+- `field` (String) The claim field that specifies what organization roles a user should be given.
+- `mapping` (Map of List of String) A map from OIDC group name to Coder organization role.
 
 ## Import
 

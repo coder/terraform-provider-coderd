@@ -10,6 +10,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
@@ -23,7 +24,7 @@ func TestAccOrganizationResource(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	client := integration.StartCoder(ctx, t, "group_acc", true)
+	client := integration.StartCoder(ctx, t, "organization_acc", true)
 	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -39,6 +40,20 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2 := cfg1
 	cfg2.Name = ptr.Ref("example-org-new")
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
+
+	cfg3 := cfg2
+	cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
+		Field: "wibble",
+		Mapping: map[string][]uuid.UUID{
+			"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
+		},
+	})
+	cfg3.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
+		Field: "wobble",
+		Mapping: map[string][]string{
+			"wobble": {"wobbly"},
+		},
+	})
 
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
@@ -71,6 +86,16 @@ func TestAccOrganizationResource(t *testing.T) {
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("Example Organization New")),
 					},
 				},
+				// Add group and role sync
+				{
+					Config: cfg3.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("field"), knownvalue.StringExact("wibble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("mapping").AtMapKey("wibble").AtSliceIndex(0), knownvalue.StringExact("6e57187f-6543-46ab-a62c-a10065dd4314")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("field"), knownvalue.StringExact("wobble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("mapping").AtMapKey("wobble").AtSliceIndex(0), knownvalue.StringExact("wobbly")),
+					},
+				},
 			},
 		})
 	})
@@ -84,6 +109,9 @@ type testAccOrganizationResourceConfig struct {
 	DisplayName *string
 	Description *string
 	Icon        *string
+
+	GroupSync *codersdk.GroupSyncSettings
+	RoleSync  *codersdk.RoleSyncSettings
 }
 
 func (c testAccOrganizationResourceConfig) String(t *testing.T) string {
@@ -99,6 +127,28 @@ resource "coderd_organization" "test" {
 	display_name = {{orNull .DisplayName}}
 	description  = {{orNull .Description}}
 	icon         = {{orNull .Icon}}
+
+	{{- if .GroupSync}}
+	group_sync {
+		field = "{{.GroupSync.Field}}"
+		mapping = {
+			{{- range $key, $value := .GroupSync.Mapping}}
+			{{$key}} = {{printf "%q" $value}}
+			{{- end}}
+		}
+	}
+	{{- end}}
+
+	{{- if .RoleSync}}
+	role_sync {
+		field = "{{.RoleSync.Field}}"
+		mapping = {
+			{{- range $key, $value := .RoleSync.Mapping}}
+			{{$key}} = {{printf "%q" $value}}
+			{{- end}}
+		}
+	}
+	{{- end}}
 }
 `
 	funcMap := template.FuncMap{
