@@ -9,6 +9,7 @@ import (
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -50,9 +51,37 @@ type GroupSyncModel struct {
 	Mapping           types.Map    `tfsdk:"mapping"`
 }
 
+var groupSyncAttrTypes = map[string]attr.Type{
+	"field":               types.StringType,
+	"regex_filter":        types.StringType,
+	"auto_create_missing": types.BoolType,
+	"mapping":             types.MapType{ElemType: types.ListType{ElemType: UUIDType}},
+}
+
+func (m GroupSyncModel) ValueObject() types.Object {
+	return types.ObjectValueMust(groupSyncAttrTypes, map[string]attr.Value{
+		"field":               m.Field,
+		"regex_filter":        m.RegexFilter,
+		"auto_create_missing": m.AutoCreateMissing,
+		"mapping":             m.Mapping,
+	})
+}
+
 type RoleSyncModel struct {
 	Field   types.String `tfsdk:"field"`
 	Mapping types.Map    `tfsdk:"mapping"`
+}
+
+var roleSyncAttrTypes = map[string]attr.Type{
+	"field":   types.StringType,
+	"mapping": types.MapType{ElemType: types.ListType{ElemType: types.StringType}},
+}
+
+func (m RoleSyncModel) ValueObject() types.Object {
+	return types.ObjectValueMust(roleSyncAttrTypes, map[string]attr.Value{
+		"field":   m.Field,
+		"mapping": m.Mapping,
+	})
 }
 
 func NewOrganizationResource() resource.Resource {
@@ -206,23 +235,74 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 	}
 
 	if !data.GroupSync.IsNull() {
-		_, err := r.Client.GroupIDPSyncSettings(ctx, data.ID.ValueUUID().String())
+		groupSync, err := r.Client.GroupIDPSyncSettings(ctx, data.ID.ValueUUID().String())
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("unable to get organization group sync settings, got error: %s", err))
 			return
 		}
 
-		// data.GroupSync = ???
+		// Read values from Terraform
+		var groupSyncData GroupSyncModel
+		resp.Diagnostics.Append(data.GroupSync.As(ctx, &groupSyncData, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		if !groupSyncData.Field.IsNull() {
+			groupSyncData.Field = types.StringValue(groupSync.Field)
+		}
+		if !groupSyncData.RegexFilter.IsNull() {
+			groupSyncData.RegexFilter = types.StringValue(groupSync.RegexFilter.String())
+		}
+		if !groupSyncData.AutoCreateMissing.IsNull() {
+			groupSyncData.AutoCreateMissing = types.BoolValue(groupSync.AutoCreateMissing)
+		}
+		if !groupSyncData.Mapping.IsNull() {
+			elements := make(map[string][]string)
+			for key, ids := range groupSync.Mapping {
+				for _, id := range ids {
+					elements[key] = append(elements[key], id.String())
+				}
+			}
+
+			mapping, diags := types.MapValueFrom(ctx, types.ListType{ElemType: UUIDType}, elements)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			groupSyncData.Mapping = mapping
+		}
+
+		data.GroupSync = groupSyncData.ValueObject()
 	}
 
 	if !data.RoleSync.IsNull() {
-		_, err := r.Client.RoleIDPSyncSettings(ctx, data.ID.ValueUUID().String())
+		roleSync, err := r.Client.RoleIDPSyncSettings(ctx, data.ID.ValueUUID().String())
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("unable to get organization role sync settings, got error: %s", err))
 			return
 		}
 
-		// data.RoleSync = ???
+		// Read values from Terraform
+		var roleSyncData RoleSyncModel
+		resp.Diagnostics.Append(data.RoleSync.As(ctx, &roleSyncData, basetypes.ObjectAsOptions{})...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		if !roleSyncData.Field.IsNull() {
+			roleSyncData.Field = types.StringValue(roleSync.Field)
+		}
+		if !roleSyncData.Mapping.IsNull() {
+			mapping, diags := types.MapValueFrom(ctx, types.ListType{ElemType: types.StringType}, roleSync.Mapping)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			roleSyncData.Mapping = mapping
+		}
+
+		data.RoleSync = roleSyncData.ValueObject()
 	}
 
 	// We've fetched the organization ID from state, and the latest values for
