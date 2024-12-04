@@ -94,8 +94,11 @@ func (r *OrganizationResource) Metadata(ctx context.Context, req resource.Metada
 
 func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "An organization on the Coder deployment",
+		MarkdownDescription: `An organization on the Coder deployment.
 
+~> **Warning**
+This resource is only compatible with Coder version [2.16.0](https://github.com/coder/coder/releases/tag/v2.16.0) and later.
+`,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				CustomType:          UUIDType,
@@ -135,6 +138,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 
 		Blocks: map[string]schema.Block{
 			"group_sync": schema.SingleNestedBlock{
+				MarkdownDescription: `Group sync settings to sync groups from an IdP.`,
 				Attributes: map[string]schema.Attribute{
 					"field": schema.StringAttribute{
 						Optional: true,
@@ -167,6 +171,7 @@ func (r *OrganizationResource) Schema(ctx context.Context, req resource.SchemaRe
 				},
 			},
 			"role_sync": schema.SingleNestedBlock{
+				MarkdownDescription: `Role sync settings to sync organization roles from an IdP.`,
 				Attributes: map[string]schema.Attribute{
 					"field": schema.StringAttribute{
 						Optional: true,
