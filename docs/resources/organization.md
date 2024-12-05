@@ -3,12 +3,17 @@
 page_title: "coderd_organization Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  An organization on the Coder deployment
+  An organization on the Coder deployment.
+  ~> Warning
+  This resource is only compatible with Coder version 2.16.0 https://github.com/coder/coder/releases/tag/v2.16.0 and later.
 ---
 
 # coderd_organization (Resource)
 
-An organization on the Coder deployment
+An organization on the Coder deployment.
+
+~> **Warning**
+This resource is only compatible with Coder version [2.16.0](https://github.com/coder/coder/releases/tag/v2.16.0) and later.
 
 
 
@@ -23,9 +28,9 @@ An organization on the Coder deployment
 
 - `description` (String)
 - `display_name` (String) Display name of the organization. Defaults to name.
-- `group_sync` (Block, Optional) (see [below for nested schema](#nestedblock--group_sync))
+- `group_sync` (Block, Optional) Group sync settings to sync groups from an IdP. (see [below for nested schema](#nestedblock--group_sync))
 - `icon` (String)
-- `role_sync` (Block, Optional) (see [below for nested schema](#nestedblock--role_sync))
+- `role_sync` (Block, Optional) Role sync settings to sync organization roles from an IdP. (see [below for nested schema](#nestedblock--role_sync))
 
 ### Read-Only
 
@@ -55,6 +60,15 @@ Optional:
 Import is supported using the following syntax:
 
 ```shell
-# Organizations can be imported by their name
-terraform import coderd_organization.our_org our_org
+# The ID supplied can be either a organization UUID retrieved via the API
+# or the name of the organization.
+$ terraform import coderd_organization.our_org our-org
+```
+Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
+
+```terraform
+import {
+  to = coderd_organization.our_org
+  id = "our-org"
+}
 ```

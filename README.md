@@ -7,7 +7,7 @@ The provider currently supports resources and data sources for:
 - Templates + Template Versions
 - Groups
 - Workspace Proxies
-- Organizations (Data Source only)
+- Organizations
 
 ## Requirements
 
