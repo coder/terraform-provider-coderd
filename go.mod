@@ -5,7 +5,7 @@ go 1.22.8
 require (
 	cdr.dev/slog v1.6.2-0.20241112041820-0ec81e6e67bb
 	github.com/coder/coder/v2 v2.18.1
-	github.com/docker/docker v27.4.0+incompatible
+	github.com/docker/docker v27.4.1+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/terraform-plugin-docs v0.20.1
