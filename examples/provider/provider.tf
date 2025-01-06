@@ -7,7 +7,7 @@ terraform {
 }
 
 provider "coderd" {
-  url   = "coder.example.com"
+  url   = "https://coder.example.com"
   token = "****"
 }
 

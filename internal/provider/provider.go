@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -101,7 +102,16 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		data.Token = types.StringValue(tokenEnv)
 	}
 
-	url, err := url.Parse(data.URL.ValueString())
+	rawURL := data.URL.ValueString()
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		scheme := "https"
+		if strings.HasPrefix(rawURL, "localhost") {
+			scheme = "http"
+		}
+		rawURL = fmt.Sprintf("%s://%s", scheme, rawURL)
+	}
+
+	url, err := url.Parse(rawURL)
 	if err != nil {
 		resp.Diagnostics.AddError("url", "url is not a valid URL: "+err.Error())
 		return
