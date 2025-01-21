@@ -1019,10 +1019,7 @@ func hasOneActiveVersion(data Versions) (hasActiveVersion bool, diags diag.Diagn
 			active = true
 		}
 	}
-	if !active {
-		return false, diags
-	}
-	return true, diags
+	return active, diags
 }
 
 func NewVersionsPlanModifier() planmodifier.List {
