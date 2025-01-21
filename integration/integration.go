@@ -51,9 +51,10 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool)
 	ctr, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: coderImg + ":" + coderVersion,
 		Env: []string{
-			"CODER_HTTP_ADDRESS=0.0.0.0:3000",        // Listen on all interfaces inside the container
-			"CODER_ACCESS_URL=http://localhost:3000", // Set explicitly to avoid creating try.coder.app URLs.
-			"CODER_TELEMETRY_ENABLE=false",           // Avoid creating noise.
+			"CODER_HTTP_ADDRESS=0.0.0.0:3000",          // Listen on all interfaces inside the container
+			"CODER_ACCESS_URL=http://localhost:3000",   // Set explicitly to avoid creating try.coder.app URLs.
+			"CODER_TELEMETRY_ENABLE=false",             // Avoid creating noise.
+			"CODER_DANGEROUS_DISABLE_RATE_LIMITS=true", // Avoid hitting file rate limit in tests.
 		},
 		Labels:       map[string]string{},
 		ExposedPorts: map[nat.Port]struct{}{nat.Port("3000/tcp"): {}},

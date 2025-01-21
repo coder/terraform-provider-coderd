@@ -245,7 +245,7 @@ func TestAccTemplateResource(t *testing.T) {
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
-					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
+					Directory: &exTemplateTwo,
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
 							Key:   ptr.Ref("name"),
@@ -256,13 +256,14 @@ func TestAccTemplateResource(t *testing.T) {
 				},
 				{
 					// Auto-generated version name
-					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
+					Directory: &exTemplateTwo,
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
 							Key:   ptr.Ref("name"),
 							Value: ptr.Ref("world"),
 						},
 					},
+					Active: ptr.Ref(false),
 				},
 			},
 			ACL: testAccTemplateACLConfig{
@@ -282,11 +283,11 @@ func TestAccTemplateResource(t *testing.T) {
 
 		cfg4 := cfg1
 		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Directory = ptr.Ref("../../integration/template-test/example-template/")
+		cfg4.Versions[0].Directory = &exTemplateOne
 
 		cfg5 := cfg4
 		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[1].Directory = ptr.Ref("../../integration/template-test/example-template/")
+		cfg5.Versions[1].Directory = &exTemplateOne
 
 		cfg6 := cfg5
 		cfg6.Versions = slices.Clone(cfg6.Versions)
@@ -373,7 +374,7 @@ func TestAccTemplateResource(t *testing.T) {
 			Versions: []testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
-					Directory: ptr.Ref("../../integration/template-test/example-template-2/"),
+					Directory: &exTemplateTwo,
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
 							Key:   ptr.Ref("name"),
@@ -417,6 +418,222 @@ func TestAccTemplateResource(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("CreateWithNoActiveVersionErrors", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					// Auto-generated version name
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(false),
+				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
+			},
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg1.String(t),
+					ExpectError: regexp.MustCompile("At least one template version must be active when creating"),
+				},
+			},
+		})
+	})
+
+	t.Run("AmbiguousActiveVersionResolvedByModifying", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					// Auto-generated version name
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
+			},
+		}
+
+		cfg2 := cfg1
+		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions[0].Active = ptr.Ref(false)
+
+		cfg3 := cfg2
+		cfg3.Versions = slices.Clone(cfg3.Versions)
+		cfg3.Versions[0].Directory = &exTemplateTwo
+
+		cfg2b := cfg1
+		cfg2b.Versions = slices.Clone(cfg2b.Versions)
+		cfg2b.Versions = append(cfg2b.Versions, testAccTemplateVersionConfig{
+			Directory: &exTemplateTwo,
+			Active:    ptr.Ref(false),
+		})
+
+		cfg3b := cfg2b
+		cfg3b.Versions = slices.Clone(cfg3b.Versions)
+		cfg3b.Versions[1].Active = ptr.Ref(true)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				// With an unmodified version deactivated, it's not clear what
+				// the active version should be.
+				{
+					Config:      cfg2.String(t),
+					ExpectError: regexp.MustCompile("Plan could not determine which version should be active."),
+				},
+				// If we modify the version, a new version will be created on `coderd`,
+				// and the old version can remain active.
+				{
+					Config: cfg3.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+							"active": regexp.MustCompile("false"),
+						}),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("AmbiguousActiveVersionResolvedByCreatingNewVersion", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					// Auto-generated version name
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
+			},
+		}
+
+		cfg2 := cfg1
+		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions[0].Active = ptr.Ref(false)
+		cfg2.Versions = append(cfg2.Versions, testAccTemplateVersionConfig{
+			Directory: &exTemplateTwo,
+			Active:    ptr.Ref(false),
+		})
+
+		cfg3 := cfg2
+		cfg3.Versions = slices.Clone(cfg3.Versions)
+		cfg3.Versions[1].Active = ptr.Ref(true)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				// Adding a new version that's not active doesn't help
+				{
+					Config:      cfg2.String(t),
+					ExpectError: regexp.MustCompile("Plan could not determine which version should be active."),
+				},
+				// Making that new version active will fix the issue
+				{
+					Config: cfg3.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("PushNewInactiveVersion", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					// Auto-generated version name
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{
+				null: true,
+			},
+		}
+
+		cfg2 := cfg1
+		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions[0].Active = ptr.Ref(false)
+		cfg2.Versions[0].Directory = &exTemplateTwo
+
+		cfg3 := cfg2
+		cfg3.Versions = slices.Clone(cfg3.Versions)
+		cfg3.Versions[0].Active = ptr.Ref(true)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				// Create one active version
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				// Modify an existing version, make it inactive
+				{
+					Config: cfg2.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+							"active": regexp.MustCompile("false"),
+						}),
+					),
+				},
+				// Make that modification active
+				{
+					Config: cfg3.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+							"active": regexp.MustCompile("true"),
+						}),
+					),
+				},
+			},
+		})
+	})
 }
 
 func TestAccTemplateResourceEnterprise(t *testing.T) {
@@ -434,6 +651,10 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	exTemplateOne := t.TempDir()
+	err = cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
@@ -441,7 +662,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		Versions: []testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
-				Directory: ptr.Ref("../../integration/template-test/example-template"),
+				Directory: &exTemplateOne,
 				Active:    ptr.Ref(true),
 			},
 		},
@@ -569,6 +790,10 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
+	exTemplateOne := t.TempDir()
+	err = cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
@@ -576,7 +801,7 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 		Versions: []testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
-				Directory: ptr.Ref("../../integration/template-test/example-template/"),
+				Directory: &exTemplateOne,
 				Active:    ptr.Ref(true),
 			},
 		},
@@ -652,8 +877,8 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 func TestAccTemplateResourceVariables(t *testing.T) {
 	cfg := `
 provider coderd {
-	url   = "%s"
-	token = "%s"
+	url   = %q
+	token = %q
 }
 
 data "coderd_organization" "default" {
@@ -677,12 +902,12 @@ resource "coderd_template" "sample" {
   versions = [
     {
       name = "${var.PRIOR_GIT_COMMIT_SHA}"
-      directory = "../../integration/template-test/example-template"
+      directory = %q
       active    = var.ACTIVE
     },
     {
       name = "${var.CURRENT_GIT_COMMIT_SHA}"
-      directory = "../../integration/template-test/example-template"
+      directory = %q
       active    = false
     }
   ]
@@ -691,7 +916,11 @@ resource "coderd_template" "sample" {
 	ctx := context.Background()
 	client := integration.StartCoder(ctx, t, "template_resource_variables_acc", false)
 
-	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken())
+	exTemplateOne := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
+	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), exTemplateOne, exTemplateOne)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -911,11 +1140,13 @@ func TestReconcileVersionIDs(t *testing.T) {
 	aUUID := uuid.New()
 	bUUID := uuid.New()
 	cases := []struct {
-		Name             string
-		planVersions     Versions
-		configVersions   Versions
-		inputState       LastVersionsByHash
-		expectedVersions Versions
+		Name                string
+		planVersions        Versions
+		configVersions      Versions
+		inputState          LastVersionsByHash
+		expectedVersions    Versions
+		cfgHasActiveVersion bool
+		expectError         bool
 	}{
 		{
 			Name: "IdenticalDontRename",
@@ -1242,13 +1473,46 @@ func TestReconcileVersionIDs(t *testing.T) {
 				},
 			},
 		},
+		{
+			Name: "NoPossibleActiveVersion",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+					Active:             types.BoolValue(false),
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:     aUUID,
+						Name:   "foo",
+						TFVars: map[string]string{},
+						Active: true,
+					},
+				},
+			},
+			cfgHasActiveVersion: false,
+			expectError:         true,
+		},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			c.planVersions.reconcileVersionIDs(c.inputState, c.configVersions)
-			require.Equal(t, c.expectedVersions, c.planVersions)
+			diag := c.planVersions.reconcileVersionIDs(c.inputState, c.configVersions, c.cfgHasActiveVersion)
+			if c.expectError {
+				require.True(t, diag.HasError())
+			} else {
+				require.Equal(t, c.expectedVersions, c.planVersions)
+			}
 		})
 
 	}
