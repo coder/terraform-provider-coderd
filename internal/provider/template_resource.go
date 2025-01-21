@@ -286,7 +286,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				},
 			},
 			"icon": schema.StringAttribute{
-				MarkdownDescription: "Relative path or external URL that specifes an icon to be displayed in the dashboard.",
+				MarkdownDescription: "Relative path or external URL that specifies an icon to be displayed in the dashboard.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
@@ -404,7 +404,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Required: true,
 				Validators: []validator.List{
 					listvalidator.SizeAtLeast(1),
-					NewActiveVersionValidator(),
+					NewVersionsValidator(),
 				},
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -867,24 +867,24 @@ func (r *TemplateResource) ConfigValidators(context.Context) []resource.ConfigVa
 	return []resource.ConfigValidator{}
 }
 
-type activeVersionValidator struct{}
+type versionsValidator struct{}
 
-func NewActiveVersionValidator() validator.List {
-	return &activeVersionValidator{}
+func NewVersionsValidator() validator.List {
+	return &versionsValidator{}
 }
 
 // Description implements validator.List.
-func (a *activeVersionValidator) Description(ctx context.Context) string {
+func (a *versionsValidator) Description(ctx context.Context) string {
 	return a.MarkdownDescription(ctx)
 }
 
 // MarkdownDescription implements validator.List.
-func (a *activeVersionValidator) MarkdownDescription(context.Context) string {
-	return "Validate that exactly one template version has active set to true."
+func (a *versionsValidator) MarkdownDescription(context.Context) string {
+	return "Validate that template version names are unique and that at most one version is active."
 }
 
 // ValidateList implements validator.List.
-func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
+func (a *versionsValidator) ValidateList(ctx context.Context, req validator.ListRequest, resp *validator.ListResponse) {
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
 		return
 	}
@@ -908,13 +908,13 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 		uniqueNames[version.Name.ValueString()] = struct{}{}
 	}
 
-	// Check if only one item in Version has active set to true
+	// Ensure at most one version is active
 	active := false
 	for _, version := range data {
-		// `active` is required, so if it's null or unknown, this is Terraform
+		// `active` defaults to false, so if it's null or unknown, this is Terraform
 		// requesting an early validation.
 		if version.Active.IsNull() || version.Active.IsUnknown() {
-			return
+			continue
 		}
 		if version.Active.ValueBool() {
 			if active {
@@ -924,12 +924,9 @@ func (a *activeVersionValidator) ValidateList(ctx context.Context, req validator
 			active = true
 		}
 	}
-	if !active {
-		resp.Diagnostics.AddError("Client Error", "At least one template version must be active.")
-	}
 }
 
-var _ validator.List = &activeVersionValidator{}
+var _ validator.List = &versionsValidator{}
 
 type versionsPlanModifier struct{}
 
@@ -956,6 +953,12 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		return
 	}
 
+	hasActiveVersion, diag := hasOneActiveVersion(configVersions)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+
 	for i := range planVersions {
 		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
 		if err != nil {
@@ -974,6 +977,13 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 	// If this is the first read, init the private state value
 	if lvBytes == nil {
 		lv = make(LastVersionsByHash)
+		// If there's no prior private state, this might be resource creation,
+		// in which case one version must be active.
+		if !hasActiveVersion {
+			resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
+				" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
+			return
+		}
 	} else {
 		err := json.Unmarshal(lvBytes, &lv)
 		if err != nil {
@@ -982,9 +992,37 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		}
 	}
 
-	planVersions.reconcileVersionIDs(lv, configVersions)
+	diag = planVersions.reconcileVersionIDs(lv, configVersions, hasActiveVersion)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
 
-	resp.PlanValue, resp.Diagnostics = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), planVersions)
+	resp.PlanValue, diag = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), planVersions)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+	}
+}
+
+func hasOneActiveVersion(data Versions) (hasActiveVersion bool, diags diag.Diagnostics) {
+	active := false
+	for _, version := range data {
+		if version.Active.IsNull() || version.Active.IsUnknown() {
+			// If null or unknown, the value will be defaulted to false
+			continue
+		}
+		if version.Active.ValueBool() {
+			if active {
+				diags.AddError("Client Error", "Only one template version can be active at a time.")
+				return
+			}
+			active = true
+		}
+	}
+	if !active {
+		return false, diags
+	}
+	return true, diags
 }
 
 func NewVersionsPlanModifier() planmodifier.List {
@@ -1309,6 +1347,7 @@ type PreviousTemplateVersion struct {
 	ID     uuid.UUID         `json:"id"`
 	Name   string            `json:"name"`
 	TFVars map[string]string `json:"tf_vars"`
+	Active bool              `json:"active"`
 }
 
 type privateState interface {
@@ -1331,6 +1370,7 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 				ID:     version.ID.ValueUUID(),
 				Name:   version.Name.ValueString(),
 				TFVars: tfVars,
+				Active: version.Active.ValueBool(),
 			})
 		} else {
 			lv[version.DirectoryHash.ValueString()] = []PreviousTemplateVersion{
@@ -1338,6 +1378,7 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 					ID:     version.ID.ValueUUID(),
 					Name:   version.Name.ValueString(),
 					TFVars: tfVars,
+					Active: version.Active.ValueBool(),
 				},
 			}
 		}
@@ -1350,7 +1391,7 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	return ps.SetKey(ctx, LastVersionsKey, lvBytes)
 }
 
-func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions) {
+func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions, hasOneActiveVersion bool) (diag diag.Diagnostics) {
 	// We remove versions that we've matched from `lv`, so make a copy for
 	// resolving tfvar changes at the end.
 	fullLv := make(LastVersionsByHash)
@@ -1420,6 +1461,39 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 			}
 		}
 	}
+
+	// If a version was deactivated, and no active version was set, we need to
+	// return an error to avoid a post-apply plan being non-empty.
+	if !hasOneActiveVersion {
+		for i := range planVersions {
+			if !planVersions[i].ID.IsUnknown() {
+				prevs, ok := fullLv[planVersions[i].DirectoryHash.ValueString()]
+				if !ok {
+					continue
+				}
+				if versionDeactivated(prevs, &planVersions[i]) {
+					diag.AddError("Client Error", "Plan could not determine which version should be active.\n"+
+						"Either specify an active version or modify the contents of the previously active version before marking it as inactive.")
+					return diag
+				}
+			}
+		}
+	}
+	return diag
+}
+
+func versionDeactivated(prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
+	for _, prev := range prevs {
+		if prev.ID == planned.ID.ValueUUID() {
+			if prev.Active &&
+				!planned.Active.IsNull() &&
+				!planned.Active.IsUnknown() &&
+				!planned.Active.ValueBool() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {

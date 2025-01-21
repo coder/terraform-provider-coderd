@@ -166,7 +166,7 @@ func TestIntegration(t *testing.T) {
 			tfCmd.Stderr = &buf
 			tt.preF(t, client)
 			if err := tfCmd.Run(); !assert.NoError(t, err) {
-				t.Logf("%s", buf.String())
+				t.Log(buf.String())
 				t.FailNow()
 			}
 			tt.assertF(t, client)
