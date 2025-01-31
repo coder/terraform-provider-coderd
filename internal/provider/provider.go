@@ -150,6 +150,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewLicenseResource,
 		NewOrganizationResource,
 		NewProvisionerKeyResource,
+		NewOrganizationSyncSettingsResource,
 	}
 }
 
