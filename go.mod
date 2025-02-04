@@ -4,7 +4,7 @@ go 1.22.8
 
 require (
 	cdr.dev/slog v1.6.2-0.20241112041820-0ec81e6e67bb
-	github.com/coder/coder/v2 v2.18.4
+	github.com/coder/coder/v2 v2.18.5
 	github.com/docker/docker v27.5.1+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/google/uuid v1.6.0
@@ -21,10 +21,11 @@ require (
 require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/DataDog/appsec-internal-go v1.8.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/obfuscate v0.48.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/remoteconfig/state v0.57.0 // indirect
-	github.com/DataDog/datadog-go/v5 v5.3.0 // indirect
+	github.com/DataDog/datadog-agent/pkg/obfuscate v0.58.0 // indirect
+	github.com/DataDog/datadog-agent/pkg/remoteconfig/state v0.58.0 // indirect
+	github.com/DataDog/datadog-go/v5 v5.5.0 // indirect
 	github.com/DataDog/go-libddwaf/v3 v3.4.0 // indirect
+	github.com/DataDog/go-sqllexer v0.0.14 // indirect
 	github.com/DataDog/go-tuf v1.1.0-0.5.2 // indirect
 	github.com/DataDog/gostackparse v0.7.0 // indirect
 	github.com/DataDog/sketches-go v1.4.5 // indirect
@@ -47,6 +48,7 @@ require (
 	github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 // indirect
 	github.com/coder/serpent v0.10.0 // indirect
 	github.com/coder/terraform-provider-coder v1.0.2 // indirect
+	github.com/coder/websocket v1.8.12 // indirect
 	github.com/coreos/go-oidc/v3 v3.11.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
@@ -90,7 +92,6 @@ require (
 	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/huandu/xstrings v1.3.3 // indirect
 	github.com/imdario/mergo v0.3.15 // indirect
-	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -169,6 +170,5 @@ require (
 	gopkg.in/DataDog/dd-trace-go.v1 v1.69.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	nhooyr.io/websocket v1.8.7 // indirect
 	storj.io/drpc v0.0.33 // indirect
 )
