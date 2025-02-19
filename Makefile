@@ -15,7 +15,10 @@ build: terraform-provider-coderd
 terraform-provider-coderd: internal/provider/*.go main.go
 	CGO_ENABLED=0 go build .
 
+test: testacc
+.PHONY: test
+
 # Run acceptance tests
-.PHONY: testacc
 testacc:
-	TF_ACC=1 go test ./... -v $(TESTARGS) -timeout 120m
+	TF_ACC=1 go test ./... -v $(TESTARGS) -count 1 -timeout 120m
+.PHONY: testacc
