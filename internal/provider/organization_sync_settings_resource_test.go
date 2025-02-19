@@ -28,6 +28,9 @@ func TestAccOrganizationSyncSettingsResource(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg1 := testAccOrganizationSyncSettingsResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+
 		Field:         "wibble",
 		AssignDefault: true,
 	}
@@ -85,6 +88,9 @@ func TestAccOrganizationSyncSettingsResource(t *testing.T) {
 }
 
 type testAccOrganizationSyncSettingsResourceConfig struct {
+	URL   string
+	Token string
+
 	Field         string
 	AssignDefault bool
 	Mapping       map[string][]uuid.UUID
