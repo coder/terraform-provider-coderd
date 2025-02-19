@@ -111,7 +111,7 @@ resource "coderd_organization_sync_settings" "test" {
 	{{- if .Mapping}}
 	mapping = {
 		{{- range $key, $value := .Mapping}}
-		{{$key}} = {{printf "%q" $value}}
+		{{$key}} = "{{$value}}"
 		{{- end}}
 	}
 	{{- end}}
