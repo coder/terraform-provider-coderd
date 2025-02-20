@@ -42,24 +42,24 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
 
 	cfg3 := cfg2
-	cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
+	cfg3.SyncMapping = []string{"wibble", "wobble"}
+
+	cfg4 := cfg3
+	cfg4.SyncMapping = []string{"wibbley", "wobbley"}
+
+	cfg5 := cfg4
+	cfg5.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
 		Field: "wibble",
 		Mapping: map[string][]uuid.UUID{
 			"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
 		},
 	})
-	cfg3.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
+	cfg5.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
 		Field: "wobble",
 		Mapping: map[string][]string{
 			"wobble": {"wobbly"},
 		},
 	})
-
-	cfg4 := cfg2
-	cfg4.SyncMapping = []string{"wibble", "wobble"}
-
-	cfg5 := cfg4
-	cfg5.SyncMapping = []string{"wibbley", "wobbley"}
 
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
