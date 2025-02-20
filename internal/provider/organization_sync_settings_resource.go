@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -18,7 +17,6 @@ import (
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &OrganizationSyncSettingsResource{}
-var _ resource.ResourceWithImportState = &OrganizationSyncSettingsResource{}
 
 type OrganizationSyncSettingsResource struct {
 	*CoderdProviderData
@@ -257,9 +255,4 @@ func (r *OrganizationSyncSettingsResource) Delete(ctx context.Context, req resou
 
 	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-}
-
-func (r *OrganizationSyncSettingsResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Any random string provided as the ID will work for importing.
-	resource.ImportStatePassthroughID(ctx, path.Root("field"), req, resp)
 }
