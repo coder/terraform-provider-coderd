@@ -55,6 +55,12 @@ func TestAccOrganizationResource(t *testing.T) {
 		},
 	})
 
+	cfg4 := cfg2
+	cfg4.SyncMapping = []string{"wibble", "wobble"}
+
+	cfg5 := cfg4
+	cfg5.SyncMapping = []string{"wibbley", "wobbley"}
+
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -96,6 +102,22 @@ func TestAccOrganizationResource(t *testing.T) {
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("mapping").AtMapKey("wobble").AtSliceIndex(0), knownvalue.StringExact("wobbly")),
 					},
 				},
+				// Add org sync
+				{
+					Config: cfg4.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(0), knownvalue.StringExact("wibble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(1), knownvalue.StringExact("wobble")),
+					},
+				},
+				// Patch org sync
+				{
+					Config: cfg5.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(0), knownvalue.StringExact("wibbley")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(1), knownvalue.StringExact("wobbley")),
+					},
+				},
 			},
 		})
 	})
@@ -110,8 +132,9 @@ type testAccOrganizationResourceConfig struct {
 	Description *string
 	Icon        *string
 
-	GroupSync *codersdk.GroupSyncSettings
-	RoleSync  *codersdk.RoleSyncSettings
+	SyncMapping []string
+	GroupSync   *codersdk.GroupSyncSettings
+	RoleSync    *codersdk.RoleSyncSettings
 }
 
 func (c testAccOrganizationResourceConfig) String(t *testing.T) string {
@@ -127,6 +150,14 @@ resource "coderd_organization" "test" {
 	display_name = {{orNull .DisplayName}}
 	description  = {{orNull .Description}}
 	icon         = {{orNull .Icon}}
+
+	{{- if .SyncMapping}}
+	sync_mapping = [
+		{{- range $name := .SyncMapping }}
+		"{{$name}}",
+		{{- end}}
+	]
+	{{- end}}
 
 	{{- if .GroupSync}}
 	group_sync {

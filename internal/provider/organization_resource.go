@@ -457,7 +457,7 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		var state OrganizationResourceModel
 		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 		var currentClaims []string
-		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &currentClaims, false)...)
+		resp.Diagnostics.Append(state.SyncMapping.ElementsAs(ctx, &currentClaims, false)...)
 
 		var plannedClaims []string
 		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &plannedClaims, false)...)
@@ -635,7 +635,7 @@ func (r *OrganizationResource) patchOrgSyncMapping(
 	}
 	var removeMappings []codersdk.IDPSyncMapping[uuid.UUID]
 	for _, claim := range remove {
-		addMappings = append(removeMappings, codersdk.IDPSyncMapping[uuid.UUID]{
+		removeMappings = append(removeMappings, codersdk.IDPSyncMapping[uuid.UUID]{
 			Given: claim,
 			Gets:  orgID,
 		})
