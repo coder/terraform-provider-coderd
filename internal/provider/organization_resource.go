@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/coder/coder/v2/coderd/util/slice"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
@@ -40,8 +41,9 @@ type OrganizationResourceModel struct {
 	Description types.String `tfsdk:"description"`
 	Icon        types.String `tfsdk:"icon"`
 
-	GroupSync types.Object `tfsdk:"group_sync"`
-	RoleSync  types.Object `tfsdk:"role_sync"`
+	SyncMapping types.Set    `tfsdk:"sync_mapping"`
+	GroupSync   types.Object `tfsdk:"group_sync"`
+	RoleSync    types.Object `tfsdk:"role_sync"`
 }
 
 type GroupSyncModel struct {
@@ -133,6 +135,12 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(""),
+			},
+
+			"sync_mapping": schema.SetAttribute{
+				ElementType:         types.StringType,
+				Optional:            true,
+				MarkdownDescription: "Claims from the IdP provider that will give users access to this organization.",
 			},
 		},
 
@@ -361,21 +369,38 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 	// default it.
 	data.DisplayName = types.StringValue(org.DisplayName)
 
-	// Now apply group and role sync settings, if specified
 	orgID := data.ID.ValueUUID()
-	tflog.Trace(ctx, "updating group sync", map[string]any{
-		"orgID": orgID,
-	})
+
+	// Apply org sync patches, if specified
+	if !data.SyncMapping.IsNull() {
+		tflog.Trace(ctx, "updating org sync", map[string]any{
+			"orgID": orgID,
+		})
+
+		var claims []string
+		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &claims, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		resp.Diagnostics.Append(r.patchOrgSyncMapping(ctx, orgID, []string{}, claims)...)
+	}
+
+	// Apply group and role sync settings, if specified
 	if !data.GroupSync.IsNull() {
+		tflog.Trace(ctx, "updating group sync", map[string]any{
+			"orgID": orgID,
+		})
+
 		resp.Diagnostics.Append(r.patchGroupSync(ctx, orgID, data.GroupSync)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
-	tflog.Trace(ctx, "updating role sync", map[string]any{
-		"orgID": orgID,
-	})
 	if !data.RoleSync.IsNull() {
+		tflog.Trace(ctx, "updating role sync", map[string]any{
+			"orgID": orgID,
+		})
 		resp.Diagnostics.Append(r.patchRoleSync(ctx, orgID, data.RoleSync)...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -423,19 +448,42 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		"icon":         org.Icon,
 	})
 
-	tflog.Trace(ctx, "updating group sync", map[string]any{
-		"orgID": orgID,
-	})
+	// Apply org sync patches, if specified
+	if !data.SyncMapping.IsNull() {
+		tflog.Trace(ctx, "updating org sync mappings", map[string]any{
+			"orgID": orgID,
+		})
+
+		var state OrganizationResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		var currentClaims []string
+		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &currentClaims, false)...)
+
+		var plannedClaims []string
+		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &plannedClaims, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		resp.Diagnostics.Append(r.patchOrgSyncMapping(ctx, orgID, currentClaims, plannedClaims)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	if !data.GroupSync.IsNull() {
+		tflog.Trace(ctx, "updating group sync", map[string]any{
+			"orgID": orgID,
+		})
 		resp.Diagnostics.Append(r.patchGroupSync(ctx, orgID, data.GroupSync)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
-	tflog.Trace(ctx, "updating role sync", map[string]any{
-		"orgID": orgID,
-	})
 	if !data.RoleSync.IsNull() {
+		tflog.Trace(ctx, "updating role sync", map[string]any{
+			"orgID": orgID,
+		})
 		resp.Diagnostics.Append(r.patchRoleSync(ctx, orgID, data.RoleSync)...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -455,6 +503,21 @@ func (r *OrganizationResource) Delete(ctx context.Context, req resource.DeleteRe
 	}
 
 	orgID := data.ID.ValueUUID()
+
+	// Remove org sync mappings, if we were managing them
+	if !data.SyncMapping.IsNull() {
+		tflog.Trace(ctx, "deleting org sync mappings", map[string]any{
+			"orgID": orgID,
+		})
+
+		var claims []string
+		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &claims, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		resp.Diagnostics.Append(r.patchOrgSyncMapping(ctx, orgID, claims, []string{})...)
+	}
 
 	tflog.Trace(ctx, "deleting organization", map[string]any{
 		"id":   orgID,
@@ -550,6 +613,40 @@ func (r *OrganizationResource) patchRoleSync(
 	if err != nil {
 		diags.AddError("Role Sync Update error", err.Error())
 		return diags
+	}
+
+	return diags
+}
+
+func (r *OrganizationResource) patchOrgSyncMapping(
+	ctx context.Context,
+	orgID uuid.UUID,
+	currentClaims, plannedClaims []string,
+) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	add, remove := slice.SymmetricDifference(currentClaims, plannedClaims)
+	var addMappings []codersdk.IDPSyncMapping[uuid.UUID]
+	for _, claim := range add {
+		addMappings = append(addMappings, codersdk.IDPSyncMapping[uuid.UUID]{
+			Given: claim,
+			Gets:  orgID,
+		})
+	}
+	var removeMappings []codersdk.IDPSyncMapping[uuid.UUID]
+	for _, claim := range remove {
+		addMappings = append(removeMappings, codersdk.IDPSyncMapping[uuid.UUID]{
+			Given: claim,
+			Gets:  orgID,
+		})
+	}
+
+	_, err := r.Client.PatchOrganizationIDPSyncMapping(ctx, codersdk.PatchOrganizationIDPSyncMappingRequest{
+		Add:    addMappings,
+		Remove: removeMappings,
+	})
+	if err != nil {
+		diags.AddError("Org Sync Update error", err.Error())
 	}
 
 	return diags

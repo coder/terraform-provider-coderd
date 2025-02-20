@@ -83,8 +83,10 @@ func computeDirectoryHash(directory string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// memberDiff returns the members to add and remove from the group, given the current members and the planned members.
-// plannedMembers is deliberately our custom type, as Terraform cannot automatically produce `[]uuid.UUID` from a set.
+// memberDiff returns the members to add and remove from the group, given the
+// current members and the planned members. plannedMembers is deliberately our
+// custom type, as Terraform cannot automatically produce `[]uuid.UUID` from a
+// set.
 func memberDiff(currentMembers []uuid.UUID, plannedMembers []UUID) (add, remove []string) {
 	curSet := make(map[uuid.UUID]struct{}, len(currentMembers))
 	planSet := make(map[uuid.UUID]struct{}, len(plannedMembers))
