@@ -29,9 +29,6 @@ type OrganizationSyncSettingsResourceModel struct {
 	Field         types.String `tfsdk:"field"`
 	AssignDefault types.Bool   `tfsdk:"assign_default"`
 	Mapping       types.Map    `tfsdk:"mapping"`
-
-	// Terraform requires that resources have an ID
-	ID types.String `tfsdk:"id"`
 }
 
 func NewOrganizationSyncSettingsResource() resource.Resource {
@@ -69,11 +66,6 @@ This resource is only compatible with Coder version [2.19.0](https://github.com/
 				ElementType:         types.ListType{ElemType: UUIDType},
 				Optional:            true,
 				MarkdownDescription: "A map from OIDC group name to Coder organization ID.",
-			},
-			"id": schema.StringAttribute{
-				Computed: true,
-				MarkdownDescription: "An arbitrary ID, because Terraform requires that " +
-					"all resources have IDs.",
 			},
 		},
 	}
@@ -113,24 +105,26 @@ func (r *OrganizationSyncSettingsResource) Read(ctx context.Context, req resourc
 		return
 	}
 
-	// Convert IDs to strings
-	elements := make(map[string][]string)
-	for key, ids := range settings.Mapping {
-		for _, id := range ids {
-			elements[key] = append(elements[key], id.String())
-		}
-	}
-
 	// Store the latest values that we just fetched.
 	data.Field = types.StringValue(settings.Field)
 	data.AssignDefault = types.BoolValue(settings.AssignDefault)
 
-	mapping, diags := types.MapValueFrom(ctx, types.ListType{ElemType: UUIDType}, elements)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	if !data.Mapping.IsNull() {
+		// Convert IDs to strings
+		elements := make(map[string][]string)
+		for key, ids := range settings.Mapping {
+			for _, id := range ids {
+				elements[key] = append(elements[key], id.String())
+			}
+		}
+
+		mapping, diags := types.MapValueFrom(ctx, types.ListType{ElemType: UUIDType}, elements)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.Mapping = mapping
 	}
-	data.Mapping = mapping
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -148,9 +142,6 @@ func (r *OrganizationSyncSettingsResource) Create(ctx context.Context, req resou
 		"field":          data.Field.ValueString(),
 		"assign_default": data.AssignDefault.ValueBool(),
 	})
-
-	// A random ID, since Terraform requires that we have one.
-	data.ID = types.StringValue(uuid.New().String())
 
 	// Create and Update use a shared implementation
 	resp.Diagnostics.Append(r.Patch(ctx, data)...)
@@ -270,5 +261,5 @@ func (r *OrganizationSyncSettingsResource) Delete(ctx context.Context, req resou
 
 func (r *OrganizationSyncSettingsResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Any random string provided as the ID will work for importing.
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	resource.ImportStatePassthroughID(ctx, path.Root("field"), req, resp)
 }

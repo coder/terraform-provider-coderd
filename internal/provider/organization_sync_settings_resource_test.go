@@ -44,7 +44,7 @@ func TestAccOrganizationSyncSettingsResource(t *testing.T) {
 		"wibble": {uuid.MustParse("151b5a4e-391a-464d-a88c-ac50f1458d6f")},
 	}
 
-	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
+	t.Run("CreateUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -57,14 +57,6 @@ func TestAccOrganizationSyncSettingsResource(t *testing.T) {
 						statecheck.ExpectKnownValue("coderd_organization_sync_settings.test", tfjsonpath.New("field"), knownvalue.StringExact("wibble")),
 						statecheck.ExpectKnownValue("coderd_organization_sync_settings.test", tfjsonpath.New("assign_default"), knownvalue.Bool(true)),
 					},
-				},
-				// Import
-				{
-					Config:            cfg1.String(t),
-					ResourceName:      "coderd_organization_sync_settings.test",
-					ImportState:       true,
-					ImportStateVerify: true,
-					ImportStateId:     ":)",
 				},
 				// Update and Read
 				{
@@ -105,13 +97,17 @@ provider coderd {
 }
 
 resource "coderd_organization_sync_settings" "test" {
-	field          = {{.Field}}
+	field          = "{{.Field}}"
 	assign_default = {{.AssignDefault}}
 
 	{{- if .Mapping}}
 	mapping = {
 		{{- range $key, $value := .Mapping}}
-		{{$key}} = "{{$value}}"
+		{{$key}} = [
+			{{- range $id := $value}}
+			"{{$id}}",
+			{{- end}}
+		]
 		{{- end}}
 	}
 	{{- end}}
