@@ -31,7 +31,3 @@ This resource is only compatible with Coder version [2.19.0](https://github.com/
 ### Optional
 
 - `mapping` (Map of List of String) A map from OIDC group name to Coder organization ID.
-
-### Read-Only
-
-- `id` (String) An arbitrary ID, because Terraform requires that all resources have IDs.
