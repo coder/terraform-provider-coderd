@@ -144,7 +144,7 @@ func (r *OrganizationSyncSettingsResource) Create(ctx context.Context, req resou
 	})
 
 	// Create and Update use a shared implementation
-	resp.Diagnostics.Append(r.Patch(ctx, data)...)
+	resp.Diagnostics.Append(r.patch(ctx, data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -173,7 +173,7 @@ func (r *OrganizationSyncSettingsResource) Update(ctx context.Context, req resou
 	})
 
 	// Create and Update use a shared implementation
-	resp.Diagnostics.Append(r.Patch(ctx, data)...)
+	resp.Diagnostics.Append(r.patch(ctx, data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -187,7 +187,7 @@ func (r *OrganizationSyncSettingsResource) Update(ctx context.Context, req resou
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *OrganizationSyncSettingsResource) Patch(
+func (r *OrganizationSyncSettingsResource) patch(
 	ctx context.Context,
 	data OrganizationSyncSettingsResourceModel,
 ) diag.Diagnostics {
@@ -195,7 +195,7 @@ func (r *OrganizationSyncSettingsResource) Patch(
 	field := data.Field.ValueString()
 	assignDefault := data.AssignDefault.ValueBool()
 
-	if !data.Mapping.IsNull() {
+	if data.Mapping.IsNull() {
 		_, err := r.Client.PatchOrganizationIDPSyncConfig(ctx, codersdk.PatchOrganizationIDPSyncConfigRequest{
 			Field:         field,
 			AssignDefault: assignDefault,
