@@ -92,19 +92,9 @@ func TestAccOrganizationResource(t *testing.T) {
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("Example Organization New")),
 					},
 				},
-				// Add group and role sync
-				{
-					Config: cfg3.String(t),
-					ConfigStateChecks: []statecheck.StateCheck{
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("field"), knownvalue.StringExact("wibble")),
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("mapping").AtMapKey("wibble").AtSliceIndex(0), knownvalue.StringExact("6e57187f-6543-46ab-a62c-a10065dd4314")),
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("field"), knownvalue.StringExact("wobble")),
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("mapping").AtMapKey("wobble").AtSliceIndex(0), knownvalue.StringExact("wobbly")),
-					},
-				},
 				// Add org sync
 				{
-					Config: cfg4.String(t),
+					Config: cfg3.String(t),
 					ConfigStateChecks: []statecheck.StateCheck{
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(0), knownvalue.StringExact("wibble")),
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(1), knownvalue.StringExact("wobble")),
@@ -112,10 +102,20 @@ func TestAccOrganizationResource(t *testing.T) {
 				},
 				// Patch org sync
 				{
-					Config: cfg5.String(t),
+					Config: cfg4.String(t),
 					ConfigStateChecks: []statecheck.StateCheck{
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(0), knownvalue.StringExact("wibbley")),
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(1), knownvalue.StringExact("wobbley")),
+					},
+				},
+				// Add group and role sync
+				{
+					Config: cfg5.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("field"), knownvalue.StringExact("wibble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("mapping").AtMapKey("wibble").AtSliceIndex(0), knownvalue.StringExact("6e57187f-6543-46ab-a62c-a10065dd4314")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("field"), knownvalue.StringExact("wobble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("mapping").AtMapKey("wobble").AtSliceIndex(0), knownvalue.StringExact("wobbly")),
 					},
 				},
 			},
