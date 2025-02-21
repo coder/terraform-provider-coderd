@@ -146,6 +146,8 @@ func TestIntegration(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			client := StartCoder(ctx, t, tt.name, true)
 			wd, err := os.Getwd()
 			require.NoError(t, err)
