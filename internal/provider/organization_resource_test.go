@@ -42,10 +42,10 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
 
 	cfg3 := cfg2
-	cfg3.SyncMapping = []string{"wibble", "wobble"}
+	cfg3.OrgSyncIdpGroups = []string{"wibble", "wobble"}
 
 	cfg4 := cfg3
-	cfg4.SyncMapping = []string{"wibbley", "wobbley"}
+	cfg4.OrgSyncIdpGroups = []string{"wibbley", "wobbley"}
 
 	cfg5 := cfg4
 	cfg5.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
@@ -132,9 +132,9 @@ type testAccOrganizationResourceConfig struct {
 	Description *string
 	Icon        *string
 
-	SyncMapping []string
-	GroupSync   *codersdk.GroupSyncSettings
-	RoleSync    *codersdk.RoleSyncSettings
+	OrgSyncIdpGroups []string
+	GroupSync        *codersdk.GroupSyncSettings
+	RoleSync         *codersdk.RoleSyncSettings
 }
 
 func (c testAccOrganizationResourceConfig) String(t *testing.T) string {

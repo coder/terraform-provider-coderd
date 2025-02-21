@@ -41,9 +41,9 @@ type OrganizationResourceModel struct {
 	Description types.String `tfsdk:"description"`
 	Icon        types.String `tfsdk:"icon"`
 
-	SyncMapping types.Set    `tfsdk:"org_sync_idp_groups"`
-	GroupSync   types.Object `tfsdk:"group_sync"`
-	RoleSync    types.Object `tfsdk:"role_sync"`
+	OrgSyncIdpGroups types.Set    `tfsdk:"org_sync_idp_groups"`
+	GroupSync        types.Object `tfsdk:"group_sync"`
+	RoleSync         types.Object `tfsdk:"role_sync"`
 }
 
 type GroupSyncModel struct {
@@ -372,13 +372,13 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 	orgID := data.ID.ValueUUID()
 
 	// Apply org sync patches, if specified
-	if !data.SyncMapping.IsNull() {
+	if !data.OrgSyncIdpGroups.IsNull() {
 		tflog.Trace(ctx, "updating org sync", map[string]any{
 			"orgID": orgID,
 		})
 
 		var claims []string
-		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &claims, false)...)
+		resp.Diagnostics.Append(data.OrgSyncIdpGroups.ElementsAs(ctx, &claims, false)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -449,7 +449,7 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 	})
 
 	// Apply org sync patches, if specified
-	if !data.SyncMapping.IsNull() {
+	if !data.OrgSyncIdpGroups.IsNull() {
 		tflog.Trace(ctx, "updating org sync mappings", map[string]any{
 			"orgID": orgID,
 		})
@@ -457,10 +457,10 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		var state OrganizationResourceModel
 		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 		var currentClaims []string
-		resp.Diagnostics.Append(state.SyncMapping.ElementsAs(ctx, &currentClaims, false)...)
+		resp.Diagnostics.Append(state.OrgSyncIdpGroups.ElementsAs(ctx, &currentClaims, false)...)
 
 		var plannedClaims []string
-		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &plannedClaims, false)...)
+		resp.Diagnostics.Append(data.OrgSyncIdpGroups.ElementsAs(ctx, &plannedClaims, false)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -505,13 +505,13 @@ func (r *OrganizationResource) Delete(ctx context.Context, req resource.DeleteRe
 	orgID := data.ID.ValueUUID()
 
 	// Remove org sync mappings, if we were managing them
-	if !data.SyncMapping.IsNull() {
+	if !data.OrgSyncIdpGroups.IsNull() {
 		tflog.Trace(ctx, "deleting org sync mappings", map[string]any{
 			"orgID": orgID,
 		})
 
 		var claims []string
-		resp.Diagnostics.Append(data.SyncMapping.ElementsAs(ctx, &claims, false)...)
+		resp.Diagnostics.Append(data.OrgSyncIdpGroups.ElementsAs(ctx, &claims, false)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
