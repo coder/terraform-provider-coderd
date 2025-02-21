@@ -43,13 +43,19 @@ func TestAccOrganizationResource(t *testing.T) {
 	cfg2.DisplayName = ptr.Ref("Example Organization New")
 
 	cfg3 := cfg2
-	cfg3.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
+	cfg3.OrgSyncIdpGroups = []string{"wibble", "wobble"}
+
+	cfg4 := cfg3
+	cfg4.OrgSyncIdpGroups = []string{"wibbley", "wobbley"}
+
+	cfg5 := cfg4
+	cfg5.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
 		Field: "wibble",
 		Mapping: map[string][]uuid.UUID{
 			"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
 		},
 	})
-	cfg3.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
+	cfg5.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
 		Field: "wobble",
 		Mapping: map[string][]string{
 			"wobble": {"wobbly"},
@@ -87,9 +93,25 @@ func TestAccOrganizationResource(t *testing.T) {
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("Example Organization New")),
 					},
 				},
-				// Add group and role sync
+				// Add org sync
 				{
 					Config: cfg3.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(0), knownvalue.StringExact("wibble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(1), knownvalue.StringExact("wobble")),
+					},
+				},
+				// Patch org sync
+				{
+					Config: cfg4.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(0), knownvalue.StringExact("wibbley")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(1), knownvalue.StringExact("wobbley")),
+					},
+				},
+				// Add group and role sync
+				{
+					Config: cfg5.String(t),
 					ConfigStateChecks: []statecheck.StateCheck{
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("field"), knownvalue.StringExact("wibble")),
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("group_sync").AtMapKey("mapping").AtMapKey("wibble").AtSliceIndex(0), knownvalue.StringExact("6e57187f-6543-46ab-a62c-a10065dd4314")),
@@ -111,8 +133,9 @@ type testAccOrganizationResourceConfig struct {
 	Description *string
 	Icon        *string
 
-	GroupSync *codersdk.GroupSyncSettings
-	RoleSync  *codersdk.RoleSyncSettings
+	OrgSyncIdpGroups []string
+	GroupSync        *codersdk.GroupSyncSettings
+	RoleSync         *codersdk.RoleSyncSettings
 }
 
 func (c testAccOrganizationResourceConfig) String(t *testing.T) string {
@@ -128,6 +151,14 @@ resource "coderd_organization" "test" {
 	display_name = {{orNull .DisplayName}}
 	description  = {{orNull .Description}}
 	icon         = {{orNull .Icon}}
+
+	{{- if .OrgSyncIdpGroups}}
+	org_sync_idp_groups = [
+		{{- range $name := .OrgSyncIdpGroups }}
+		"{{$name}}",
+		{{- end}}
+	]
+	{{- end}}
 
 	{{- if .GroupSync}}
 	group_sync {
