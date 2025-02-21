@@ -121,6 +121,29 @@ func TestAccOrganizationResource(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("DefaultDisplayName", func(t *testing.T) {
+		cfg1 := testAccOrganizationResourceConfig{
+			URL:         client.URL.String(),
+			Token:       client.SessionToken(),
+			Name:        ptr.Ref("example-org"),
+			Description: ptr.Ref("This is an example organization"),
+			Icon:        ptr.Ref("/icon/coder.svg"),
+		}
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("display_name"), knownvalue.StringExact("example-org")),
+					},
+				},
+			},
+		})
+	})
 }
 
 type testAccOrganizationResourceConfig struct {
