@@ -244,7 +244,7 @@ func (r *OrganizationSyncSettingsResource) Delete(ctx context.Context, req resou
 	tflog.Trace(ctx, "deleting organization sync", map[string]any{})
 	_, err := r.Client.PatchOrganizationIDPSyncConfig(ctx, codersdk.PatchOrganizationIDPSyncConfigRequest{
 		// This disables organization sync without causing state conflicts for
-		// organization resources that might still specify `sync_mapping`.
+		// organization resources that might still specify `org_sync_idp_groups`.
 		Field: "",
 	})
 	if err != nil {

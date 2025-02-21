@@ -96,16 +96,16 @@ func TestAccOrganizationResource(t *testing.T) {
 				{
 					Config: cfg3.String(t),
 					ConfigStateChecks: []statecheck.StateCheck{
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(0), knownvalue.StringExact("wibble")),
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(1), knownvalue.StringExact("wobble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(0), knownvalue.StringExact("wibble")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(1), knownvalue.StringExact("wobble")),
 					},
 				},
 				// Patch org sync
 				{
 					Config: cfg4.String(t),
 					ConfigStateChecks: []statecheck.StateCheck{
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(0), knownvalue.StringExact("wibbley")),
-						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("sync_mapping").AtSliceIndex(1), knownvalue.StringExact("wobbley")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(0), knownvalue.StringExact("wibbley")),
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("org_sync_idp_groups").AtSliceIndex(1), knownvalue.StringExact("wobbley")),
 					},
 				},
 				// Add group and role sync
@@ -152,7 +152,7 @@ resource "coderd_organization" "test" {
 	icon         = {{orNull .Icon}}
 
 	{{- if .SyncMapping}}
-	sync_mapping = [
+	org_sync_idp_groups = [
 		{{- range $name := .SyncMapping }}
 		"{{$name}}",
 		{{- end}}

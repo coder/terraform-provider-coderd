@@ -4,7 +4,7 @@ resource "coderd_organization" "blueberry" {
   description  = "The organization for blueberries"
   icon         = "/emojis/1fad0.png"
 
-  sync_mapping = [
+  org_sync_idp_groups = [
     "wibble",
     "wobble",
   ]

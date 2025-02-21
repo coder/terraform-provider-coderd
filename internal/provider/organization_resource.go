@@ -41,7 +41,7 @@ type OrganizationResourceModel struct {
 	Description types.String `tfsdk:"description"`
 	Icon        types.String `tfsdk:"icon"`
 
-	SyncMapping types.Set    `tfsdk:"sync_mapping"`
+	SyncMapping types.Set    `tfsdk:"org_sync_idp_groups"`
 	GroupSync   types.Object `tfsdk:"group_sync"`
 	RoleSync    types.Object `tfsdk:"role_sync"`
 }
@@ -137,7 +137,7 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				Default:  stringdefault.StaticString(""),
 			},
 
-			"sync_mapping": schema.SetAttribute{
+			"org_sync_idp_groups": schema.SetAttribute{
 				ElementType:         types.StringType,
 				Optional:            true,
 				MarkdownDescription: "Claims from the IdP provider that will give users access to this organization.",
