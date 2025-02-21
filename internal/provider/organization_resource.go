@@ -119,7 +119,6 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				MarkdownDescription: "Display name of the organization. Defaults to name.",
 				Computed:            true,
 				Optional:            true,
-				Default:             stringdefault.StaticString(""),
 				Validators: []validator.String{
 					codersdkvalidator.DisplayName(),
 				},
