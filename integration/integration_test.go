@@ -22,6 +22,7 @@ import (
 // - Runs the `main.tf` specified in the given test directory against the Coder deployment
 // - Asserts the state of the deployment via `codersdk`.
 func TestIntegration(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "1" {
 		t.Skip("Skipping integration tests during tf acceptance tests")
 	}

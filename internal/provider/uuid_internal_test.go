@@ -50,7 +50,6 @@ func TestUUIDTypeValueFromTerraform(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			ctx := context.Background()
 
 			actual, err := uuidType.ValueFromTerraform(UUIDType, ctx, test.input)
@@ -85,7 +84,6 @@ func TestUUIDToStringValue(t *testing.T) {
 	for name, test := range tests {
 		name, test := name, test
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
 			ctx := context.Background()
 
 			s, _ := test.uuid.ToStringValue(ctx)

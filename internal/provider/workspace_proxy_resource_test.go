@@ -15,6 +15,7 @@ import (
 )
 
 func TestAccWorkspaceProxyResource(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
@@ -56,6 +57,7 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 }
 
 func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
