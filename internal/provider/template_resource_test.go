@@ -23,6 +23,7 @@ import (
 )
 
 func TestAccTemplateResource(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
@@ -637,6 +638,7 @@ func TestAccTemplateResource(t *testing.T) {
 }
 
 func TestAccTemplateResourceEnterprise(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
@@ -782,6 +784,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 }
 
 func TestAccTemplateResourceAGPL(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
@@ -875,6 +878,7 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 }
 
 func TestAccTemplateResourceVariables(t *testing.T) {
+	t.Parallel()
 	cfg := `
 provider coderd {
 	url   = %q
@@ -1137,6 +1141,7 @@ func testAccCheckNumTemplateVersions(ctx context.Context, client *codersdk.Clien
 }
 
 func TestReconcileVersionIDs(t *testing.T) {
+	t.Parallel()
 	aUUID := uuid.New()
 	bUUID := uuid.New()
 	cases := []struct {
@@ -1507,6 +1512,8 @@ func TestReconcileVersionIDs(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+
 			diag := c.planVersions.reconcileVersionIDs(c.inputState, c.configVersions, c.cfgHasActiveVersion)
 			if c.expectError {
 				require.True(t, diag.HasError())

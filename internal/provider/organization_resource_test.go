@@ -19,6 +19,7 @@ import (
 )
 
 func TestAccOrganizationResource(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}

@@ -51,11 +51,10 @@ func TestUUIDTypeValueFromTerraform(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
 
+			ctx := context.Background()
 			actual, err := uuidType.ValueFromTerraform(UUIDType, ctx, test.input)
 			require.NoError(t, err)
-
 			require.Equal(t, test.expected, actual)
 		})
 	}
@@ -86,10 +85,9 @@ func TestUUIDToStringValue(t *testing.T) {
 		name, test := name, test
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
 			ctx := context.Background()
-
 			s, _ := test.uuid.ToStringValue(ctx)
-
 			require.Equal(t, test.expected, s)
 		})
 	}
