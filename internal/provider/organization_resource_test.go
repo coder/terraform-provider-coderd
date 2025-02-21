@@ -151,9 +151,9 @@ resource "coderd_organization" "test" {
 	description  = {{orNull .Description}}
 	icon         = {{orNull .Icon}}
 
-	{{- if .SyncMapping}}
+	{{- if .OrgSyncIdpGroups}}
 	org_sync_idp_groups = [
-		{{- range $name := .SyncMapping }}
+		{{- range $name := .OrgSyncIdpGroups }}
 		"{{$name}}",
 		{{- end}}
 	]
