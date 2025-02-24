@@ -16,6 +16,7 @@ import (
 )
 
 func TestAccGroupResource(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
@@ -133,6 +134,7 @@ func TestAccGroupResource(t *testing.T) {
 }
 
 func TestAccGroupResourceAGPL(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}

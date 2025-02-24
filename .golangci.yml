@@ -18,9 +18,16 @@ linters:
     - makezero
     - misspell
     - nilerr
+    - paralleltest
     - predeclared
     - staticcheck
     - unconvert
     - unparam
     - unused
     - usetesting
+
+linters-settings:
+  paralleltest:
+    # Terraform acceptance subtests all share a Coder instance, and cannot run
+    # in parallel.
+    ignore-missing-subtests: true
