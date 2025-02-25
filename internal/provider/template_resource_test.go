@@ -657,129 +657,160 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 	err = cp.Copy("../../integration/template-test/example-template", exTemplateOne)
 	require.NoError(t, err)
 
-	cfg1 := testAccTemplateResourceConfig{
-		URL:   client.URL.String(),
-		Token: client.SessionToken(),
-		Name:  ptr.Ref("example-template"),
-		Versions: []testAccTemplateVersionConfig{
-			{
-				// Auto-generated version name
-				Directory: &exTemplateOne,
-				Active:    ptr.Ref(true),
-			},
-		},
-		ACL: testAccTemplateACLConfig{
-			GroupACL: []testAccTemplateKeyValueConfig{
+	t.Run("BasicUsage", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
 				{
-					Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
-					Value: ptr.Ref("use"),
-				},
-				{
-					Key:   ptr.Ref(group.ID.String()),
-					Value: ptr.Ref("admin"),
+					// Auto-generated version name
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(true),
 				},
 			},
-			UserACL: []testAccTemplateKeyValueConfig{
-				{
-					Key:   ptr.Ref(firstUser.ID.String()),
-					Value: ptr.Ref("admin"),
-				},
-			},
-		},
-	}
-
-	cfg2 := cfg1
-	cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
-	cfg2.MaxPortShareLevel = ptr.Ref("owner")
-
-	cfg3 := cfg2
-	cfg3.ACL.null = true
-	cfg3.MaxPortShareLevel = ptr.Ref("public")
-
-	cfg4 := cfg3
-	cfg4.AllowUserAutostart = ptr.Ref(false)
-	cfg4.AutostopRequirement = testAccAutostopRequirementConfig{
-		DaysOfWeek: ptr.Ref([]string{"monday", "tuesday"}),
-		Weeks:      ptr.Ref(int64(2)),
-	}
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		IsUnitTest:               true,
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: cfg1.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
-					resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "2"),
-					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
-						"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
-						"role": regexp.MustCompile("^use$"),
-					}),
-					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
-						"id":   regexp.MustCompile(group.ID.String()),
-						"role": regexp.MustCompile("^admin$"),
-					}),
-					resource.TestCheckResourceAttr("coderd_template.test", "acl.users.#", "1"),
-					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
-						"id":   regexp.MustCompile(firstUser.ID.String()),
-						"role": regexp.MustCompile("^admin$"),
-					}),
-				),
-			},
-			{
-				Config: cfg2.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
-					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
-						"id":   regexp.MustCompile(firstUser.ID.String()),
-						"role": regexp.MustCompile("^admin$"),
-					}),
-				),
-			},
-			{
-				Config: cfg3.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
-					resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
-					func(s *terraform.State) error {
-						templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
-						if err != nil {
-							return err
-						}
-						if len(templates) != 1 {
-							return fmt.Errorf("expected 1 template, got %d", len(templates))
-						}
-						acl, err := client.TemplateACL(ctx, templates[0].ID)
-						if err != nil {
-							return err
-						}
-						if len(acl.Groups) != 1 {
-							return fmt.Errorf("expected 1 group ACL, got %d", len(acl.Groups))
-						}
-						if acl.Groups[0].Role != "admin" && acl.Groups[0].ID != group.ID {
-							return fmt.Errorf("expected group ACL to be 'use' for %s, got %s", firstUser.OrganizationIDs[0].String(), acl.Groups[0].Role)
-						}
-						if len(acl.Users) != 1 {
-							return fmt.Errorf("expected 1 user ACL, got %d", len(acl.Users))
-						}
-						if acl.Users[0].Role != "admin" && acl.Users[0].ID != firstUser.ID {
-							return fmt.Errorf("expected user ACL to be 'admin' for %s, got %s", firstUser.ID.String(), acl.Users[0].Role)
-						}
-						return nil
+			ACL: testAccTemplateACLConfig{
+				GroupACL: []testAccTemplateKeyValueConfig{
+					{
+						Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
+						Value: ptr.Ref("use"),
 					},
-				),
+					{
+						Key:   ptr.Ref(group.ID.String()),
+						Value: ptr.Ref("admin"),
+					},
+				},
+				UserACL: []testAccTemplateKeyValueConfig{
+					{
+						Key:   ptr.Ref(firstUser.ID.String()),
+						Value: ptr.Ref("admin"),
+					},
+				},
 			},
-			{
-				Config: cfg4.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
-					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
-					resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
-				),
+		}
+
+		cfg2 := cfg1
+		cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
+		cfg2.MaxPortShareLevel = ptr.Ref("owner")
+
+		cfg3 := cfg2
+		cfg3.ACL.null = true
+		cfg3.MaxPortShareLevel = ptr.Ref("public")
+
+		cfg4 := cfg3
+		cfg4.AllowUserAutostart = ptr.Ref(false)
+		cfg4.AutostopRequirement = testAccAutostopRequirementConfig{
+			DaysOfWeek: ptr.Ref([]string{"monday", "tuesday"}),
+			Weeks:      ptr.Ref(int64(2)),
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+						resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "2"),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+							"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
+							"role": regexp.MustCompile("^use$"),
+						}),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
+							"id":   regexp.MustCompile(group.ID.String()),
+							"role": regexp.MustCompile("^admin$"),
+						}),
+						resource.TestCheckResourceAttr("coderd_template.test", "acl.users.#", "1"),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+							"id":   regexp.MustCompile(firstUser.ID.String()),
+							"role": regexp.MustCompile("^admin$"),
+						}),
+					),
+				},
+				{
+					Config: cfg2.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
+							"id":   regexp.MustCompile(firstUser.ID.String()),
+							"role": regexp.MustCompile("^admin$"),
+						}),
+					),
+				},
+				{
+					Config: cfg3.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
+						resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
+						func(s *terraform.State) error {
+							templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
+							if err != nil {
+								return err
+							}
+							if len(templates) != 1 {
+								return fmt.Errorf("expected 1 template, got %d", len(templates))
+							}
+							acl, err := client.TemplateACL(ctx, templates[0].ID)
+							if err != nil {
+								return err
+							}
+							if len(acl.Groups) != 1 {
+								return fmt.Errorf("expected 1 group ACL, got %d", len(acl.Groups))
+							}
+							if acl.Groups[0].Role != "admin" && acl.Groups[0].ID != group.ID {
+								return fmt.Errorf("expected group ACL to be 'use' for %s, got %s", firstUser.OrganizationIDs[0].String(), acl.Groups[0].Role)
+							}
+							if len(acl.Users) != 1 {
+								return fmt.Errorf("expected 1 user ACL, got %d", len(acl.Users))
+							}
+							if acl.Users[0].Role != "admin" && acl.Users[0].ID != firstUser.ID {
+								return fmt.Errorf("expected user ACL to be 'admin' for %s, got %s", firstUser.ID.String(), acl.Users[0].Role)
+							}
+							return nil
+						},
+					),
+				},
+				{
+					Config: cfg4.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_template.test", "allow_user_auto_start", "false"),
+						resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.days_of_week.#", "2"),
+						resource.TestCheckResourceAttr("coderd_template.test", "auto_stop_requirement.weeks", "2"),
+					),
+				},
 			},
-		},
+		})
+	})
+
+	// Verifies that when `max_port_share_level` is set to to the default value,
+	// an update request that would return HTTP Not Modified is not sent.
+	t.Run("DefaultMaxPortShareLevel", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(true),
+				},
+			},
+			MaxPortShareLevel: ptr.Ref("owner"),
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg1.String(t),
+					Check:  resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+				},
+			},
+		})
 	})
 }
 

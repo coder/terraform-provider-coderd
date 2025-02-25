@@ -573,6 +573,8 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	// deployment running `v2.15.0` or later.
 	if data.MaxPortShareLevel.IsUnknown() {
 		data.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
+	} else if data.MaxPortShareLevel.ValueString() == string(templateResp.MaxPortShareLevel) {
+		tflog.Info(ctx, "max port share level set to default, not updating")
 	} else {
 		mpslReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
