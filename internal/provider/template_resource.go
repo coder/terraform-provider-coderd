@@ -47,7 +47,7 @@ func NewTemplateResource() resource.Resource {
 
 // TemplateResource defines the resource implementation.
 type TemplateResource struct {
-	data *CoderdProviderData
+	*CoderdProviderData
 }
 
 // TemplateResourceModel describes the resource data model.
@@ -277,10 +277,10 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             stringdefault.StaticString(""),
 			},
 			"organization_id": schema.StringAttribute{
-				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
-				CustomType:          UUIDType,
-				Optional:            true,
+				MarkdownDescription: "The ID of the organization that this template belongs to.",
 				Computed:            true,
+				Optional:            true,
+				CustomType:          UUIDType,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplaceIfConfigured(),
 				},
@@ -476,32 +476,26 @@ func (r *TemplateResource) Configure(ctx context.Context, req resource.Configure
 		return
 	}
 
-	r.data = data
+	r.CoderdProviderData = data
 }
 
 func (r *TemplateResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data TemplateResourceModel
-
 	// Read Terraform plan data into the model
+	var data TemplateResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	if data.DisplayName.IsUnknown() {
 		data.DisplayName = data.Name
 	}
 
-	resp.Diagnostics.Append(data.CheckEntitlements(ctx, r.data.Features)...)
+	resp.Diagnostics.Append(data.CheckEntitlements(ctx, r.Features)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	client := r.data.Client
 	orgID := data.OrganizationID.ValueUUID()
 	var templateResp codersdk.Template
 	for idx, version := range data.Versions {
@@ -512,7 +506,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		if idx > 0 {
 			newVersionRequest.TemplateID = &templateResp.ID
 		}
-		versionResp, err, logs := newVersion(ctx, client, newVersionRequest)
+		versionResp, err, logs := newVersion(ctx, r.Client, newVersionRequest)
 		if err != nil {
 			resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 			return
@@ -523,7 +517,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			if resp.Diagnostics.HasError() {
 				return
 			}
-			templateResp, err = client.CreateTemplate(ctx, orgID, *createReq)
+			templateResp, err = r.Client.CreateTemplate(ctx, orgID, *createReq)
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template: %s", err))
 				return
@@ -548,7 +542,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				if resp.Diagnostics.HasError() {
 					return
 				}
-				err = client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(codersdk.TemplateACL{}, acl))
+				err = r.Client.UpdateTemplateACL(ctx, templateResp.ID, convertACLToRequest(codersdk.TemplateACL{}, acl))
 				if err != nil {
 					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create template ACL: %s", err))
 					return
@@ -557,7 +551,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 			}
 		}
 		if version.Active.ValueBool() {
-			err := markActive(ctx, client, templateResp.ID, versionResp.ID)
+			err := markActive(ctx, r.Client, templateResp.ID, versionResp.ID)
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", err.Error())
 				return
@@ -580,7 +574,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		mpslResp, err := client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *mpslReq)
+		mpslResp, err := r.Client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *mpslReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set max port share level via update: %s", err))
 			return
@@ -598,19 +592,16 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 }
 
 func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data TemplateResourceModel
-
 	// Read Terraform prior state data into the model
+	var data TemplateResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	client := r.data.Client
-
 	templateID := data.ID.ValueUUID()
 
-	template, err := client.Template(ctx, templateID)
+	template, err := r.Client.Template(ctx, templateID)
 	if err != nil {
 		if isNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Template with ID %s not found. Marking as deleted.", templateID.String()))
@@ -630,7 +621,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	if !data.ACL.IsNull() {
 		tflog.Info(ctx, "reading template ACL")
-		acl, err := client.TemplateACL(ctx, templateID)
+		acl, err := r.Client.TemplateACL(ctx, templateID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
 			return
@@ -647,7 +638,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	for idx, version := range data.Versions {
 		versionID := version.ID.ValueUUID()
-		versionResp, err := client.TemplateVersion(ctx, versionID)
+		versionResp, err := r.Client.TemplateVersion(ctx, versionID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
 			return
@@ -666,40 +657,31 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var newState TemplateResourceModel
-	var curState TemplateResourceModel
-
 	// Read Terraform plan data into the model
+	var newState TemplateResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &newState)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	// Read Terraform prior state data into the model
+	var curState TemplateResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &curState)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	if newState.OrganizationID.IsUnknown() {
-		newState.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	if newState.DisplayName.IsUnknown() {
 		newState.DisplayName = newState.Name
 	}
 
-	resp.Diagnostics.Append(newState.CheckEntitlements(ctx, r.data.Features)...)
+	resp.Diagnostics.Append(newState.CheckEntitlements(ctx, r.Features)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	orgID := newState.OrganizationID.ValueUUID()
-
 	templateID := newState.ID.ValueUUID()
-
-	client := r.data.Client
 
 	// TODO(ethanndickson): Remove this once the provider requires a Coder
 	// deployment running `v2.15.0` or later.
@@ -714,7 +696,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		_, err := client.UpdateTemplateMeta(ctx, templateID, *updateReq)
+		_, err := r.Client.UpdateTemplateMeta(ctx, templateID, *updateReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template metadata: %s", err))
 			return
@@ -731,13 +713,13 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		curACL, err := client.TemplateACL(ctx, templateID)
+		curACL, err := r.Client.TemplateACL(ctx, templateID)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
 			return
 		}
 
-		err = client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(curACL, acl))
+		err = r.Client.UpdateTemplateACL(ctx, templateID, convertACLToRequest(curACL, acl))
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template ACL: %s", err))
 			return
@@ -748,7 +730,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	for idx := range newState.Versions {
 		if newState.Versions[idx].ID.IsUnknown() {
 			tflog.Info(ctx, "discovered a new or modified template version")
-			uploadResp, err, logs := newVersion(ctx, client, newVersionRequest{
+			uploadResp, err, logs := newVersion(ctx, r.Client, newVersionRequest{
 				Version:        &newState.Versions[idx],
 				OrganizationID: orgID,
 				TemplateID:     &templateID,
@@ -757,7 +739,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 				return
 			}
-			versionResp, err := client.TemplateVersion(ctx, uploadResp.ID)
+			versionResp, err := r.Client.TemplateVersion(ctx, uploadResp.ID)
 			if err != nil {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template version: %s", err))
 				return
@@ -765,7 +747,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			newState.Versions[idx].ID = UUIDValue(versionResp.ID)
 			newState.Versions[idx].Name = types.StringValue(versionResp.Name)
 			if newState.Versions[idx].Active.ValueBool() {
-				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
+				err := markActive(ctx, r.Client, templateID, newState.Versions[idx].ID.ValueUUID())
 				if err != nil {
 					resp.Diagnostics.AddError("Client Error", err.Error())
 					return
@@ -781,7 +763,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				return
 			}
 			if !curVersion.Name.Equal(newState.Versions[idx].Name) {
-				_, err := client.UpdateTemplateVersion(ctx, newState.Versions[idx].ID.ValueUUID(), codersdk.PatchTemplateVersionRequest{
+				_, err := r.Client.UpdateTemplateVersion(ctx, newState.Versions[idx].ID.ValueUUID(), codersdk.PatchTemplateVersionRequest{
 					Name:    newState.Versions[idx].Name.ValueString(),
 					Message: newState.Versions[idx].Message.ValueStringPointer(),
 				})
@@ -791,7 +773,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				}
 			}
 			if newState.Versions[idx].Active.ValueBool() && !curVersion.Active.ValueBool() {
-				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
+				err := markActive(ctx, r.Client, templateID, newState.Versions[idx].ID.ValueUUID())
 				if err != nil {
 					resp.Diagnostics.AddError("Client Error", err.Error())
 					return
@@ -801,7 +783,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	// TODO(ethanndickson): Remove this once the provider requires a Coder
 	// deployment running `v2.15.0` or later.
-	templateResp, err := client.Template(ctx, templateID)
+	templateResp, err := r.Client.Template(ctx, templateID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
 		return
@@ -818,21 +800,17 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 }
 
 func (r *TemplateResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var data TemplateResourceModel
-
 	// Read Terraform prior state data into the model
+	var data TemplateResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	client := r.data.Client
-
 	templateID := data.ID.ValueUUID()
 
 	tflog.Info(ctx, "deleting template")
-	err := client.DeleteTemplate(ctx, templateID)
+	err := r.Client.DeleteTemplate(ctx, templateID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete template: %s", err))
 		return
@@ -845,13 +823,12 @@ func (r *TemplateResource) ImportState(ctx context.Context, req resource.ImportS
 		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 		return
 	} else if len(idParts) == 2 {
-		client := r.data.Client
-		org, err := client.OrganizationByName(ctx, idParts[0])
+		org, err := r.Client.OrganizationByName(ctx, idParts[0])
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization with name %s: %s", idParts[0], err))
 			return
 		}
-		template, err := client.TemplateByName(ctx, org.ID, idParts[1])
+		template, err := r.Client.TemplateByName(ctx, org.ID, idParts[1])
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template with name %s: %s", idParts[1], err))
 			return
