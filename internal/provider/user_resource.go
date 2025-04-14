@@ -248,6 +248,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	client := r.data.Client
 
+	// Lookup by ID to handle imports
 	user, err := client.User(ctx, data.ID.ValueString())
 	if err != nil {
 		if isNotFound(err) {
@@ -273,6 +274,23 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.Roles = types.SetValueMust(types.StringType, roles)
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
+
+	// Also query by username to check for deletion or username reassignment
+	userByName, err := client.User(ctx, data.Username.ValueString())
+	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with ID %q not found. Marking as deleted.", data.ID.ValueString()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
+		return
+	}
+	if userByName.ID != data.ID.ValueUUID() {
+		resp.Diagnostics.AddWarning("Client Error", fmt.Sprintf("The username %q has been reassigned to a new user. Marking as deleted.", user.Username))
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

@@ -9,6 +9,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/stretchr/testify/require"
 )
 
@@ -99,6 +100,19 @@ func TestAccUserResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "github"),
 				),
+			},
+			// Verify config drift via deletion is handled
+			{
+				Config: cfg4.String(t),
+				Check: func(*terraform.State) error {
+					user, err := client.User(ctx, "exampleNew")
+					if err != nil {
+						return err
+					}
+					return client.DeleteUser(ctx, user.ID)
+				},
+				// The Plan should be to create the entire resource
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})
