@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"regexp"
 	"strings"
@@ -20,7 +19,7 @@ func TestAccGroupDataSource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "group_data_acc", true)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)

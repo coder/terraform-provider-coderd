@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -22,7 +21,7 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "provisioner_key_acc", true)
 	orgs, err := client.Organizations(ctx)
 	require.NoError(t, err)

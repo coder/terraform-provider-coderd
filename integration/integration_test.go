@@ -36,7 +36,7 @@ func TestIntegration(t *testing.T) {
 	}
 	timeoutMins, err := strconv.Atoi(timeoutStr)
 	require.NoError(t, err, "invalid value specified for timeout")
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMins)*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Duration(timeoutMins)*time.Minute)
 	t.Cleanup(cancel)
 
 	tfrcPath := setupProvider(t)

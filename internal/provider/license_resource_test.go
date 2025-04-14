@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -17,7 +16,7 @@ func TestAccLicenseResource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "license_acc", false)
 
 	license := os.Getenv("CODER_ENTERPRISE_LICENSE")
