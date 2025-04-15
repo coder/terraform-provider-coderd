@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"regexp"
 	"strings"
@@ -19,7 +18,7 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "ws_proxy_acc", true)
 
 	cfg1 := testAccWorkspaceProxyResourceConfig{
@@ -61,7 +60,7 @@ func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "ws_proxy_acc_agpl", false)
 
 	cfg1 := testAccWorkspaceProxyResourceConfig{

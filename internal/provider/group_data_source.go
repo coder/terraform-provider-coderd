@@ -40,14 +40,13 @@ type GroupDataSourceModel struct {
 }
 
 type Member struct {
-	ID              UUID         `tfsdk:"id"`
-	Username        types.String `tfsdk:"username"`
-	Email           types.String `tfsdk:"email"`
-	CreatedAt       types.Int64  `tfsdk:"created_at"`
-	LastSeenAt      types.Int64  `tfsdk:"last_seen_at"`
-	Status          types.String `tfsdk:"status"`
-	LoginType       types.String `tfsdk:"login_type"`
-	ThemePreference types.String `tfsdk:"theme_preference"`
+	ID         UUID         `tfsdk:"id"`
+	Username   types.String `tfsdk:"username"`
+	Email      types.String `tfsdk:"email"`
+	CreatedAt  types.Int64  `tfsdk:"created_at"`
+	LastSeenAt types.Int64  `tfsdk:"last_seen_at"`
+	Status     types.String `tfsdk:"status"`
+	LoginType  types.String `tfsdk:"login_type"`
 }
 
 func (d *GroupDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -126,9 +125,6 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 						"login_type": schema.StringAttribute{
 							MarkdownDescription: "The login type of the member. Can be `oidc`, `token`, `password`, `github` or `none`.",
 							Computed:            true,
-						},
-						"theme_preference": schema.StringAttribute{
-							Computed: true,
 						},
 						// TODO: Upgrade requested user type if required
 					},
@@ -217,14 +213,13 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	members := make([]Member, 0, len(group.Members))
 	for _, member := range group.Members {
 		members = append(members, Member{
-			ID:              UUIDValue(member.ID),
-			Username:        types.StringValue(member.Username),
-			Email:           types.StringValue(member.Email),
-			CreatedAt:       types.Int64Value(member.CreatedAt.Unix()),
-			LastSeenAt:      types.Int64Value(member.LastSeenAt.Unix()),
-			Status:          types.StringValue(string(member.Status)),
-			LoginType:       types.StringValue(string(member.LoginType)),
-			ThemePreference: types.StringValue(member.ThemePreference),
+			ID:         UUIDValue(member.ID),
+			Username:   types.StringValue(member.Username),
+			Email:      types.StringValue(member.Email),
+			CreatedAt:  types.Int64Value(member.CreatedAt.Unix()),
+			LastSeenAt: types.Int64Value(member.LastSeenAt.Unix()),
+			Status:     types.StringValue(string(member.Status)),
+			LoginType:  types.StringValue(string(member.LoginType)),
 		})
 	}
 	data.Members = members

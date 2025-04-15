@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -52,7 +51,7 @@ func TestUUIDTypeValueFromTerraform(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			ctx := context.Background()
+			ctx := t.Context()
 			actual, err := uuidType.ValueFromTerraform(UUIDType, ctx, test.input)
 			require.NoError(t, err)
 			require.Equal(t, test.expected, actual)
@@ -86,7 +85,7 @@ func TestUUIDToStringValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			ctx := context.Background()
+			ctx := t.Context()
 			s, _ := test.uuid.ToStringValue(ctx)
 			require.Equal(t, test.expected, s)
 		})

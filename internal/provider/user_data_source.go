@@ -41,7 +41,6 @@ type UserDataSourceModel struct {
 	OrganizationIDs types.Set    `tfsdk:"organization_ids"`
 	CreatedAt       types.Int64  `tfsdk:"created_at"` // Unix timestamp
 	LastSeenAt      types.Int64  `tfsdk:"last_seen_at"`
-	ThemePreference types.String `tfsdk:"theme_preference"`
 }
 
 func (d *UserDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -99,10 +98,6 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"last_seen_at": schema.Int64Attribute{
 				MarkdownDescription: "Unix timestamp of when the user was last seen.",
-				Computed:            true,
-			},
-			"theme_preference": schema.StringAttribute{
-				MarkdownDescription: "The user's preferred theme.",
 				Computed:            true,
 			},
 		},
@@ -188,7 +183,6 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	data.OrganizationIDs = types.SetValueMust(UUIDType, orgIDs)
 	data.CreatedAt = types.Int64Value(user.CreatedAt.Unix())
 	data.LastSeenAt = types.Int64Value(user.LastSeenAt.Unix())
-	data.ThemePreference = types.StringValue(user.ThemePreference)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

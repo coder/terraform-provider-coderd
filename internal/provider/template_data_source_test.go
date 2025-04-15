@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"regexp"
 	"strconv"
@@ -24,7 +23,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "template_data_acc", true)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)

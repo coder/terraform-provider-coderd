@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -24,7 +23,7 @@ func TestAccOrganizationResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "organization_acc", true)
 	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)

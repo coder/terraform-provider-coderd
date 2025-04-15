@@ -71,5 +71,4 @@ Read-Only:
 - `last_seen_at` (Number) Unix timestamp of when the member was last seen.
 - `login_type` (String) The login type of the member. Can be `oidc`, `token`, `password`, `github` or `none`.
 - `status` (String) The status of the member. Can be `active`, `dormant` or `suspended`.
-- `theme_preference` (String)
 - `username` (String)
