@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
@@ -110,5 +111,15 @@ func memberDiff(currentMembers []uuid.UUID, plannedMembers []UUID) (add, remove 
 
 func isNotFound(err error) bool {
 	var sdkErr *codersdk.Error
-	return errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound
+	if !errors.As(err, &sdkErr) {
+		return false
+	}
+	if sdkErr.StatusCode() == http.StatusNotFound {
+		return true
+	}
+	// `httpmw/ExtractUserContext` returns a 400 w/ this message if the user is not found
+	if sdkErr.StatusCode() == http.StatusBadRequest && strings.Contains(sdkErr.Message, "must be an existing uuid or username") {
+		return true
+	}
+	return false
 }

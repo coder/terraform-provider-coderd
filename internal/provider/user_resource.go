@@ -248,14 +248,15 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 
 	client := r.data.Client
 
+	// Lookup by ID to handle imports
 	user, err := client.User(ctx, data.ID.ValueString())
 	if err != nil {
 		if isNotFound(err) {
-			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with ID %q not found. Marking as deleted.", data.ID.ValueString()))
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with ID %q not found. Marking resource as deleted.", data.ID.ValueString()))
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user by ID, got error: %s", err))
 		return
 	}
 	if len(user.OrganizationIDs) < 1 {
@@ -273,6 +274,30 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.Roles = types.SetValueMust(types.StringType, roles)
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
+
+	// The user-by-ID API returns deleted users if the authorized user has
+	// permission. It does not indicate whether the user is deleted or not.
+	// The user-by-username API will never return deleted users.
+	// So, we do another lookup by username.
+	userByName, err := client.User(ctx, data.Username.ValueString())
+	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf(
+				"User with username %q not found. Marking resource as deleted.",
+				data.Username.ValueString()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user by username, got error: %s", err))
+		return
+	}
+	if userByName.ID != data.ID.ValueUUID() {
+		resp.Diagnostics.AddWarning("Client Error", fmt.Sprintf(
+			"The username %q has been reassigned to a new user not managed by this Terraform resource. Marking resource as deleted.",
+			user.Username))
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
