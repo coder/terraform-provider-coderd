@@ -32,7 +32,7 @@ func NewGroupResource() resource.Resource {
 
 // GroupResource defines the resource implementation.
 type GroupResource struct {
-	data *CoderdProviderData
+	*CoderdProviderData
 }
 
 // GroupResourceModel describes the resource data model.
@@ -137,34 +137,26 @@ func (r *GroupResource) Configure(ctx context.Context, req resource.ConfigureReq
 		return
 	}
 
-	r.data = data
+	r.CoderdProviderData = data
 }
 
 func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data GroupResourceModel
-
 	// Read Terraform plan data into the model
+	var data GroupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, r.data.Features)...)
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, r.Features)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	client := r.data.Client
-
-	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
 	}
 
 	orgID := data.OrganizationID.ValueUUID()
 
 	tflog.Info(ctx, "creating group")
-	group, err := client.CreateGroup(ctx, orgID, codersdk.CreateGroupRequest{
+	group, err := r.Client.CreateGroup(ctx, orgID, codersdk.CreateGroupRequest{
 		Name:           data.Name.ValueString(),
 		DisplayName:    data.DisplayName.ValueString(),
 		AvatarURL:      data.AvatarURL.ValueString(),
@@ -188,7 +180,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	group, err = client.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
+	group, err = r.Client.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
 		AddUsers: members,
 	})
 	if err != nil {
@@ -202,20 +194,16 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 }
 
 func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data GroupResourceModel
-
 	// Read Terraform prior state data into the model
+	var data GroupResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	client := r.data.Client
-
 	groupID := data.ID.ValueUUID()
 
-	group, err := client.Group(ctx, groupID)
+	group, err := r.Client.Group(ctx, groupID)
 	if err != nil {
 		if isNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
@@ -244,22 +232,16 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 }
 
 func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data GroupResourceModel
-
 	// Read Terraform plan data into the model
+	var data GroupResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	client := r.data.Client
-	if data.OrganizationID.IsUnknown() {
-		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
-	}
 	groupID := data.ID.ValueUUID()
 
-	group, err := client.Group(ctx, groupID)
+	group, err := r.Client.Group(ctx, groupID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group, got error: %s", err))
 		return
@@ -268,9 +250,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	var remove []string
 	if !data.Members.IsNull() {
 		var plannedMembers []UUID
-		resp.Diagnostics.Append(
-			data.Members.ElementsAs(ctx, &plannedMembers, false)...,
-		)
+		resp.Diagnostics.Append(data.Members.ElementsAs(ctx, &plannedMembers, false)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -291,7 +271,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	})
 
 	quotaAllowance := int(data.QuotaAllowance.ValueInt32())
-	_, err = client.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
+	_, err = r.Client.PatchGroup(ctx, group.ID, codersdk.PatchGroupRequest{
 		AddUsers:       add,
 		RemoveUsers:    remove,
 		Name:           data.Name.ValueString(),
@@ -310,22 +290,19 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 }
 
 func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var data GroupResourceModel
-
 	// Read Terraform prior state data into the model
+	var data GroupResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	client := r.data.Client
 	groupID := data.ID.ValueUUID()
 
 	tflog.Info(ctx, "deleting group", map[string]any{
 		"id": groupID,
 	})
-	err := client.DeleteGroup(ctx, groupID)
+	err := r.Client.DeleteGroup(ctx, groupID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete group, got error: %s", err))
 		return
@@ -335,7 +312,6 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	var groupID uuid.UUID
-	client := r.data.Client
 	idParts := strings.Split(req.ID, "/")
 	if len(idParts) == 1 {
 		var err error
@@ -345,12 +321,12 @@ func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStat
 			return
 		}
 	} else if len(idParts) == 2 {
-		org, err := client.OrganizationByName(ctx, idParts[0])
+		org, err := r.Client.OrganizationByName(ctx, idParts[0])
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization with name %s: %s", idParts[0], err))
 			return
 		}
-		group, err := client.GroupByOrgAndName(ctx, org.ID, idParts[1])
+		group, err := r.Client.GroupByOrgAndName(ctx, org.ID, idParts[1])
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get group with name %s: %s", idParts[1], err))
 			return
@@ -360,7 +336,7 @@ func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStat
 		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<group-name>`")
 		return
 	}
-	group, err := client.Group(ctx, groupID)
+	group, err := r.Client.Group(ctx, groupID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get imported group, got error: %s", err))
 		return
