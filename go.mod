@@ -5,7 +5,7 @@ go 1.24.2
 require (
 	cdr.dev/slog v1.6.2-0.20241112041820-0ec81e6e67bb
 	github.com/coder/coder/v2 v2.23.1
-	github.com/docker/docker v28.1.1+incompatible
+	github.com/docker/docker v28.2.2+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/terraform-plugin-docs v0.21.0
@@ -62,6 +62,8 @@ require (
 	github.com/coder/serpent v0.10.0 // indirect
 	github.com/coder/terraform-provider-coder/v2 v2.5.2 // indirect
 	github.com/coder/websocket v1.8.13 // indirect
+	github.com/containerd/errdefs v1.0.0 // indirect
+	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.14.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
