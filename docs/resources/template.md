@@ -166,6 +166,8 @@ Optional:
 
 Import is supported using the following syntax:
 
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
 ```shell
 # The ID supplied can be either a template UUID retrieved via the API
 # or a fully qualified name: `<organization-name>/<template-name>`.
