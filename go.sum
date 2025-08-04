@@ -106,8 +106,8 @@ github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575 h1:kHaBemcxl8o/pQ5VM1
 github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575/go.mod h1:9d6lWj8KzO/fd/NrVaLscBKmPigpZpn5YawRPw+e3Yo=
 github.com/cloudflare/circl v1.6.1 h1:zqIqSPIndyBh1bjLVVDHMPpVKqp8Su/V+6MeDzzQBQ0=
 github.com/cloudflare/circl v1.6.1/go.mod h1:uddAzsPgqdMAYatqJ0lsjX1oECcQLIlRpzZh3pJrofs=
-github.com/coder/coder/v2 v2.24.1 h1:EeenSwofUYi4IqA1lWOKmIcGXbeRBRt2Xr3SYSdNZeM=
-github.com/coder/coder/v2 v2.24.1/go.mod h1:4jF5d64HGuw6QHPN3XW6Y4pfr6AhlKM5ND5W6/t2hIU=
+github.com/coder/coder/v2 v2.24.2 h1:BCZZzisJ4hVfu7LL4pPezRJpNBrY4feWjW2RyI1QMGY=
+github.com/coder/coder/v2 v2.24.2/go.mod h1:4jF5d64HGuw6QHPN3XW6Y4pfr6AhlKM5ND5W6/t2hIU=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 h1:3A0ES21Ke+FxEM8CXx9n47SZOKOpgSE1bbJzlE4qPVs=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0/go.mod h1:5UuS2Ts+nTToAMeOjNlnHFkPahrtDkmpydBen/3wgZc=
 github.com/coder/serpent v0.10.0 h1:ofVk9FJXSek+SmL3yVE3GoArP83M+1tX+H7S4t8BSuM=
