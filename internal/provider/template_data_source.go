@@ -24,7 +24,7 @@ func NewTemplateDataSource() datasource.DataSource {
 
 // TemplateDataSource defines the data source implementation.
 type TemplateDataSource struct {
-	data *CoderdProviderData
+	*CoderdProviderData
 }
 
 // TemplateDataSourceModel describes the data source data model.
@@ -230,36 +230,29 @@ func (d *TemplateDataSource) Configure(ctx context.Context, req datasource.Confi
 		return
 	}
 
-	d.data = data
+	d.CoderdProviderData = data
 }
 
 func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var data TemplateDataSourceModel
-
 	// Read Terraform configuration data into the model
+	var data TemplateDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	client := d.data.Client
 
 	var (
 		template codersdk.Template
 		err      error
 	)
 	if data.ID.ValueUUID() != uuid.Nil {
-		template, err = client.Template(ctx, data.ID.ValueUUID())
+		template, err = d.Client.Template(ctx, data.ID.ValueUUID())
 	} else {
-		if data.OrganizationID.ValueUUID() == uuid.Nil {
-			data.OrganizationID = UUIDValue(d.data.DefaultOrganizationID)
-		}
 		if data.OrganizationID.ValueUUID() == uuid.Nil {
 			resp.Diagnostics.AddError("Client Error", "name requires organization_id to be set")
 			return
 		}
-		template, err = client.TemplateByName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
+		template, err = d.Client.TemplateByName(ctx, data.OrganizationID.ValueUUID(), data.Name.ValueString())
 	}
 	if err != nil {
 		if isNotFound(err) {
@@ -283,7 +276,7 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 		return
 	}
 
-	acl, err := client.TemplateACL(ctx, template.ID)
+	acl, err := d.Client.TemplateACL(ctx, template.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template ACL: %s", err))
 		return
