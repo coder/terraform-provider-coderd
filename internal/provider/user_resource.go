@@ -213,17 +213,28 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
-		return
+
+	// OIDC users get their roles from the OIDC provider's role mapping
+	if loginType == codersdk.LoginTypeOIDC {
+		if len(roles) > 0 {
+			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
+			return
+		}
+		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
+	} else {
+		// For non-OIDC users, set roles explicitly
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
 		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
@@ -348,17 +359,29 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
-		return
+
+	// OIDC users get their roles from the OIDC provider's role mapping
+	loginType := codersdk.LoginType(data.LoginType.ValueString())
+	if loginType == codersdk.LoginTypeOIDC {
+		if len(roles) > 0 {
+			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
+			return
+		}
+		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
+	} else {
+		// For non-OIDC users, set roles explicitly
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
 		tflog.Info(ctx, "updating password")
