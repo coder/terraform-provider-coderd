@@ -225,15 +225,8 @@ func (r *OrganizationGroupSyncResource) Delete(ctx context.Context, req resource
 		"organization_id": orgID,
 	})
 
-	// Disable group sync by setting field to empty string
-	var groupSync codersdk.GroupSyncSettings
-	groupSync.Field = "" // Empty field disables group sync
-	groupSync.AutoCreateMissing = false
-	groupSync.Mapping = make(map[string][]uuid.UUID)
-	groupSync.RegexFilter = nil
-
-	// Perform the PATCH to disable group sync
-	_, err := r.Client.PatchGroupIDPSyncSettings(ctx, orgID.String(), groupSync)
+	// Sending all zero-values will delete the group sync configuration
+	_, err := r.Client.PatchGroupIDPSyncSettings(ctx, orgID.String(), codersdk.GroupSyncSettings{})
 	if err != nil {
 		if isNotFound(err) {
 			// Organization doesn't exist, so group sync is already "deleted"
@@ -256,15 +249,15 @@ func (r *OrganizationGroupSyncResource) patchGroupSync(
 ) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	var groupSync codersdk.GroupSyncSettings
-	groupSync.Field = data.Field.ValueString()
+	groupSync := codersdk.GroupSyncSettings{
+		Field:             data.Field.ValueString(),
+		AutoCreateMissing: data.AutoCreateMissing.ValueBool(),
+		Mapping:           make(map[string][]uuid.UUID),
+	}
 
 	if !data.RegexFilter.IsNull() {
 		groupSync.RegexFilter = regexp.MustCompile(data.RegexFilter.ValueString())
 	}
-
-	groupSync.AutoCreateMissing = data.AutoCreateMissing.ValueBool()
-	groupSync.Mapping = make(map[string][]uuid.UUID)
 
 	// Mapping is required, so always process it (can be empty)
 	// Terraform doesn't know how to turn one our `UUID` Terraform values into a
