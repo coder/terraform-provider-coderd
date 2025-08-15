@@ -56,7 +56,9 @@ resource "coderd_organization" "blueberry" {
 
 - `description` (String)
 - `display_name` (String) Display name of the organization. Defaults to name.
-- `group_sync` (Block, Optional) Group sync settings to sync groups from an IdP. (see [below for nested schema](#nestedblock--group_sync))
+- `group_sync` (Block, Optional, Deprecated) Group sync settings to sync groups from an IdP.
+
+~> **Deprecated** This block is deprecated. Use the `coderd_organization_group_sync` resource instead. (see [below for nested schema](#nestedblock--group_sync))
 - `icon` (String)
 - `org_sync_idp_groups` (Set of String) Claims from the IdP provider that will give users access to this organization.
 - `role_sync` (Block, Optional) Role sync settings to sync organization roles from an IdP. (see [below for nested schema](#nestedblock--role_sync))

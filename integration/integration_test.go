@@ -107,6 +107,45 @@ func TestIntegration(t *testing.T) {
 			},
 		},
 		{
+			name: "org-group-sync-test",
+			preF: func(t testing.TB, c *codersdk.Client) {},
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				org, err := c.OrganizationByName(ctx, "test-org-group-sync")
+				assert.NoError(t, err)
+				assert.Equal(t, "test-org-group-sync", org.Name)
+				assert.Equal(t, "Test Organization for Group Sync", org.DisplayName)
+
+				testGroup, err := c.GroupByOrgAndName(ctx, org.ID, "test-group")
+				assert.NoError(t, err)
+				assert.Equal(t, "test-group", testGroup.Name)
+				assert.Equal(t, "Test Group", testGroup.DisplayName)
+				assert.Equal(t, 50, testGroup.QuotaAllowance)
+
+				adminGroup, err := c.GroupByOrgAndName(ctx, org.ID, "admin-group")
+				assert.NoError(t, err)
+				assert.Equal(t, "admin-group", adminGroup.Name)
+				assert.Equal(t, "Admin Group", adminGroup.DisplayName)
+				assert.Equal(t, 100, adminGroup.QuotaAllowance)
+
+				// Verify group sync settings
+				groupSync, err := c.GroupIDPSyncSettings(ctx, org.ID.String())
+				assert.NoError(t, err)
+				assert.Equal(t, "groups", groupSync.Field)
+				assert.NotNil(t, groupSync.RegexFilter)
+				assert.Equal(t, "test_.*|admin_.*", groupSync.RegexFilter.String())
+				assert.False(t, groupSync.AutoCreateMissing)
+
+				assert.Contains(t, groupSync.Mapping, "test_developers")
+				assert.Contains(t, groupSync.Mapping, "admin_users")
+				assert.Contains(t, groupSync.Mapping, "mixed_group")
+
+				assert.Contains(t, groupSync.Mapping["test_developers"], testGroup.ID)
+				assert.Contains(t, groupSync.Mapping["admin_users"], adminGroup.ID)
+				assert.Contains(t, groupSync.Mapping["mixed_group"], testGroup.ID)
+				assert.Contains(t, groupSync.Mapping["mixed_group"], adminGroup.ID)
+			},
+		},
+		{
 			name: "template-test",
 			preF: func(t testing.TB, c *codersdk.Client) {},
 			assertF: func(t testing.TB, c *codersdk.Client) {
