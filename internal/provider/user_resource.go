@@ -278,11 +278,21 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.Email = types.StringValue(user.Email)
 	data.Name = types.StringValue(user.Name)
 	data.Username = types.StringValue(user.Username)
-	roles := make([]attr.Value, 0, len(user.Roles))
-	for _, role := range user.Roles {
-		roles = append(roles, types.StringValue(role.Name))
+	
+	// For OIDC users, don't populate roles from server to avoid config drift
+	// OIDC users get their roles from the OIDC provider's role mapping
+	if user.LoginType == codersdk.LoginTypeOIDC {
+		// Keep roles empty for OIDC users to match the expected Terraform config
+		data.Roles = types.SetValueMust(types.StringType, []attr.Value{})
+	} else {
+		// For non-OIDC users, populate roles from server response
+		roles := make([]attr.Value, 0, len(user.Roles))
+		for _, role := range user.Roles {
+			roles = append(roles, types.StringValue(role.Name))
+		}
+		data.Roles = types.SetValueMust(types.StringType, roles)
 	}
-	data.Roles = types.SetValueMust(types.StringType, roles)
+	
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
 
