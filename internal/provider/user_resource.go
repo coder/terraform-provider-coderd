@@ -214,15 +214,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
 
-	// OIDC users get their roles from the OIDC provider's role mapping
-	if loginType == codersdk.LoginTypeOIDC {
-		if len(roles) > 0 {
-			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
-			return
-		}
-		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
-	} else {
-		// For non-OIDC users, set roles explicitly
+	if loginType != codersdk.LoginTypeOIDC { // non-OIDC users get explicit roles
 		tflog.Info(ctx, "updating user roles", map[string]any{
 			"new_roles": roles,
 		})
@@ -234,6 +226,13 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 			return
 		}
 		tflog.Info(ctx, "successfully updated user roles")
+	} else {
+		// OIDC users get roles from provider's role mapping
+		if len(roles) > 0 {
+			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
+			return
+		}
+		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
 	}
 
 	if data.Suspended.ValueBool() {
@@ -278,21 +277,18 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.Email = types.StringValue(user.Email)
 	data.Name = types.StringValue(user.Name)
 	data.Username = types.StringValue(user.Username)
-	
-	// For OIDC users, don't populate roles from server to avoid config drift
-	// OIDC users get their roles from the OIDC provider's role mapping
-	if user.LoginType == codersdk.LoginTypeOIDC {
-		// Keep roles empty for OIDC users to match the expected Terraform config
-		data.Roles = types.SetValueMust(types.StringType, []attr.Value{})
-	} else {
-		// For non-OIDC users, populate roles from server response
+
+	if user.LoginType != codersdk.LoginTypeOIDC { // populate roles from server for non-OIDC users
 		roles := make([]attr.Value, 0, len(user.Roles))
 		for _, role := range user.Roles {
 			roles = append(roles, types.StringValue(role.Name))
 		}
 		data.Roles = types.SetValueMust(types.StringType, roles)
+	} else {
+		// OIDC users: keep roles empty to avoid config drift
+		data.Roles = types.SetValueMust(types.StringType, []attr.Value{})
 	}
-	
+
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
 
@@ -370,16 +366,8 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
 
-	// OIDC users get their roles from the OIDC provider's role mapping
 	loginType := codersdk.LoginType(data.LoginType.ValueString())
-	if loginType == codersdk.LoginTypeOIDC {
-		if len(roles) > 0 {
-			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
-			return
-		}
-		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
-	} else {
-		// For non-OIDC users, set roles explicitly
+	if loginType != codersdk.LoginTypeOIDC { // non-OIDC users get explicit roles
 		tflog.Info(ctx, "updating user roles", map[string]any{
 			"new_roles": roles,
 		})
@@ -391,6 +379,13 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 			return
 		}
 		tflog.Info(ctx, "successfully updated user roles")
+	} else {
+		// OIDC users get roles from provider's role mapping
+		if len(roles) > 0 {
+			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
+			return
+		}
+		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
 	}
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
@@ -455,5 +450,4 @@ func (r *UserResource) ImportState(ctx context.Context, req resource.ImportState
 		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or a valid username")
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), user.ID.String())...)
-}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), user.ID.String())...)}
