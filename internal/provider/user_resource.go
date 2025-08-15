@@ -213,17 +213,22 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
-		return
+
+	if loginType != codersdk.LoginTypeOIDC { // avoid 400 when role-sync is enabled
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
+	} else {
+		tflog.Info(ctx, "skipping user-role update for OIDC user")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
 		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
@@ -348,17 +353,22 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
-		return
+
+	if data.LoginType.ValueString() != string(codersdk.LoginTypeOIDC) { // skip for OIDC users
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
+	} else {
+		tflog.Info(ctx, "skipping user-role update for OIDC user")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
 		tflog.Info(ctx, "updating password")
