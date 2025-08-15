@@ -213,17 +213,27 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
-		return
+
+	if loginType != codersdk.LoginTypeOIDC { // non-OIDC users get explicit roles
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
+	} else {
+		// OIDC users get roles from provider's role mapping
+		if len(roles) > 0 {
+			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
+			return
+		}
+		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
 		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
@@ -267,11 +277,18 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.Email = types.StringValue(user.Email)
 	data.Name = types.StringValue(user.Name)
 	data.Username = types.StringValue(user.Username)
-	roles := make([]attr.Value, 0, len(user.Roles))
-	for _, role := range user.Roles {
-		roles = append(roles, types.StringValue(role.Name))
+
+	if user.LoginType != codersdk.LoginTypeOIDC { // populate roles from server for non-OIDC users
+		roles := make([]attr.Value, 0, len(user.Roles))
+		for _, role := range user.Roles {
+			roles = append(roles, types.StringValue(role.Name))
+		}
+		data.Roles = types.SetValueMust(types.StringType, roles)
+	} else {
+		// OIDC users: keep roles empty to avoid config drift
+		data.Roles = types.SetValueMust(types.StringType, []attr.Value{})
 	}
-	data.Roles = types.SetValueMust(types.StringType, roles)
+
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
 
@@ -348,17 +365,28 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	resp.Diagnostics.Append(
 		data.Roles.ElementsAs(ctx, &roles, false)...,
 	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
-		return
+
+	loginType := codersdk.LoginType(data.LoginType.ValueString())
+	if loginType != codersdk.LoginTypeOIDC { // non-OIDC users get explicit roles
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
+	} else {
+		// OIDC users get roles from provider's role mapping
+		if len(roles) > 0 {
+			resp.Diagnostics.AddError("Configuration Error", "Cannot set explicit roles for OIDC users. OIDC users get their roles from the OIDC provider's role mapping configuration.")
+			return
+		}
+		tflog.Info(ctx, "skipping role assignment for OIDC user (roles come from OIDC provider)")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
 		tflog.Info(ctx, "updating password")
