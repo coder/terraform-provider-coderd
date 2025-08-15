@@ -450,4 +450,5 @@ func (r *UserResource) ImportState(ctx context.Context, req resource.ImportState
 		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or a valid username")
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), user.ID.String())...)}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), user.ID.String())...)
+}
