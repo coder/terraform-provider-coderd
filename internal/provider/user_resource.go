@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -88,7 +87,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Required:            true,
 			},
 			"roles": schema.SetAttribute{
-				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.",
+				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`. If `null`, roles will not be managed by Terraform. This attribute must be null if the user was created via OIDC and uses role sync.",
 				Computed:            true,
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -97,7 +96,6 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 						stringvalidator.OneOf("owner", "template-admin", "user-admin", "auditor"),
 					),
 				},
-				Default: setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})),
 			},
 			"login_type": schema.StringAttribute{
 				MarkdownDescription: "Type of login for the user. Valid types are `none`, `password`, `github`, and `oidc`.",
@@ -209,21 +207,26 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	tflog.Info(ctx, "successfully updated user profile")
 	data.Name = types.StringValue(user.Name)
 
-	var roles []string
-	resp.Diagnostics.Append(
-		data.Roles.ElementsAs(ctx, &roles, false)...,
-	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
-		return
+	if !data.Roles.IsNull() {
+		var roles []string
+		resp.Diagnostics.Append(
+			data.Roles.ElementsAs(ctx, &roles, false)...,
+		)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		user, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update newly created user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.Suspended.ValueBool() {
 		_, err = client.UpdateUserStatus(ctx, data.ID.ValueString(), codersdk.UserStatus("suspended"))
@@ -267,11 +270,13 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	data.Email = types.StringValue(user.Email)
 	data.Name = types.StringValue(user.Name)
 	data.Username = types.StringValue(user.Username)
-	roles := make([]attr.Value, 0, len(user.Roles))
-	for _, role := range user.Roles {
-		roles = append(roles, types.StringValue(role.Name))
+	if !data.Roles.IsNull() {
+		roles := make([]attr.Value, 0, len(user.Roles))
+		for _, role := range user.Roles {
+			roles = append(roles, types.StringValue(role.Name))
+		}
+		data.Roles = types.SetValueMust(types.StringType, roles)
 	}
-	data.Roles = types.SetValueMust(types.StringType, roles)
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
 
@@ -344,21 +349,26 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	data.Name = name
 	tflog.Info(ctx, "successfully updated user profile")
 
-	var roles []string
-	resp.Diagnostics.Append(
-		data.Roles.ElementsAs(ctx, &roles, false)...,
-	)
-	tflog.Info(ctx, "updating user roles", map[string]any{
-		"new_roles": roles,
-	})
-	_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
-		Roles: roles,
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
-		return
+	if !data.Roles.IsNull() {
+		var roles []string
+		resp.Diagnostics.Append(
+			data.Roles.ElementsAs(ctx, &roles, false)...,
+		)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		tflog.Info(ctx, "updating user roles", map[string]any{
+			"new_roles": roles,
+		})
+		_, err = client.UpdateUserRoles(ctx, user.ID.String(), codersdk.UpdateRoles{
+			Roles: roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update user roles, got error: %s", err))
+			return
+		}
+		tflog.Info(ctx, "successfully updated user roles")
 	}
-	tflog.Info(ctx, "successfully updated user roles")
 
 	if data.LoginType.ValueString() == string(codersdk.LoginTypePassword) && !data.Password.IsNull() {
 		tflog.Info(ctx, "updating password")
