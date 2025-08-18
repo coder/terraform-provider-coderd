@@ -71,7 +71,7 @@ func TestAccUserResource(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				// We can't pull the password from the API.
-				ImportStateVerifyIgnore: []string{"password"},
+				ImportStateVerifyIgnore: []string{"password", "roles"},
 			},
 			// ImportState by username
 			{
@@ -80,7 +80,7 @@ func TestAccUserResource(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateId:     "example",
 				// We can't pull the password from the API.
-				ImportStateVerifyIgnore: []string{"password"},
+				ImportStateVerifyIgnore: []string{"password", "roles"},
 			},
 			// Update and Read testing
 			{
