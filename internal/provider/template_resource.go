@@ -399,7 +399,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             stringdefault.StaticString(""),
 			},
 			"use_classic_parameter_flow": schema.BoolAttribute{
-				MarkdownDescription: "If true, the classic parameter flow will be used when creating workspaces from this template. This only affects deployments with the experiment \"dynamic-parameters\" enabled. Defaults to false.",
+				MarkdownDescription: "If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.Bool{

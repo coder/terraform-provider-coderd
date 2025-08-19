@@ -83,7 +83,7 @@ resource "coderd_template" "ubuntu-main" {
 - `require_active_version` (Boolean) (Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.
 - `time_til_dormant_autodelete_ms` (Number) (Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.
 - `time_til_dormant_ms` (Number) (Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.
-- `use_classic_parameter_flow` (Boolean) If true, the classic parameter flow will be used when creating workspaces from this template. This only affects deployments with the experiment "dynamic-parameters" enabled. Defaults to false.
+- `use_classic_parameter_flow` (Boolean) If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.
 
 ### Read-Only
 
