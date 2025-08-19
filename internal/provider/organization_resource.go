@@ -145,7 +145,10 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 
 		Blocks: map[string]schema.Block{
 			"group_sync": schema.SingleNestedBlock{
-				MarkdownDescription: `Group sync settings to sync groups from an IdP.`,
+				MarkdownDescription: `Group sync settings to sync groups from an IdP.
+
+~> **Deprecated** This block is deprecated. Use the ` + "`coderd_organization_group_sync`" + ` resource instead.`,
+				DeprecationMessage: "Use the coderd_organization_group_sync resource instead.",
 				Attributes: map[string]schema.Attribute{
 					"field": schema.StringAttribute{
 						Optional: true,

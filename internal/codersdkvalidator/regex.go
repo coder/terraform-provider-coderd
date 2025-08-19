@@ -7,7 +7,7 @@ import (
 )
 
 func checkRegexp(it string) error {
-	_, err := regexp.Compile("")
+	_, err := regexp.Compile(it)
 	return err
 }
 
