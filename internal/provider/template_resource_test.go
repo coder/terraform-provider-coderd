@@ -116,6 +116,7 @@ func TestAccTemplateResource(t *testing.T) {
 						resource.TestCheckResourceAttr("coderd_template.test", "time_til_dormant_autodelete_ms", "0"),
 						resource.TestCheckResourceAttr("coderd_template.test", "require_active_version", "false"),
 						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
+						resource.TestCheckResourceAttr("coderd_template.test", "use_classic_parameter_flow", "false"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
 							"name":           regexp.MustCompile(".+"),
 							"id":             regexp.MustCompile(".+"),
@@ -991,6 +992,7 @@ type testAccTemplateResourceConfig struct {
 	RequireActiveVersion         *bool
 	DeprecationMessage           *string
 	MaxPortShareLevel            *string
+	UseClassicParameterFlow      *bool
 
 	Versions []testAccTemplateVersionConfig
 	ACL      testAccTemplateACLConfig
@@ -1098,6 +1100,7 @@ resource "coderd_template" "test" {
 	require_active_version            = {{orNull .RequireActiveVersion}}
 	deprecation_message               = {{orNull .DeprecationMessage}}
 	max_port_share_level              = {{orNull .MaxPortShareLevel}}
+	use_classic_parameter_flow        = {{orNull .UseClassicParameterFlow}}
 
 	acl = ` + c.ACL.String(t) + `
 

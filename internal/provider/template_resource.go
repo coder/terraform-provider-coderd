@@ -24,6 +24,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -72,6 +73,7 @@ type TemplateResourceModel struct {
 	RequireActiveVersion           types.Bool   `tfsdk:"require_active_version"`
 	DeprecationMessage             types.String `tfsdk:"deprecation_message"`
 	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
+	UseClassicParameterFlow        types.Bool   `tfsdk:"use_classic_parameter_flow"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
@@ -97,7 +99,8 @@ func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceMod
 		m.TimeTilDormantAutoDeleteMillis.Equal(other.TimeTilDormantAutoDeleteMillis) &&
 		m.RequireActiveVersion.Equal(other.RequireActiveVersion) &&
 		m.DeprecationMessage.Equal(other.DeprecationMessage) &&
-		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel)
+		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel) &&
+		m.UseClassicParameterFlow.Equal(other.UseClassicParameterFlow)
 }
 
 func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
@@ -385,12 +388,23 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Validators: []validator.String{
 					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
 				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"deprecation_message": schema.StringAttribute{
 				MarkdownDescription: "If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
+			},
+			"use_classic_parameter_flow": schema.BoolAttribute{
+				MarkdownDescription: "If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.",
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"acl": schema.SingleNestedAttribute{
 				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
@@ -588,6 +602,25 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.MaxPortShareLevel = types.StringValue(string(mpslResp.MaxPortShareLevel))
 	}
 
+	// TODO: Remove this update call (and the attribute) once the provider
+	// requires a Coder version where this flag has been removed.
+	if data.UseClassicParameterFlow.IsUnknown() {
+		data.UseClassicParameterFlow = types.BoolValue(templateResp.UseClassicParameterFlow)
+	} else if data.UseClassicParameterFlow.ValueBool() == templateResp.UseClassicParameterFlow {
+		tflog.Info(ctx, "use classic parameter flow set to default, not updating")
+	} else {
+		ucpfReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		ucpfResp, err := client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *ucpfReq)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set use classic parameter flow via update: %s", err))
+			return
+		}
+		data.UseClassicParameterFlow = types.BoolValue(ucpfResp.UseClassicParameterFlow)
+	}
+
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -627,6 +660,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
+	data.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
 
 	if !data.ACL.IsNull() {
 		tflog.Info(ctx, "reading template ACL")
@@ -701,11 +735,6 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 
 	client := r.data.Client
 
-	// TODO(ethanndickson): Remove this once the provider requires a Coder
-	// deployment running `v2.15.0` or later.
-	if newState.MaxPortShareLevel.IsUnknown() {
-		newState.MaxPortShareLevel = curState.MaxPortShareLevel
-	}
 	templateMetadataChanged := !newState.EqualTemplateMetadata(&curState)
 	// This is required, as the API will reject no-diff updates.
 	if templateMetadataChanged {
@@ -1290,6 +1319,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
+		UseClassicParameterFlow:        ptr.Ref(r.UseClassicParameterFlow.ValueBool()),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
 	}
@@ -1334,6 +1364,7 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64Pointer(),
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
+		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}
 }
