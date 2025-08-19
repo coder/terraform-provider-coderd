@@ -56,7 +56,7 @@ resource "coderd_user" "admin" {
 - `login_type` (String) Type of login for the user. Valid types are `none`, `password`, `github`, and `oidc`.
 - `name` (String) Display name of the user. Defaults to username.
 - `password` (String, Sensitive) Password for the user. Required when `login_type` is `password`. Passwords are saved into the state as plain text and should only be used for testing purposes.
-- `roles` (Set of String) Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`.
+- `roles` (Set of String) Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`. If `null`, roles will not be managed by Terraform. This attribute must be null if the user is an OIDC user and role sync is configured
 - `suspended` (Boolean) Whether the user is suspended.
 
 ### Read-Only

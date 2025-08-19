@@ -42,6 +42,9 @@ func TestAccUserResource(t *testing.T) {
 	cfg4.LoginType = ptr.Ref("github")
 	cfg4.Password = nil
 
+	cfg5 := cfg4
+	cfg5.Roles = nil
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -68,7 +71,7 @@ func TestAccUserResource(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				// We can't pull the password from the API.
-				ImportStateVerifyIgnore: []string{"password"},
+				ImportStateVerifyIgnore: []string{"password", "roles"},
 			},
 			// ImportState by username
 			{
@@ -77,7 +80,7 @@ func TestAccUserResource(t *testing.T) {
 				ImportStateVerify: true,
 				ImportStateId:     "example",
 				// We can't pull the password from the API.
-				ImportStateVerifyIgnore: []string{"password"},
+				ImportStateVerifyIgnore: []string{"password", "roles"},
 			},
 			// Update and Read testing
 			{
@@ -114,7 +117,41 @@ func TestAccUserResource(t *testing.T) {
 				// The Plan should be to create the entire resource
 				ExpectNonEmptyPlan: true,
 			},
+			// Unmanaged roles
+			{
+				Config: cfg5.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("coderd_user.test", "roles"),
+				),
+			},
 		},
+	})
+
+	t.Run("CreateUnmanagedRolesOk", func(t *testing.T) {
+		cfg := testAccUserResourceConfig{
+			URL:       client.URL.String(),
+			Token:     client.SessionToken(),
+			Username:  ptr.Ref("unmanaged"),
+			Name:      ptr.Ref("Unmanaged User"),
+			Email:     ptr.Ref("unmanaged@coder.com"),
+			Roles:     nil, // Start with unmanaged roles
+			LoginType: ptr.Ref("password"),
+			Password:  ptr.Ref("SomeSecurePassword!"),
+		}
+
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_user.test", "roles"),
+					),
+				},
+			},
+		})
 	})
 }
 
