@@ -1303,9 +1303,9 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 	}
 	return &codersdk.UpdateTemplateMeta{
 		Name:                           r.Name.ValueString(),
-		DisplayName:                    r.DisplayName.ValueString(),
-		Description:                    r.Description.ValueString(),
-		Icon:                           r.Icon.ValueString(),
+		DisplayName:                    r.DisplayName.ValueStringPointer(),
+		Description:                    r.Description.ValueStringPointer(),
+		Icon:                           r.Icon.ValueStringPointer(),
 		DefaultTTLMillis:               r.DefaultTTLMillis.ValueInt64(),
 		ActivityBumpMillis:             r.ActivityBumpMillis.ValueInt64(),
 		AutostopRequirement:            autoStop,
