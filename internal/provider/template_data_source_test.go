@@ -73,9 +73,9 @@ func TestAccTemplateDataSource(t *testing.T) {
 	// Can't set some fields on create, like deprecated.
 	tpl, err = client.UpdateTemplateMeta(ctx, tpl.ID, codersdk.UpdateTemplateMeta{
 		Name:               tpl.Name,
-		DisplayName:        tpl.DisplayName,
-		Description:        tpl.Description,
-		Icon:               tpl.Icon,
+		DisplayName:        &tpl.DisplayName,
+		Description:        &tpl.Description,
+		Icon:               &tpl.Icon,
 		DefaultTTLMillis:   tpl.DefaultTTLMillis,
 		ActivityBumpMillis: tpl.ActivityBumpMillis,
 		AutostopRequirement: &codersdk.TemplateAutostopRequirement{
