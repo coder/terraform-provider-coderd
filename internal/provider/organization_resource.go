@@ -36,10 +36,11 @@ type OrganizationResource struct {
 type OrganizationResourceModel struct {
 	ID UUID `tfsdk:"id"`
 
-	Name        types.String `tfsdk:"name"`
-	DisplayName types.String `tfsdk:"display_name"`
-	Description types.String `tfsdk:"description"`
-	Icon        types.String `tfsdk:"icon"`
+	Name             types.String `tfsdk:"name"`
+	DisplayName      types.String `tfsdk:"display_name"`
+	Description      types.String `tfsdk:"description"`
+	Icon             types.String `tfsdk:"icon"`
+	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
 
 	OrgSyncIdpGroups types.Set    `tfsdk:"org_sync_idp_groups"`
 	GroupSync        types.Object `tfsdk:"group_sync"`
@@ -134,6 +135,15 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(""),
+			},
+			"workspace_sharing": schema.StringAttribute{
+				MarkdownDescription: "Workspace sharing setting for the organization. " +
+					"Valid values are `everyone` and `none`.",
+				Optional: true,
+				Computed: true,
+				Validators: []validator.String{
+					stringvalidator.OneOf(workspaceSharingNone, workspaceSharingEveryone),
+				},
 			},
 
 			"org_sync_idp_groups": schema.SetAttribute{
@@ -321,6 +331,14 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 		data.RoleSync = roleSyncData.ValueObject()
 	}
 
+	// `workspace_sharing` is optional+computed, so we fetch it from the backend
+	// even if not specified.
+	workspaceSharingSettings, err := r.Client.WorkspaceSharingSettings(ctx, org.ID.String())
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("unable to get organization workspace sharing settings, got error: %s", err))
+		return
+	}
+
 	// We've fetched the organization ID from state, and the latest values for
 	// everything else from the backend. Ensure that any mutable data is synced
 	// with the backend.
@@ -328,6 +346,7 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 	data.DisplayName = types.StringValue(org.DisplayName)
 	data.Description = types.StringValue(org.Description)
 	data.Icon = types.StringValue(org.Icon)
+	data.WorkspaceSharing = types.StringValue(workspaceSharingValueFromSettings(workspaceSharingSettings))
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -408,6 +427,30 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 			return
 		}
 	}
+
+	// Apply workspace sharing settings, if specified and available.
+	if !data.WorkspaceSharing.IsNull() && !data.WorkspaceSharing.IsUnknown() {
+		tflog.Trace(ctx, "updating workspace sharing", map[string]any{
+			"orgID": orgID,
+		})
+
+		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.WorkspaceSharingSettings{
+			SharingDisabled: workspaceSharingDisabledFromValue(data.WorkspaceSharing.ValueString()),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Workspace Sharing Update error", err.Error())
+			return
+		}
+	}
+
+	// This is computed, we need to write a known value to the state
+	// in any case.
+	workspaceSharingSettings, err := r.Client.WorkspaceSharingSettings(ctx, orgID.String())
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get workspace sharing settings, got error: %s", err))
+		return
+	}
+	data.WorkspaceSharing = types.StringValue(workspaceSharingValueFromSettings(workspaceSharingSettings))
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -491,6 +534,30 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 			return
 		}
 	}
+
+	// Apply workspace sharing settings, if specified and available.
+	if !data.WorkspaceSharing.IsNull() && !data.WorkspaceSharing.IsUnknown() {
+		tflog.Trace(ctx, "updating workspace sharing", map[string]any{
+			"orgID": orgID,
+		})
+
+		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.WorkspaceSharingSettings{
+			SharingDisabled: workspaceSharingDisabledFromValue(data.WorkspaceSharing.ValueString()),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Workspace Sharing Update error", err.Error())
+			return
+		}
+	}
+
+	// This is computed, we need to write a known value to the state
+	// in any case.
+	workspaceSharingSettings, err := r.Client.WorkspaceSharingSettings(ctx, orgID.String())
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get workspace sharing settings, got error: %s", err))
+		return
+	}
+	data.WorkspaceSharing = types.StringValue(workspaceSharingValueFromSettings(workspaceSharingSettings))
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -652,4 +719,20 @@ func (r *OrganizationResource) patchOrgSyncMapping(
 	}
 
 	return diags
+}
+
+const (
+	workspaceSharingNone     = "none"
+	workspaceSharingEveryone = "everyone"
+)
+
+func workspaceSharingValueFromSettings(settings codersdk.WorkspaceSharingSettings) string {
+	if settings.SharingDisabled {
+		return workspaceSharingNone
+	}
+	return workspaceSharingEveryone
+}
+
+func workspaceSharingDisabledFromValue(value string) bool {
+	return value == workspaceSharingNone
 }

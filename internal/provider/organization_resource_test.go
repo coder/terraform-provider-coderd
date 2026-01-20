@@ -61,6 +61,12 @@ func TestAccOrganizationResource(t *testing.T) {
 		},
 	})
 
+	cfg6 := cfg5
+	cfg6.WorkspaceSharing = ptr.Ref("none")
+
+	cfg7 := cfg6
+	cfg7.WorkspaceSharing = ptr.Ref("everyone")
+
 	t.Run("CreateImportUpdateReadOk", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -118,6 +124,20 @@ func TestAccOrganizationResource(t *testing.T) {
 						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("role_sync").AtMapKey("mapping").AtMapKey("wobble").AtSliceIndex(0), knownvalue.StringExact("wobbly")),
 					},
 				},
+				// Disable workspace sharing
+				{
+					Config: cfg6.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("workspace_sharing"), knownvalue.StringExact("none")),
+					},
+				},
+				// Re-enable workspace sharing
+				{
+					Config: cfg7.String(t),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("workspace_sharing"), knownvalue.StringExact("everyone")),
+					},
+				},
 			},
 		})
 	})
@@ -150,10 +170,11 @@ type testAccOrganizationResourceConfig struct {
 	URL   string
 	Token string
 
-	Name        *string
-	DisplayName *string
-	Description *string
-	Icon        *string
+	Name             *string
+	DisplayName      *string
+	Description      *string
+	Icon             *string
+	WorkspaceSharing *string
 
 	OrgSyncIdpGroups []string
 	GroupSync        *codersdk.GroupSyncSettings
@@ -169,10 +190,11 @@ provider coderd {
 }
 
 resource "coderd_organization" "test" {
-	name         = {{orNull .Name}}
-	display_name = {{orNull .DisplayName}}
-	description  = {{orNull .Description}}
-	icon         = {{orNull .Icon}}
+	name              = {{orNull .Name}}
+	display_name      = {{orNull .DisplayName}}
+	description       = {{orNull .Description}}
+	icon              = {{orNull .Icon}}
+	workspace_sharing = {{orNull .WorkspaceSharing}}
 
 	{{- if .OrgSyncIdpGroups}}
 	org_sync_idp_groups = [
