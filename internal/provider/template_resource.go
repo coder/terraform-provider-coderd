@@ -73,6 +73,7 @@ type TemplateResourceModel struct {
 	RequireActiveVersion           types.Bool   `tfsdk:"require_active_version"`
 	DeprecationMessage             types.String `tfsdk:"deprecation_message"`
 	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
+	CORSBehavior                   types.String `tfsdk:"cors_behavior"`
 	UseClassicParameterFlow        types.Bool   `tfsdk:"use_classic_parameter_flow"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
@@ -100,6 +101,7 @@ func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceMod
 		m.RequireActiveVersion.Equal(other.RequireActiveVersion) &&
 		m.DeprecationMessage.Equal(other.DeprecationMessage) &&
 		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel) &&
+		m.CORSBehavior.Equal(other.CORSBehavior) &&
 		m.UseClassicParameterFlow.Equal(other.UseClassicParameterFlow)
 }
 
@@ -398,6 +400,17 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Computed:            true,
 				Default:             stringdefault.StaticString(""),
 			},
+			"cors_behavior": schema.StringAttribute{
+				MarkdownDescription: "The CORS behavior for workspace apps in this template. Valid values are `simple` (default CORS middleware) or `passthru` (bypass CORS middleware). Defaults to `simple`.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOfCaseInsensitive(string(codersdk.CORSBehaviorSimple), string(codersdk.CORSBehaviorPassthru)),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"use_classic_parameter_flow": schema.BoolAttribute{
 				MarkdownDescription: "If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.",
 				Optional:            true,
@@ -602,6 +615,9 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.MaxPortShareLevel = types.StringValue(string(mpslResp.MaxPortShareLevel))
 	}
 
+	// Set cors_behavior from the response (it's set during create via toCreateRequest)
+	data.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
+
 	// TODO: Remove this update call (and the attribute) once the provider
 	// requires a Coder version where this flag has been removed.
 	if data.UseClassicParameterFlow.IsUnknown() {
@@ -660,6 +676,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
+	data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
 	data.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
 
 	if !data.ACL.IsNull() {
@@ -836,6 +853,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
+	newState.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -1319,6 +1337,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
+		CORSBehavior:                   corsPtr(r.CORSBehavior.ValueString()),
 		UseClassicParameterFlow:        ptr.Ref(r.UseClassicParameterFlow.ValueBool()),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
@@ -1365,8 +1384,19 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		CORSBehavior:                   corsPtr(r.CORSBehavior.ValueString()),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}
+}
+
+// corsPtr returns a pointer to a CORSBehavior if the value is not empty,
+// otherwise returns nil (which will use the server default).
+func corsPtr(v string) *codersdk.CORSBehavior {
+	if v == "" {
+		return nil
+	}
+	b := codersdk.CORSBehavior(v)
+	return &b
 }
 
 type LastVersionsByHash = map[string][]PreviousTemplateVersion
