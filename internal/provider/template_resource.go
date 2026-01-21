@@ -615,23 +615,8 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.MaxPortShareLevel = types.StringValue(string(mpslResp.MaxPortShareLevel))
 	}
 
-	// Handle cors_behavior - can't be set during create, needs update
-	if data.CORSBehavior.IsUnknown() {
-		data.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
-	} else if data.CORSBehavior.ValueString() == string(templateResp.CORSBehavior) {
-		tflog.Info(ctx, "cors behavior set to default, not updating")
-	} else {
-		corsReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		corsResp, err := client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *corsReq)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set cors behavior via update: %s", err))
-			return
-		}
-		data.CORSBehavior = types.StringValue(string(corsResp.CORSBehavior))
-	}
+	// Set cors_behavior from the response (it's set during create via toCreateRequest)
+	data.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
 
 	// TODO: Remove this update call (and the attribute) once the provider
 	// requires a Coder version where this flag has been removed.
@@ -1411,6 +1396,7 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		CORSBehavior:                   ptr.Ref(codersdk.CORSBehavior(r.CORSBehavior.ValueString())),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}
 }
