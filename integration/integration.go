@@ -48,14 +48,21 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool)
 	defer puller.Close()
 	_, err = io.Copy(os.Stderr, puller)
 	require.NoError(t, err, "pull coder image")
+
+	env := []string{
+		"CODER_HTTP_ADDRESS=0.0.0.0:3000",          // Listen on all interfaces inside the container.
+		"CODER_ACCESS_URL=http://localhost:3000",   // Avoid creating try.coder.app URLs.
+		"CODER_TELEMETRY_ENABLE=false",             // Avoid creating noise.
+		"CODER_DANGEROUS_DISABLE_RATE_LIMITS=true", // Avoid hitting file rate limit in tests.
+	}
+	// Optionally enable experiment-gated features.
+	if experiments := os.Getenv("CODER_EXPERIMENTS"); experiments != "" {
+		env = append(env, "CODER_EXPERIMENTS="+experiments)
+	}
+
 	ctr, err := cli.ContainerCreate(ctx, &container.Config{
-		Image: coderImg + ":" + coderVersion,
-		Env: []string{
-			"CODER_HTTP_ADDRESS=0.0.0.0:3000",          // Listen on all interfaces inside the container
-			"CODER_ACCESS_URL=http://localhost:3000",   // Set explicitly to avoid creating try.coder.app URLs.
-			"CODER_TELEMETRY_ENABLE=false",             // Avoid creating noise.
-			"CODER_DANGEROUS_DISABLE_RATE_LIMITS=true", // Avoid hitting file rate limit in tests.
-		},
+		Image:        coderImg + ":" + coderVersion,
+		Env:          env,
 		Labels:       map[string]string{},
 		ExposedPorts: map[nat.Port]struct{}{nat.Port("3000/tcp"): {}},
 	}, &container.HostConfig{

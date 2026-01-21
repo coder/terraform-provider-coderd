@@ -32,6 +32,7 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		resource.TestCheckTypeSetElemAttr("data.coderd_organization.test", "members.*", firstUser.ID.String()),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "created_at"),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "updated_at"),
+		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "workspace_sharing"),
 	)
 
 	t.Run("DefaultOrgByIDOk", func(t *testing.T) {
