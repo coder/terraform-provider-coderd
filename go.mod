@@ -4,7 +4,7 @@ go 1.24.10
 
 require (
 	cdr.dev/slog v1.6.2-0.20250703074222-9df5e0a6c145
-	github.com/coder/coder/v2 v2.29.1
+	github.com/coder/coder/v2 v2.29.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/google/uuid v1.6.0
@@ -53,7 +53,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
-	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
+	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
