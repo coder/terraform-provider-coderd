@@ -58,6 +58,7 @@ type TemplateDataSourceModel struct {
 
 	RequireActiveVersion types.Bool   `tfsdk:"require_active_version"`
 	MaxPortShareLevel    types.String `tfsdk:"max_port_share_level"`
+	CORSBehavior         types.String `tfsdk:"cors_behavior"`
 
 	CreatedByUserID UUID        `tfsdk:"created_by_user_id"`
 	CreatedAt       types.Int64 `tfsdk:"created_at"` // Unix timestamp
@@ -186,6 +187,10 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			},
 			"max_port_share_level": schema.StringAttribute{
 				MarkdownDescription: "The maximum port share level for workspaces created from the template.",
+				Computed:            true,
+			},
+			"cors_behavior": schema.StringAttribute{
+				MarkdownDescription: "Behavior of CORS for workspace apps.",
 				Computed:            true,
 			},
 			"created_by_user_id": schema.StringAttribute{
@@ -330,6 +335,7 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	data.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
+	data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
 	data.CreatedByUserID = UUIDValue(template.CreatedByID)
 	data.CreatedAt = types.Int64Value(template.CreatedAt.Unix())
 	data.UpdatedAt = types.Int64Value(template.UpdatedAt.Unix())

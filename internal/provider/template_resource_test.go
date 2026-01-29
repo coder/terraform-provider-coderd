@@ -992,6 +992,7 @@ type testAccTemplateResourceConfig struct {
 	RequireActiveVersion         *bool
 	DeprecationMessage           *string
 	MaxPortShareLevel            *string
+	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
 
 	Versions []testAccTemplateVersionConfig
@@ -1100,6 +1101,7 @@ resource "coderd_template" "test" {
 	require_active_version            = {{orNull .RequireActiveVersion}}
 	deprecation_message               = {{orNull .DeprecationMessage}}
 	max_port_share_level              = {{orNull .MaxPortShareLevel}}
+	cors_behavior                     = {{orNull .CORSBehavior}}
 	use_classic_parameter_flow        = {{orNull .UseClassicParameterFlow}}
 
 	acl = ` + c.ACL.String(t) + `
