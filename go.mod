@@ -4,7 +4,7 @@ go 1.24.10
 
 require (
 	cdr.dev/slog v1.6.2-0.20250703074222-9df5e0a6c145
-	github.com/coder/coder/v2 v2.29.2
+	github.com/coder/coder/v2 v2.29.4
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/google/uuid v1.6.0
