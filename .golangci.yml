@@ -1,3 +1,5 @@
+version: "2"
+
 # Visit https://golangci-lint.run/ for usage documentation and information on
 # other useful linters
 issues:
@@ -5,14 +7,12 @@ issues:
   max-same-issues: 0
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - durationcheck
     - errcheck
     - forcetypeassert
     - godot
-    - gofmt
-    - gosimple
     - govet
     - ineffassign
     - makezero
@@ -25,9 +25,12 @@ linters:
     - unparam
     - unused
     - usetesting
+  settings:
+    paralleltest:
+      # Terraform acceptance subtests all share a Coder instance, and cannot run
+      # in parallel.
+      ignore-missing-subtests: true
 
-linters-settings:
-  paralleltest:
-    # Terraform acceptance subtests all share a Coder instance, and cannot run
-    # in parallel.
-    ignore-missing-subtests: true
+formatters:
+  enable:
+    - gofmt
