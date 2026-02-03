@@ -181,12 +181,13 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	data.IsDefault = types.BoolValue(org.IsDefault)
 	data.CreatedAt = types.Int64Value(org.CreatedAt.Unix())
 	data.UpdatedAt = types.Int64Value(org.UpdatedAt.Unix())
-	workspaceSharingSettings, err := client.WorkspaceSharingSettings(ctx, org.ID.String())
+	workspaceSharing, err := fetchWorkspaceSharingValue(ctx, client, org.ID.String())
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get workspace sharing settings, got error: %s", err))
+		resp.Diagnostics.AddError(
+			"Client Error", fmt.Sprintf("Unable to get organization workspace sharing settings, got error: %s", err))
 		return
 	}
-	data.WorkspaceSharing = types.StringValue(workspaceSharingValueFromSettings(workspaceSharingSettings))
+	data.WorkspaceSharing = workspaceSharing
 	members, err := client.OrganizationMembers(ctx, org.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization members, got error: %s", err))
