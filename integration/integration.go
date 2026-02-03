@@ -45,7 +45,11 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool)
 	// Stand up a temporary Coder instance
 	puller, err := cli.ImagePull(ctx, coderImg+":"+coderVersion, image.PullOptions{})
 	require.NoError(t, err, "pull coder image")
-	defer puller.Close()
+	defer func() {
+		if err := puller.Close(); err != nil {
+			t.Logf("error closing image puller: %v", err)
+		}
+	}()
 	_, err = io.Copy(os.Stderr, puller)
 	require.NoError(t, err, "pull coder image")
 
