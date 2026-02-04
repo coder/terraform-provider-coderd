@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Happy path: current version of Coder, necessary experiments
+// enabled.  All checks should pass, including the experimental ones.
 func TestAccOrganizationDataSource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -27,6 +29,8 @@ func TestAccOrganizationDataSource(t *testing.T) {
 	runOrganizationDataSourceTests(t, client, &firstUser, true)
 }
 
+// Current version of Coder, no experiments enabled. Perform all
+// checks except the experimental ones (workspace sharing).
 func TestAccOrganizationDataSourceNoExperiments(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -40,6 +44,8 @@ func TestAccOrganizationDataSourceNoExperiments(t *testing.T) {
 	runOrganizationDataSourceTests(t, client, &firstUser, false)
 }
 
+// Older version of coder (doesn't have the experiments). Perform all
+// checks except the experimental ones.
 func TestAccOrganizationDataSourceBackwardCompatibility(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -53,7 +59,7 @@ func TestAccOrganizationDataSourceBackwardCompatibility(t *testing.T) {
 	runOrganizationDataSourceTests(t, client, &firstUser, false)
 }
 
-func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, firstUser *codersdk.User, enableWorkspaceSharingChecks bool) {
+func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, firstUser *codersdk.User, enableExperimentalChecks bool) {
 	t.Helper()
 	checks := []resource.TestCheckFunc{
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "id", firstUser.OrganizationIDs[0].String()),
@@ -64,7 +70,7 @@ func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, first
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "created_at"),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "updated_at"),
 	}
-	if enableWorkspaceSharingChecks {
+	if enableExperimentalChecks {
 		checks = append(checks, resource.TestCheckResourceAttrSet("data.coderd_organization.test", "workspace_sharing"))
 	}
 	defaultCheckFn := resource.ComposeAggregateTestCheckFunc(checks...)

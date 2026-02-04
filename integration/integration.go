@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// User-configurable options for coder backend.
 // Using the pattern from
 // https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis
 type coderOptions struct {

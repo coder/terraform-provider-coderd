@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Happy path: current version of Coder, necessary experiments enabled.
-// All steps should pass.
+// Happy path: current version of Coder, necessary experiments
+// enabled. All steps should pass, including the experimental ones.
 func TestAccOrganizationResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -32,8 +32,8 @@ func TestAccOrganizationResource(t *testing.T) {
 	runOrganizationResourceTest(t, client, true)
 }
 
-// Current version of Coder, no experiments enabled.
-// All steps but workspace sharing should pass.
+// Current version of Coder, no experiments enabled. Test all steps
+// except the experimental ones (workspace sharing).
 func TestAccOrganizationResourceNoExperiments(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -48,8 +48,8 @@ func TestAccOrganizationResourceNoExperiments(t *testing.T) {
 	runOrganizationResourceTest(t, client, false)
 }
 
-// Older version of coder (doesn't have workspace sharing).
-// All steps but workspace sharing should pass.
+// Older version of coder (doesn't have the experiments). Test all
+// steps except the experimental ones.
 func TestAccOrganizationResourceBackwardCompatibility(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -64,7 +64,7 @@ func TestAccOrganizationResourceBackwardCompatibility(t *testing.T) {
 	runOrganizationResourceTest(t, client, false)
 }
 
-func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableWorkspaceSharingSteps bool) {
+func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableExperimentalSteps bool) {
 	t.Helper()
 
 	cfg1 := testAccOrganizationResourceConfig{
@@ -159,7 +159,7 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableWo
 						},
 					},
 				}
-				if enableWorkspaceSharingSteps {
+				if enableExperimentalSteps {
 					cfg6 := cfg5
 					cfg6.WorkspaceSharing = ptr.Ref("none")
 
