@@ -20,11 +20,42 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "org_data_acc")
+	client := integration.StartCoder(ctx, t, "org_data_acc", integration.CoderExperiments("workspace-sharing"))
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
-	defaultCheckFn := resource.ComposeAggregateTestCheckFunc(
+	runOrganizationDataSourceTests(t, client, &firstUser, true)
+}
+
+func TestAccOrganizationDataSourceNoExperiments(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "org_data_acc_noexp")
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	runOrganizationDataSourceTests(t, client, &firstUser, false)
+}
+
+func TestAccOrganizationDataSourceBackwardCompatibility(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "org_data_acc_back", integration.CoderVersion("v2.29.5"))
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+
+	runOrganizationDataSourceTests(t, client, &firstUser, false)
+}
+
+func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, firstUser *codersdk.User, enableWorkspaceSharingChecks bool) {
+	t.Helper()
+	checks := []resource.TestCheckFunc{
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "id", firstUser.OrganizationIDs[0].String()),
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "is_default", "true"),
 		resource.TestCheckResourceAttr("data.coderd_organization.test", "name", "coder"),
@@ -32,8 +63,11 @@ func TestAccOrganizationDataSource(t *testing.T) {
 		resource.TestCheckTypeSetElemAttr("data.coderd_organization.test", "members.*", firstUser.ID.String()),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "created_at"),
 		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "updated_at"),
-		resource.TestCheckResourceAttrSet("data.coderd_organization.test", "workspace_sharing"),
-	)
+	}
+	if enableWorkspaceSharingChecks {
+		checks = append(checks, resource.TestCheckResourceAttrSet("data.coderd_organization.test", "workspace_sharing"))
+	}
+	defaultCheckFn := resource.ComposeAggregateTestCheckFunc(checks...)
 
 	t.Run("DefaultOrgByIDOk", func(t *testing.T) {
 		cfg := testAccOrganizationDataSourceConfig{
