@@ -17,7 +17,7 @@ func TestAccLicenseResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "license_acc", false)
+	client := integration.StartCoder(ctx, t, "license_acc")
 
 	license := os.Getenv("CODER_ENTERPRISE_LICENSE")
 	if license == "" {

@@ -24,7 +24,7 @@ func TestAccOrganizationGroupSyncResource(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "organization_group_sync_acc", true)
+	client := integration.StartCoder(ctx, t, "organization_group_sync_acc", integration.UseLicense)
 	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 

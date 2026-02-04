@@ -22,7 +22,7 @@ func TestAccProvisionerKeyResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "provisioner_key_acc", true)
+	client := integration.StartCoder(ctx, t, "provisioner_key_acc", integration.UseLicense)
 	orgs, err := client.Organizations(ctx)
 	require.NoError(t, err)
 	firstOrg := orgs[0].ID

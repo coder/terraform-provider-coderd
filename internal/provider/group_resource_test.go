@@ -20,7 +20,7 @@ func TestAccGroupResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "group_acc", true)
+	client := integration.StartCoder(ctx, t, "group_acc", integration.UseLicense)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -138,7 +138,7 @@ func TestAccGroupResourceAGPL(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "group_acc_agpl", false)
+	client := integration.StartCoder(ctx, t, "group_acc_agpl")
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 

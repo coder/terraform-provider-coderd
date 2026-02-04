@@ -24,7 +24,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "template_data_acc", true)
+	client := integration.StartCoder(ctx, t, "template_data_acc", integration.UseLicense)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	orgID := firstUser.OrganizationIDs[0]
