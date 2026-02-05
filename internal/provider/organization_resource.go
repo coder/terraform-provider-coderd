@@ -141,7 +141,7 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 			},
 			"workspace_sharing": schema.StringAttribute{
 				MarkdownDescription: "Workspace sharing setting for the organization. " +
-					"Valid values are `everyone` and `none`.",
+					"Valid values are `everyone` and `none`. Requires a Coder Deployment running v2.32.0 or later.",
 				Optional: true,
 				Computed: true,
 				Validators: []validator.String{
