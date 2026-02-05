@@ -20,7 +20,7 @@ func TestAccUserDataSource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "user_data_acc", false)
+	client := integration.StartCoder(ctx, t, "user_data_acc")
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{

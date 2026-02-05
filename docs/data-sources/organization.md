@@ -54,3 +54,4 @@ resource "coderd_group" "example" {
 - `created_at` (Number) Unix timestamp when the organization was created.
 - `members` (Set of String) Members of the organization, by ID
 - `updated_at` (Number) Unix timestamp when the organization was last updated.
+- `workspace_sharing` (String) Workspace sharing setting for the organization. Valid values are `everyone` and `none`.

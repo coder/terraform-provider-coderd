@@ -2,8 +2,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/coder/coder/v2/coderd/util/slice"
 	"github.com/coder/coder/v2/codersdk"
@@ -36,10 +39,11 @@ type OrganizationResource struct {
 type OrganizationResourceModel struct {
 	ID UUID `tfsdk:"id"`
 
-	Name        types.String `tfsdk:"name"`
-	DisplayName types.String `tfsdk:"display_name"`
-	Description types.String `tfsdk:"description"`
-	Icon        types.String `tfsdk:"icon"`
+	Name             types.String `tfsdk:"name"`
+	DisplayName      types.String `tfsdk:"display_name"`
+	Description      types.String `tfsdk:"description"`
+	Icon             types.String `tfsdk:"icon"`
+	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
 
 	OrgSyncIdpGroups types.Set    `tfsdk:"org_sync_idp_groups"`
 	GroupSync        types.Object `tfsdk:"group_sync"`
@@ -134,6 +138,15 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(""),
+			},
+			"workspace_sharing": schema.StringAttribute{
+				MarkdownDescription: "Workspace sharing setting for the organization. " +
+					"Valid values are `everyone` and `none`.",
+				Optional: true,
+				Computed: true,
+				Validators: []validator.String{
+					stringvalidator.OneOf(workspaceSharingNone, workspaceSharingEveryone),
+				},
 			},
 
 			"org_sync_idp_groups": schema.SetAttribute{
@@ -321,6 +334,15 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 		data.RoleSync = roleSyncData.ValueObject()
 	}
 
+	// `workspace_sharing` is optional+computed, so we fetch it from the backend
+	// even if not specified.
+	workspaceSharing, err := fetchWorkspaceSharingValue(ctx, r.Client, org.ID.String())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Client Error", fmt.Sprintf("unable to get organization workspace sharing settings, got error: %s", err))
+		return
+	}
+
 	// We've fetched the organization ID from state, and the latest values for
 	// everything else from the backend. Ensure that any mutable data is synced
 	// with the backend.
@@ -328,6 +350,7 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 	data.DisplayName = types.StringValue(org.DisplayName)
 	data.Description = types.StringValue(org.Description)
 	data.Icon = types.StringValue(org.Icon)
+	data.WorkspaceSharing = workspaceSharing
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -408,6 +431,40 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 			return
 		}
 	}
+
+	// Apply workspace sharing settings, if specified and available.
+	if !data.WorkspaceSharing.IsNull() && !data.WorkspaceSharing.IsUnknown() {
+		tflog.Trace(ctx, "updating workspace sharing", map[string]any{
+			"orgID": orgID,
+		})
+
+		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.WorkspaceSharingSettings{
+			SharingDisabled: workspaceSharingDisabledFromValue(data.WorkspaceSharing.ValueString()),
+		})
+		if err != nil {
+			if isNotFound(err) {
+				// User wants to update an attribute that's not
+				// supported because their coderd is too old.
+				resp.Diagnostics.AddError(workspaceSharingNotFoundSummary, workspaceSharingNotFoundDetail)
+				return
+			}
+			// If coderd is current but the workspace-sharing
+			// experiment is not enabled, the endpoint returns a
+			// user-friendly message that we show as is.
+			resp.Diagnostics.AddError("Workspace Sharing Update error", err.Error())
+			return
+		}
+	}
+
+	// This is computed, we need to write a known value to the state
+	// in any case.
+	workspaceSharing, err := fetchWorkspaceSharingValue(ctx, r.Client, orgID.String())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Client Error", fmt.Sprintf("Unable to get organization workspace sharing settings, got error: %s", err))
+		return
+	}
+	data.WorkspaceSharing = workspaceSharing
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -491,6 +548,36 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 			return
 		}
 	}
+
+	// Apply workspace sharing settings, if specified and available.
+	if !data.WorkspaceSharing.IsNull() && !data.WorkspaceSharing.IsUnknown() {
+		tflog.Trace(ctx, "updating workspace sharing", map[string]any{
+			"orgID": orgID,
+		})
+
+		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.WorkspaceSharingSettings{
+			SharingDisabled: workspaceSharingDisabledFromValue(data.WorkspaceSharing.ValueString()),
+		})
+		if err != nil {
+			if isNotFound(err) {
+				resp.Diagnostics.AddError(workspaceSharingNotFoundSummary, workspaceSharingNotFoundDetail)
+				return
+			}
+
+			resp.Diagnostics.AddError("Workspace Sharing Update error", err.Error())
+			return
+		}
+	}
+
+	// This is computed, we need to write a known value to the state
+	// in any case.
+	workspaceSharing, err := fetchWorkspaceSharingValue(ctx, r.Client, orgID.String())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Client Error", fmt.Sprintf("Unable to get organization workspace sharing settings, got error: %s", err))
+		return
+	}
+	data.WorkspaceSharing = workspaceSharing
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -652,4 +739,54 @@ func (r *OrganizationResource) patchOrgSyncMapping(
 	}
 
 	return diags
+}
+
+const (
+	workspaceSharingNone     = "none"
+	workspaceSharingEveryone = "everyone"
+)
+
+const (
+	workspaceSharingNotFoundSummary = "Workspace Sharing Unsupported"
+	workspaceSharingNotFoundDetail  = "Workspace sharing is not available on this Coder deployment. Remove the workspace_sharing attribute or upgrade the deployment."
+)
+
+func workspaceSharingValueFromSettings(settings codersdk.WorkspaceSharingSettings) string {
+	if settings.SharingDisabled {
+		return workspaceSharingNone
+	}
+	return workspaceSharingEveryone
+}
+
+func workspaceSharingDisabledFromValue(value string) bool {
+	return value == workspaceSharingNone
+}
+
+// The endpoint may not be available on older coderd versions (we
+// support up to 3(?)) or when the workspace-sharing experiment is
+// disabled. In both cases, return null to indicate the attribute is
+// unset/unsupported.
+func fetchWorkspaceSharingValue(ctx context.Context, client *codersdk.Client, orgID string) (types.String, error) {
+	settings, err := client.WorkspaceSharingSettings(ctx, orgID)
+	if err != nil {
+		if isNotFound(err) || isWorkspaceSharingExperimentOff(err) {
+			return types.StringNull(), nil
+		}
+		return types.StringNull(), err
+	}
+	return types.StringValue(workspaceSharingValueFromSettings(settings)), nil
+}
+
+func isWorkspaceSharingExperimentOff(err error) bool {
+	var sdkErr *codersdk.Error
+	if !errors.As(err, &sdkErr) {
+		return false
+	}
+	// `httpmw.RequireExperiment` returns 403 and a message
+	if sdkErr.StatusCode() == http.StatusForbidden {
+		if strings.Contains(sdkErr.Message, string(codersdk.ExperimentWorkspaceSharing)) {
+			return true
+		}
+	}
+	return false
 }

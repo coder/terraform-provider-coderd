@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"cdr.dev/slog"
+	"cdr.dev/slog/v3"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 

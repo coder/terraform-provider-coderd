@@ -19,7 +19,7 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "ws_proxy_acc", true)
+	client := integration.StartCoder(ctx, t, "ws_proxy_acc", integration.UseLicense)
 
 	cfg1 := testAccWorkspaceProxyResourceConfig{
 		URL:         client.URL.String(),
@@ -61,7 +61,7 @@ func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "ws_proxy_acc_agpl", false)
+	client := integration.StartCoder(ctx, t, "ws_proxy_acc_agpl")
 
 	cfg1 := testAccWorkspaceProxyResourceConfig{
 		URL:         client.URL.String(),

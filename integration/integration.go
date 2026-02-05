@@ -19,23 +19,66 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool) *codersdk.Client {
-	coderImg := os.Getenv("CODER_IMAGE")
-	if coderImg == "" {
-		coderImg = "ghcr.io/coder/coder"
+// User-configurable options for coder backend.
+// Using the pattern from
+// https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis
+type coderOptions struct {
+	useLicense  bool
+	image       string
+	version     string
+	experiments string
+}
+
+func UseLicense(opts *coderOptions) {
+	opts.useLicense = true
+}
+func CoderImage(image string) func(opts *coderOptions) {
+	return func(opts *coderOptions) {
+		opts.image = image
+	}
+}
+func CoderVersion(version string) func(opts *coderOptions) {
+	return func(opts *coderOptions) {
+		opts.version = version
+	}
+}
+func CoderExperiments(experiments string) func(opts *coderOptions) {
+	return func(opts *coderOptions) {
+		opts.experiments = experiments
+	}
+}
+
+func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(*coderOptions)) *codersdk.Client {
+	// Start with the defaults.
+	opts := coderOptions{
+		useLicense:  false,
+		image:       "ghcr.io/coder/coder",
+		version:     "latest",
+		experiments: "",
 	}
 
-	coderVersion := os.Getenv("CODER_VERSION")
-	if coderVersion == "" {
-		coderVersion = "latest"
+	// Apply user-selected options.
+	for _, option := range options {
+		option(&opts)
+	}
+
+	// Env vars override user-selected options.
+	if v, ok := os.LookupEnv("CODER_IMAGE"); ok {
+		opts.image = v
+	}
+	if v, ok := os.LookupEnv("CODER_VERSION"); ok {
+		opts.version = v
+	}
+	if v, ok := os.LookupEnv("CODER_EXPERIMENTS"); ok {
+		opts.experiments = v
 	}
 
 	coderLicense := os.Getenv("CODER_ENTERPRISE_LICENSE")
-	if useLicense && coderLicense == "" {
+	if opts.useLicense && coderLicense == "" {
 		t.Skip("Skipping tests that require a license.")
 	}
 
-	t.Logf("using coder image %s:%s", coderImg, coderVersion)
+	t.Logf("using coder image %s:%s", opts.image, opts.version)
 
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	require.NoError(t, err, "init docker client")
@@ -43,19 +86,29 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool)
 	p := randomPort(t)
 	t.Logf("random port is %d", p)
 	// Stand up a temporary Coder instance
-	puller, err := cli.ImagePull(ctx, coderImg+":"+coderVersion, image.PullOptions{})
+	puller, err := cli.ImagePull(ctx, opts.image+":"+opts.version, image.PullOptions{})
 	require.NoError(t, err, "pull coder image")
-	defer puller.Close()
+	defer func() {
+		if err := puller.Close(); err != nil {
+			t.Logf("error closing image puller: %v", err)
+		}
+	}()
 	_, err = io.Copy(os.Stderr, puller)
 	require.NoError(t, err, "pull coder image")
+
+	env := []string{
+		"CODER_HTTP_ADDRESS=0.0.0.0:3000",          // Listen on all interfaces inside the container.
+		"CODER_ACCESS_URL=http://localhost:3000",   // Avoid creating try.coder.app URLs.
+		"CODER_TELEMETRY_ENABLE=false",             // Avoid creating noise.
+		"CODER_DANGEROUS_DISABLE_RATE_LIMITS=true", // Avoid hitting file rate limit in tests.
+	}
+	if opts.experiments != "" {
+		env = append(env, "CODER_EXPERIMENTS="+opts.experiments)
+	}
+
 	ctr, err := cli.ContainerCreate(ctx, &container.Config{
-		Image: coderImg + ":" + coderVersion,
-		Env: []string{
-			"CODER_HTTP_ADDRESS=0.0.0.0:3000",          // Listen on all interfaces inside the container
-			"CODER_ACCESS_URL=http://localhost:3000",   // Set explicitly to avoid creating try.coder.app URLs.
-			"CODER_TELEMETRY_ENABLE=false",             // Avoid creating noise.
-			"CODER_DANGEROUS_DISABLE_RATE_LIMITS=true", // Avoid hitting file rate limit in tests.
-		},
+		Image:        opts.image + ":" + opts.version,
+		Env:          env,
 		Labels:       map[string]string{},
 		ExposedPorts: map[nat.Port]struct{}{nat.Port("3000/tcp"): {}},
 	}, &container.HostConfig{
@@ -109,7 +162,7 @@ func StartCoder(ctx context.Context, t *testing.T, name string, useLicense bool)
 	})
 	require.NoError(t, err, "login to coder instance with password")
 	client.SetSessionToken(resp.SessionToken)
-	if useLicense {
+	if opts.useLicense {
 		_, err := client.AddLicense(ctx, codersdk.AddLicenseRequest{
 			License: coderLicense,
 		})

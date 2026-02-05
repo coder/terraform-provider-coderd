@@ -19,7 +19,7 @@ func TestAccUserResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "user_acc", false)
+	client := integration.StartCoder(ctx, t, "user_acc")
 
 	cfg1 := testAccUserResourceConfig{
 		URL:       client.URL.String(),

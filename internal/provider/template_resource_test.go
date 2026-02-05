@@ -28,7 +28,7 @@ func TestAccTemplateResource(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "template_acc", false)
+	client := integration.StartCoder(ctx, t, "template_acc")
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -644,7 +644,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "template_resource_acc", true)
+	client := integration.StartCoder(ctx, t, "template_resource_acc", integration.UseLicense)
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -821,7 +821,7 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "template_resource_agpl_acc", false)
+	client := integration.StartCoder(ctx, t, "template_resource_agpl_acc")
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 
@@ -950,7 +950,7 @@ resource "coderd_template" "sample" {
 }`
 
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "template_resource_variables_acc", false)
+	client := integration.StartCoder(ctx, t, "template_resource_variables_acc")
 
 	exTemplateOne := t.TempDir()
 	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)

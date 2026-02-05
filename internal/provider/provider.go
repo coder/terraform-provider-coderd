@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"cdr.dev/slog"
+	"cdr.dev/slog/v3"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"

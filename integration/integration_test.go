@@ -187,7 +187,7 @@ func TestIntegration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := StartCoder(ctx, t, tt.name, true)
+			client := StartCoder(ctx, t, tt.name, UseLicense)
 			wd, err := os.Getwd()
 			require.NoError(t, err)
 			srcDir := filepath.Join(wd, tt.name)

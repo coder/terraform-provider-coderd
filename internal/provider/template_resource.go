@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"cdr.dev/slog"
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
@@ -526,7 +526,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		if idx > 0 {
 			newVersionRequest.TemplateID = &templateResp.ID
 		}
-		versionResp, err, logs := newVersion(ctx, client, newVersionRequest)
+		versionResp, logs, err := newVersion(ctx, client, newVersionRequest)
 		if err != nil {
 			resp.Diagnostics.AddError("Provisioner Error", formatLogs(err, logs))
 			return
@@ -777,7 +777,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	for idx := range newState.Versions {
 		if newState.Versions[idx].ID.IsUnknown() {
 			tflog.Info(ctx, "discovered a new or modified template version")
-			uploadResp, err, logs := newVersion(ctx, client, newVersionRequest{
+			uploadResp, logs, err := newVersion(ctx, client, newVersionRequest{
 				Version:        &newState.Versions[idx],
 				OrganizationID: orgID,
 				TemplateID:     &templateID,
@@ -1069,7 +1069,13 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 		err := provisionersdk.Tar(pipeWriter, logger, directory, provisionersdk.TemplateArchiveLimit)
 		_ = pipeWriter.CloseWithError(err)
 	}()
-	defer pipeReader.Close()
+	defer func() {
+		if err := pipeReader.Close(); err != nil {
+			tflog.Warn(ctx, "error closing template archive reader", map[string]any{
+				"error": err,
+			})
+		}
+	}()
 	content := pipeReader
 	resp, err := client.Upload(ctx, codersdk.ContentTypeTar, bufio.NewReader(content))
 	if err != nil {
@@ -1083,10 +1089,16 @@ func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.
 	var jobLogs []codersdk.ProvisionerJobLog
 	for retries := 0; retries < maxRetries; retries++ {
 		logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
-		defer closer.Close()
 		if err != nil {
 			return jobLogs, fmt.Errorf("begin streaming logs: %w", err)
 		}
+		defer func() {
+			if err := closer.Close(); err != nil {
+				tflog.Warn(ctx, "error closing template version log stream", map[string]any{
+					"error": err,
+				})
+			}
+		}()
 		for {
 			logs, ok := <-logs
 			if !ok {
@@ -1125,23 +1137,23 @@ type newVersionRequest struct {
 	TemplateID     *uuid.UUID
 }
 
-func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, error, []codersdk.ProvisionerJobLog) {
+func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, []codersdk.ProvisionerJobLog, error) {
 	var logs []codersdk.ProvisionerJobLog
 	directory := req.Version.Directory.ValueString()
 	tflog.Info(ctx, "uploading directory")
 	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to upload directory: %s", err), logs
+		return nil, logs, fmt.Errorf("failed to upload directory: %s", err)
 	}
 	tflog.Info(ctx, "successfully uploaded directory")
 	tflog.Info(ctx, "discovering and parsing vars files")
 	varFiles, err := codersdk.DiscoverVarsFiles(directory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover vars files: %s", err), logs
+		return nil, logs, fmt.Errorf("failed to discover vars files: %s", err)
 	}
 	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse user variable values: %s", err), logs
+		return nil, logs, fmt.Errorf("failed to parse user variable values: %s", err)
 	}
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
@@ -1171,15 +1183,15 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	tflog.Info(ctx, "creating template version")
 	versionResp, err := client.CreateTemplateVersion(ctx, req.OrganizationID, tmplVerReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create template version: %s", err), logs
+		return nil, logs, fmt.Errorf("failed to create template version: %s", err)
 	}
 	tflog.Info(ctx, "waiting for template version import job.")
 	logs, err = waitForJob(ctx, client, &versionResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to wait for job: %s", err), logs
+		return nil, logs, fmt.Errorf("failed to wait for job: %s", err)
 	}
 	tflog.Info(ctx, "successfully created template version")
-	return &versionResp, nil, logs
+	return &versionResp, logs, nil
 }
 
 func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UUID, versionID uuid.UUID) error {

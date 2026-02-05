@@ -33,8 +33,9 @@ type OrganizationDataSourceModel struct {
 	IsDefault types.Bool   `tfsdk:"is_default"`
 	Name      types.String `tfsdk:"name"`
 
-	CreatedAt types.Int64 `tfsdk:"created_at"`
-	UpdatedAt types.Int64 `tfsdk:"updated_at"`
+	CreatedAt        types.Int64  `tfsdk:"created_at"`
+	UpdatedAt        types.Int64  `tfsdk:"updated_at"`
+	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
 	// TODO: This could reasonably store some User object - though we may need to make additional queries depending on what fields we
 	// want, or to have one consistent user type for all data sources.
 	Members types.Set `tfsdk:"members"`
@@ -76,6 +77,11 @@ This data source is only compatible with Coder version [2.13.0](https://github.c
 			"updated_at": schema.Int64Attribute{
 				MarkdownDescription: "Unix timestamp when the organization was last updated.",
 				Computed:            true,
+			},
+			"workspace_sharing": schema.StringAttribute{
+				MarkdownDescription: "Workspace sharing setting for the organization. " +
+					"Valid values are `everyone` and `none`.",
+				Computed: true,
 			},
 
 			"members": schema.SetAttribute{
@@ -175,6 +181,13 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 	data.IsDefault = types.BoolValue(org.IsDefault)
 	data.CreatedAt = types.Int64Value(org.CreatedAt.Unix())
 	data.UpdatedAt = types.Int64Value(org.UpdatedAt.Unix())
+	workspaceSharing, err := fetchWorkspaceSharingValue(ctx, client, org.ID.String())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Client Error", fmt.Sprintf("Unable to get organization workspace sharing settings, got error: %s", err))
+		return
+	}
+	data.WorkspaceSharing = workspaceSharing
 	members, err := client.OrganizationMembers(ctx, org.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization members, got error: %s", err))
