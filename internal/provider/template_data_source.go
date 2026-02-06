@@ -335,7 +335,11 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	data.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
-	data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
+	if template.CORSBehavior == "" {
+		data.CORSBehavior = types.StringNull()
+	} else {
+		data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
+	}
 	data.CreatedByUserID = UUIDValue(template.CreatedByID)
 	data.CreatedAt = types.Int64Value(template.CreatedAt.Unix())
 	data.UpdatedAt = types.Int64Value(template.UpdatedAt.Unix())

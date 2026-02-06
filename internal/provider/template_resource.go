@@ -616,7 +616,11 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// Set cors_behavior from the response (it's set during create via toCreateRequest)
-	data.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
+	if templateResp.CORSBehavior == "" {
+		data.CORSBehavior = types.StringNull()
+	} else {
+		data.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
+	}
 
 	// TODO: Remove this update call (and the attribute) once the provider
 	// requires a Coder version where this flag has been removed.
@@ -676,7 +680,11 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
-	data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
+	if template.CORSBehavior == "" {
+		data.CORSBehavior = types.StringNull()
+	} else {
+		data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
+	}
 	data.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
 
 	if !data.ACL.IsNull() {
@@ -853,7 +861,11 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
-	newState.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
+	if templateResp.CORSBehavior == "" {
+		newState.CORSBehavior = types.StringNull()
+	} else {
+		newState.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
+	}
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -1349,7 +1361,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
-		CORSBehavior:                   corsPtr(r.CORSBehavior.ValueString()),
+		CORSBehavior:                   ptr.Ref(codersdk.CORSBehavior(r.CORSBehavior.ValueString())),
 		UseClassicParameterFlow:        ptr.Ref(r.UseClassicParameterFlow.ValueBool()),
 		// If we're managing ACL, we want to delete the everyone group
 		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
@@ -1396,19 +1408,9 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
-		CORSBehavior:                   corsPtr(r.CORSBehavior.ValueString()),
+		CORSBehavior:                   (*codersdk.CORSBehavior)(r.CORSBehavior.ValueStringPointer()),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}
-}
-
-// corsPtr returns a pointer to a CORSBehavior if the value is not empty,
-// otherwise returns nil (which will use the server default).
-func corsPtr(v string) *codersdk.CORSBehavior {
-	if v == "" {
-		return nil
-	}
-	b := codersdk.CORSBehavior(v)
-	return &b
 }
 
 type LastVersionsByHash = map[string][]PreviousTemplateVersion

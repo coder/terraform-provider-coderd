@@ -693,10 +693,12 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		cfg2 := cfg1
 		cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
 		cfg2.MaxPortShareLevel = ptr.Ref("owner")
+		cfg2.CORSBehavior = ptr.Ref("passthru")
 
 		cfg3 := cfg2
 		cfg3.ACL.null = true
 		cfg3.MaxPortShareLevel = ptr.Ref("public")
+		cfg3.CORSBehavior = ptr.Ref("simple")
 
 		cfg4 := cfg3
 		cfg4.AllowUserAutostart = ptr.Ref(false)
@@ -714,6 +716,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 					Config: cfg1.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
 						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+						resource.TestCheckResourceAttr("coderd_template.test", "cors_behavior", "simple"),
 						resource.TestCheckResourceAttr("coderd_template.test", "acl.groups.#", "2"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.groups.*", map[string]*regexp.Regexp{
 							"id":   regexp.MustCompile(firstUser.OrganizationIDs[0].String()),
@@ -734,6 +737,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 					Config: cfg2.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
 						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+						resource.TestCheckResourceAttr("coderd_template.test", "cors_behavior", "passthru"),
 						resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "acl.users.*", map[string]*regexp.Regexp{
 							"id":   regexp.MustCompile(firstUser.ID.String()),
 							"role": regexp.MustCompile("^admin$"),
@@ -744,6 +748,7 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 					Config: cfg3.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
 						resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
+						resource.TestCheckResourceAttr("coderd_template.test", "cors_behavior", "simple"),
 						resource.TestCheckNoResourceAttr("coderd_template.test", "acl"),
 						func(s *terraform.State) error {
 							templates, err := client.Templates(ctx, codersdk.TemplateFilter{})
@@ -992,6 +997,7 @@ type testAccTemplateResourceConfig struct {
 	RequireActiveVersion         *bool
 	DeprecationMessage           *string
 	MaxPortShareLevel            *string
+	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
 
 	Versions []testAccTemplateVersionConfig
@@ -1100,6 +1106,7 @@ resource "coderd_template" "test" {
 	require_active_version            = {{orNull .RequireActiveVersion}}
 	deprecation_message               = {{orNull .DeprecationMessage}}
 	max_port_share_level              = {{orNull .MaxPortShareLevel}}
+	cors_behavior                     = {{orNull .CORSBehavior}}
 	use_classic_parameter_flow        = {{orNull .UseClassicParameterFlow}}
 
 	acl = ` + c.ACL.String(t) + `
