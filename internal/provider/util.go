@@ -12,6 +12,8 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
+
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 func PrintOrNull(v any) string {
@@ -122,4 +124,13 @@ func isNotFound(err error) bool {
 		return true
 	}
 	return false
+}
+
+// stringValueOrNull returns types.StringNull() if s is empty,
+// otherwise types.StringValue(s).
+func stringValueOrNull(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
 }

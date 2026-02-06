@@ -616,11 +616,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	// Set cors_behavior from the response (it's set during create via toCreateRequest)
-	if templateResp.CORSBehavior == "" {
-		data.CORSBehavior = types.StringNull()
-	} else {
-		data.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
-	}
+	data.CORSBehavior = stringValueOrNull(string(templateResp.CORSBehavior))
 
 	// TODO: Remove this update call (and the attribute) once the provider
 	// requires a Coder version where this flag has been removed.
@@ -680,11 +676,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
-	if template.CORSBehavior == "" {
-		data.CORSBehavior = types.StringNull()
-	} else {
-		data.CORSBehavior = types.StringValue(string(template.CORSBehavior))
-	}
+	data.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
 	data.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
 
 	if !data.ACL.IsNull() {
@@ -861,11 +853,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
-	if templateResp.CORSBehavior == "" {
-		newState.CORSBehavior = types.StringNull()
-	} else {
-		newState.CORSBehavior = types.StringValue(string(templateResp.CORSBehavior))
-	}
+	newState.CORSBehavior = stringValueOrNull(string(templateResp.CORSBehavior))
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
