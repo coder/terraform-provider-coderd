@@ -820,6 +820,50 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 	})
 }
 
+func TestAccTemplateResourceBackCompat(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	// Coder 2.25 does not support cors_behavior. Verify that not setting it works.
+	client := integration.StartCoder(ctx, t, "tmpl_back_compat_acc", integration.CoderVersion("v2.25.0"))
+
+	exTemplateOne := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
+	cfg1 := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  ptr.Ref("example-template"),
+		Versions: []testAccTemplateVersionConfig{
+			{
+				Directory: &exTemplateOne,
+				Active:    ptr.Ref(true),
+			},
+		},
+		ACL: testAccTemplateACLConfig{
+			null: true,
+		},
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg1.String(t),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
+					resource.TestCheckNoResourceAttr("coderd_template.test", "cors_behavior"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccTemplateResourceAGPL(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
