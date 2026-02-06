@@ -72,7 +72,7 @@ resource "coderd_template" "ubuntu-main" {
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel in-progress workspace jobs using this template. Defaults to true.
 - `auto_start_permitted_days_of_week` (Set of String) (Enterprise) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.
 - `auto_stop_requirement` (Attributes) (Enterprise) The auto-stop requirement for all workspaces created from this template. (see [below for nested schema](#nestedatt--auto_stop_requirement))
-- `cors_behavior` (String) The CORS behavior for workspace apps in this template. Valid values are `simple` (default CORS middleware) or `passthru` (bypass CORS middleware). Defaults to `simple`.
+- `cors_behavior` (String) The CORS behavior for workspace apps in this template. Valid values are `simple` (default CORS middleware) or `passthru` (bypass CORS middleware). Defaults to `simple`. Requires a Coder deployment running v2.26.0 or later.
 - `default_ttl_ms` (Number) The default time-to-live for all workspaces created from this template, in milliseconds.
 - `deprecation_message` (String) If set, the template will be marked as deprecated with the provided message and users will be blocked from creating new workspaces from it. Does nothing if set when the resource is created.
 - `description` (String) A description of the template.

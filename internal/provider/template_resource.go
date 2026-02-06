@@ -401,7 +401,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Default:             stringdefault.StaticString(""),
 			},
 			"cors_behavior": schema.StringAttribute{
-				MarkdownDescription: "The CORS behavior for workspace apps in this template. Valid values are `simple` (default CORS middleware) or `passthru` (bypass CORS middleware). Defaults to `simple`.",
+				MarkdownDescription: "The CORS behavior for workspace apps in this template. Valid values are `simple` (default CORS middleware) or `passthru` (bypass CORS middleware). Defaults to `simple`. Requires a Coder deployment running v2.26.0 or later.",
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{

@@ -56,7 +56,7 @@ resource "coderd_template" "debian-main" {
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel jobs in workspaces created from the template.
 - `auto_start_permitted_days_of_week` (Set of String) List of days of the week in which autostart is allowed to happen, for all workspaces created from this template. Defaults to all days. If no days are specified, autostart is not allowed.
 - `auto_stop_requirement` (Attributes) The auto-stop requirement for all workspaces created from this template. (see [below for nested schema](#nestedatt--auto_stop_requirement))
-- `cors_behavior` (String) The CORS behavior for workspace apps in this template.
+- `cors_behavior` (String) The CORS behavior for workspace apps in this template. Requires a Coder deployment running v2.26.0 or later.
 - `created_at` (Number) Unix timestamp of when the template was created.
 - `created_by_user_id` (String) ID of the user who created the template.
 - `default_ttl_ms` (Number) Default time-to-live for workspaces created from the template.

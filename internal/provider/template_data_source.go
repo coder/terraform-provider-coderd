@@ -190,7 +190,7 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Computed:            true,
 			},
 			"cors_behavior": schema.StringAttribute{
-				MarkdownDescription: "The CORS behavior for workspace apps in this template.",
+				MarkdownDescription: "The CORS behavior for workspace apps in this template. Requires a Coder deployment running v2.26.0 or later.",
 				Computed:            true,
 			},
 			"created_by_user_id": schema.StringAttribute{
