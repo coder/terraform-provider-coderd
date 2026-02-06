@@ -62,7 +62,7 @@ resource "coderd_organization" "blueberry" {
 - `icon` (String)
 - `org_sync_idp_groups` (Set of String) Claims from the IdP provider that will give users access to this organization.
 - `role_sync` (Block, Optional) Role sync settings to sync organization roles from an IdP. (see [below for nested schema](#nestedblock--role_sync))
-- `workspace_sharing` (String) Workspace sharing setting for the organization. Valid values are `everyone` and `none`.
+- `workspace_sharing` (String) Workspace sharing setting for the organization. Valid values are `everyone` and `none`. Requires a Coder Deployment running v2.32.0 or later.
 
 ### Read-Only
 
