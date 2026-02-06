@@ -134,3 +134,13 @@ func stringValueOrNull(s string) types.String {
 	}
 	return types.StringValue(s)
 }
+
+// corsPtr returns a pointer to a CORSBehavior if the value is known and not empty,
+// otherwise returns nil (which will use the server default).
+func corsPtr(v types.String) *codersdk.CORSBehavior {
+	if v.IsNull() || v.IsUnknown() || v.ValueString() == "" {
+		return nil
+	}
+	b := codersdk.CORSBehavior(v.ValueString())
+	return &b
+}
