@@ -135,6 +135,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		resource.TestCheckResourceAttr("data.coderd_template.test", "time_til_dormant_autodelete_ms", strconv.FormatInt(tpl.TimeTilDormantAutoDeleteMillis, 10)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "require_active_version", strconv.FormatBool(tpl.RequireActiveVersion)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "max_port_share_level", string(tpl.MaxPortShareLevel)),
+		resource.TestCheckResourceAttr("data.coderd_template.test", "cors_behavior", string(tpl.CORSBehavior)),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "created_by_user_id", firstUser.ID.String()),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "created_at", strconv.Itoa(int(tpl.CreatedAt.Unix()))),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "updated_at", strconv.Itoa(int(tpl.UpdatedAt.Unix()))),
