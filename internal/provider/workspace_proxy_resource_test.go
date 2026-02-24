@@ -85,6 +85,76 @@ func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
 
 }
 
+func TestAccWorkspaceProxyResourceAfterLicenseInSameApply(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	license := os.Getenv("CODER_ENTERPRISE_LICENSE")
+	if license == "" {
+		t.Skip("No license found for workspace proxy regression test, skipping")
+	}
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "ws_proxy_after_license_acc")
+
+	cfg := testAccWorkspaceProxyAfterLicenseConfig{
+		URL:     client.URL.String(),
+		Token:   client.SessionToken(),
+		License: license,
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_workspace_proxy.test", "session_token"),
+				),
+			},
+		},
+	})
+}
+
+type testAccWorkspaceProxyAfterLicenseConfig struct {
+	URL     string
+	Token   string
+	License string
+}
+
+func (c testAccWorkspaceProxyAfterLicenseConfig) String(t *testing.T) string {
+	t.Helper()
+	tpl := `
+provider coderd {
+	url = "{{.URL}}"
+	token = "{{.Token}}"
+}
+
+resource "coderd_license" "enterprise" {
+	license = "{{.License}}"
+}
+
+resource "coderd_workspace_proxy" "test" {
+	depends_on = [coderd_license.enterprise]
+	name = "example-after-license"
+	display_name = "Example After License"
+	icon = "/emojis/1f407.png"
+}
+`
+
+	buf := strings.Builder{}
+	tmpl, err := template.New("workspaceProxyAfterLicense").Parse(tpl)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&buf, c)
+	require.NoError(t, err)
+
+	return buf.String()
+}
+
 type testAccWorkspaceProxyResourceConfig struct {
 	URL   string
 	Token string
