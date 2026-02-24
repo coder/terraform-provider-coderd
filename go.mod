@@ -4,7 +4,7 @@ go 1.25.6
 
 require (
 	cdr.dev/slog/v3 v3.0.0-rc1
-	github.com/coder/coder/v2 v2.30.0
+	github.com/coder/coder/v2 v2.30.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/google/uuid v1.6.0
