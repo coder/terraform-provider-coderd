@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"cdr.dev/slog/v3"
 	"github.com/google/uuid"
@@ -32,10 +33,46 @@ type CoderdProvider struct {
 	version string
 }
 
+// featureSnapshot is an immutable container for the feature map,
+// used with atomic.Pointer for lock-free concurrent access.
+type featureSnapshot struct {
+	features map[codersdk.FeatureName]codersdk.Feature
+}
+
 type CoderdProviderData struct {
 	Client                *codersdk.Client
 	DefaultOrganizationID uuid.UUID
-	Features              map[codersdk.FeatureName]codersdk.Feature
+	features              atomic.Pointer[featureSnapshot]
+}
+
+// SetFeatures atomically replaces the cached feature entitlements.
+// The input map is copied so callers may continue to mutate it safely.
+func (d *CoderdProviderData) SetFeatures(in map[codersdk.FeatureName]codersdk.Feature) {
+	copied := make(map[codersdk.FeatureName]codersdk.Feature, len(in))
+	for k, v := range in {
+		copied[k] = v
+	}
+	d.features.Store(&featureSnapshot{features: copied})
+}
+
+// Features returns the current feature entitlements snapshot.
+// Callers must not mutate the returned map.
+func (d *CoderdProviderData) Features() map[codersdk.FeatureName]codersdk.Feature {
+	snap := d.features.Load()
+	if snap == nil {
+		return nil
+	}
+	return snap.features
+}
+
+// FeatureEnabled reports whether the named feature is enabled in the
+// current entitlements snapshot.
+func (d *CoderdProviderData) FeatureEnabled(name codersdk.FeatureName) bool {
+	feats := d.Features()
+	if feats == nil {
+		return false
+	}
+	return feats[name].Enabled
 }
 
 // CoderdProviderModel describes the provider data model.
@@ -135,8 +172,8 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	providerData := &CoderdProviderData{
 		Client:                client,
 		DefaultOrganizationID: data.DefaultOrganizationID.ValueUUID(),
-		Features:              entitlements.Features,
 	}
+	providerData.SetFeatures(entitlements.Features)
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
 }

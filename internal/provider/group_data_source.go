@@ -164,7 +164,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		return
 	}
 
-	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, d.data.Features)...)
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, d.data.Features())...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
