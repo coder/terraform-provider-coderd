@@ -150,7 +150,7 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, r.data.Features)...)
+	resp.Diagnostics.Append(CheckGroupEntitlements(ctx, r.data.Features())...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

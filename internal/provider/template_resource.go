@@ -523,7 +523,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.DisplayName = data.Name
 	}
 
-	resp.Diagnostics.Append(data.CheckEntitlements(ctx, r.data.Features)...)
+	resp.Diagnostics.Append(data.CheckEntitlements(ctx, r.data.Features())...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -741,7 +741,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		newState.DisplayName = newState.Name
 	}
 
-	resp.Diagnostics.Append(newState.CheckEntitlements(ctx, r.data.Features)...)
+	resp.Diagnostics.Append(newState.CheckEntitlements(ctx, r.data.Features())...)
 	if resp.Diagnostics.HasError() {
 		return
 	}

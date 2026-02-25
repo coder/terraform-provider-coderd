@@ -120,6 +120,13 @@ func (r *LicenseResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 	data.ExpiresAt = types.Int64Value(expiresAt.Unix())
 
+	entitlements, err := client.Entitlements(ctx)
+	if err != nil {
+		resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Unable to refresh deployment entitlements after adding license, got error: %s", err))
+	} else {
+		r.data.SetFeatures(entitlements.Features)
+	}
+
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -194,5 +201,12 @@ func (r *LicenseResource) Delete(ctx context.Context, req resource.DeleteRequest
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete license, got error: %s", err))
 		return
+	}
+
+	entitlements, err := client.Entitlements(ctx)
+	if err != nil {
+		resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Unable to refresh deployment entitlements after deleting license, got error: %s", err))
+	} else {
+		r.data.SetFeatures(entitlements.Features)
 	}
 }
