@@ -1106,7 +1106,9 @@ func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.
 	const maxRetries = 3
 	var jobLogs []codersdk.ProvisionerJobLog
 	for retries := 0; retries < maxRetries; retries++ {
-		jobLogs, done, err := waitForJobOnce(ctx, client, version, jobLogs)
+		var done bool
+		var err error
+		jobLogs, done, err = waitForJobOnce(ctx, client, version, jobLogs)
 		if err != nil {
 			return jobLogs, err
 		}
