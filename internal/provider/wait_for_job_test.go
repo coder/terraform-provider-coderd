@@ -174,8 +174,6 @@ func TestWaitForJob_RetriesAndCloses(t *testing.T) {
 	require.Equal(t, int32(3), wsConnections.Load())
 }
 
-
-
 func TestWaitForJob_SucceedsOnRetry(t *testing.T) {
 	t.Parallel()
 	versionID := uuid.New()
