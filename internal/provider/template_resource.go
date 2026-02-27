@@ -1104,49 +1104,61 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 
 func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
 	const maxRetries = 3
-	var jobLogs []codersdk.ProvisionerJobLog
+	var allLogs []codersdk.ProvisionerJobLog
 	for retries := 0; retries < maxRetries; retries++ {
-		logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
+		logs, done, err := waitForJobOnce(ctx, client, version)
+		allLogs = append(allLogs, logs...)
 		if err != nil {
-			return jobLogs, fmt.Errorf("begin streaming logs: %w", err)
+			return allLogs, err
 		}
-		defer func() {
-			if err := closer.Close(); err != nil {
-				tflog.Warn(ctx, "error closing template version log stream", map[string]any{
-					"error": err,
-				})
-			}
-		}()
-		for {
-			logs, ok := <-logs
-			if !ok {
-				break
-			}
-			tflog.Info(ctx, logs.Output, map[string]interface{}{
-				"job_id":     logs.ID,
-				"job_stage":  logs.Stage,
-				"log_source": logs.Source,
-				"level":      logs.Level,
-				"created_at": logs.CreatedAt,
-			})
-			if logs.Output != "" {
-				jobLogs = append(jobLogs, logs)
-			}
+		if done {
+			return allLogs, nil
 		}
-		latestResp, err := client.TemplateVersion(ctx, version.ID)
-		if err != nil {
-			return jobLogs, err
-		}
-		if latestResp.Job.Status.Active() {
-			tflog.Warn(ctx, fmt.Sprintf("provisioner job still active, continuing to wait...: %s", latestResp.Job.Status))
-			continue
-		}
-		if latestResp.Job.Status != codersdk.ProvisionerJobSucceeded {
-			return jobLogs, fmt.Errorf("provisioner job did not succeed: %s (%s)", latestResp.Job.Status, latestResp.Job.Error)
-		}
-		return jobLogs, nil
 	}
-	return jobLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
+	return allLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
+}
+
+func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, bool, error) {
+	logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin streaming logs: %w", err)
+	}
+	defer func() {
+		if err := closer.Close(); err != nil {
+			tflog.Warn(ctx, "error closing template version log stream", map[string]any{
+				"error": err,
+			})
+		}
+	}()
+	var jobLogs []codersdk.ProvisionerJobLog
+	for {
+		logs, ok := <-logs
+		if !ok {
+			break
+		}
+		tflog.Info(ctx, logs.Output, map[string]interface{}{
+			"job_id":     logs.ID,
+			"job_stage":  logs.Stage,
+			"log_source": logs.Source,
+			"level":      logs.Level,
+			"created_at": logs.CreatedAt,
+		})
+		if logs.Output != "" {
+			jobLogs = append(jobLogs, logs)
+		}
+	}
+	latestResp, err := client.TemplateVersion(ctx, version.ID)
+	if err != nil {
+		return jobLogs, false, err
+	}
+	if latestResp.Job.Status.Active() {
+		tflog.Warn(ctx, fmt.Sprintf("provisioner job still active, continuing to wait...: %s", latestResp.Job.Status))
+		return jobLogs, false, nil
+	}
+	if latestResp.Job.Status != codersdk.ProvisionerJobSucceeded {
+		return jobLogs, false, fmt.Errorf("provisioner job did not succeed: %s (%s)", latestResp.Job.Status, latestResp.Job.Error)
+	}
+	return jobLogs, true, nil
 }
 
 type newVersionRequest struct {
