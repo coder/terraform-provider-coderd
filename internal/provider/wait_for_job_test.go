@@ -34,7 +34,7 @@ func TestWaitForJobOnce_Success(t *testing.T) {
 				ID:     1,
 				Output: "test log line",
 			})
-			conn.Close(websocket.StatusNormalClosure, "done")
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -72,7 +72,7 @@ func TestWaitForJobOnce_JobFailed(t *testing.T) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			conn.Close(websocket.StatusNormalClosure, "done")
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -111,7 +111,7 @@ func TestWaitForJobOnce_StillActive(t *testing.T) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			conn.Close(websocket.StatusNormalClosure, "done")
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -149,7 +149,7 @@ func TestWaitForJob_RetriesAndCloses(t *testing.T) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			conn.Close(websocket.StatusNormalClosure, "done")
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -192,7 +192,7 @@ func TestWaitForJob_SucceedsOnRetry(t *testing.T) {
 				ID:     int64(versionCallCount.Load()),
 				Output: "log line",
 			})
-			conn.Close(websocket.StatusNormalClosure, "done")
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
 			return
 		}
 		count := versionCallCount.Add(1)
