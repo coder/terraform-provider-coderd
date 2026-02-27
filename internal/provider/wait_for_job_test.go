@@ -53,7 +53,7 @@ func TestWaitForJobOnce_Success(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	logs, done, err := waitForJobOnce(context.Background(), client, version, nil)
+	logs, done, err := waitForJobOnce(context.Background(), client, version)
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Len(t, logs, 1)
@@ -92,7 +92,7 @@ func TestWaitForJobOnce_JobFailed(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	_, done, err := waitForJobOnce(context.Background(), client, version, nil)
+	_, done, err := waitForJobOnce(context.Background(), client, version)
 	require.Error(t, err)
 	require.False(t, done)
 	require.Contains(t, err.Error(), "provisioner job did not succeed")
@@ -130,7 +130,7 @@ func TestWaitForJobOnce_StillActive(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	_, done, err := waitForJobOnce(context.Background(), client, version, nil)
+	_, done, err := waitForJobOnce(context.Background(), client, version)
 	require.NoError(t, err)
 	require.False(t, done)
 }
@@ -172,6 +172,57 @@ func TestWaitForJob_RetriesAndCloses(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "did not complete after 3 retries")
 	require.Equal(t, int32(3), wsConnections.Load())
+}
+
+func TestWaitForJob_ClosesConnectionBetweenRetries(t *testing.T) {
+	t.Parallel()
+	versionID := uuid.New()
+	var openConns atomic.Int32
+	var maxOpenConns atomic.Int32
+
+	handler := http.NewServeMux()
+	handler.HandleFunc("/api/v2/templateversions/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.RawQuery, "follow") {
+			current := openConns.Add(1)
+			for {
+				old := maxOpenConns.Load()
+				if current <= old || maxOpenConns.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = conn.Close(websocket.StatusNormalClosure, "done")
+			openConns.Add(-1)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(codersdk.TemplateVersion{
+			ID: versionID,
+			Job: codersdk.ProvisionerJob{
+				Status: codersdk.ProvisionerJobRunning,
+			},
+		})
+	})
+
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	srvURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	client := codersdk.New(srvURL)
+
+	version := &codersdk.TemplateVersion{ID: versionID}
+	_, err = waitForJob(context.Background(), client, version)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "did not complete after 3 retries")
+	// With the defer-in-loop bug, connections would not be closed between retries,
+	// so maxOpenConns would be > 1. With the fix (separate function), each
+	// connection is closed before the next retry, so maxOpenConns should be 1.
+	require.Equal(t, int32(1), maxOpenConns.Load(),
+		"connections should be closed between retries, not accumulated")
 }
 
 func TestWaitForJob_SucceedsOnRetry(t *testing.T) {

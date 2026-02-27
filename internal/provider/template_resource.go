@@ -1104,25 +1104,24 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 
 func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
 	const maxRetries = 3
-	var jobLogs []codersdk.ProvisionerJobLog
+	var allLogs []codersdk.ProvisionerJobLog
 	for retries := 0; retries < maxRetries; retries++ {
-		var done bool
-		var err error
-		jobLogs, done, err = waitForJobOnce(ctx, client, version, jobLogs)
+		logs, done, err := waitForJobOnce(ctx, client, version)
+		allLogs = append(allLogs, logs...)
 		if err != nil {
-			return jobLogs, err
+			return allLogs, err
 		}
 		if done {
-			return jobLogs, nil
+			return allLogs, nil
 		}
 	}
-	return jobLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
+	return allLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
 }
 
-func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion, jobLogs []codersdk.ProvisionerJobLog) ([]codersdk.ProvisionerJobLog, bool, error) {
+func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, bool, error) {
 	logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
 	if err != nil {
-		return jobLogs, false, fmt.Errorf("begin streaming logs: %w", err)
+		return nil, false, fmt.Errorf("begin streaming logs: %w", err)
 	}
 	defer func() {
 		if err := closer.Close(); err != nil {
@@ -1131,6 +1130,7 @@ func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *coder
 			})
 		}
 	}()
+	var jobLogs []codersdk.ProvisionerJobLog
 	for {
 		logs, ok := <-logs
 		if !ok {
