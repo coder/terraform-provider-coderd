@@ -8,11 +8,13 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
+	"github.com/coder/retry"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -1105,21 +1107,31 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
 	const maxRetries = 3
 	var allLogs []codersdk.ProvisionerJobLog
-	for retries := 0; retries < maxRetries; retries++ {
-		logs, done, err := waitForJobOnce(ctx, client, version)
+	var lastLogID int64
+
+	for attempts, retrier := 0, retry.New(500*time.Millisecond, 5*time.Second); attempts < maxRetries && retrier.Wait(ctx); attempts++ {
+		logs, done, err := waitForJobOnce(ctx, client, version, lastLogID)
 		allLogs = append(allLogs, logs...)
+		if len(logs) > 0 {
+			lastLogID = logs[len(logs)-1].ID
+		}
 		if err != nil {
 			return allLogs, err
 		}
 		if done {
 			return allLogs, nil
 		}
+		tflog.Warn(ctx, fmt.Sprintf("provisioner job still active, retrying (attempt %d/%d)", attempts+1, maxRetries))
+	}
+
+	if err := ctx.Err(); err != nil {
+		return allLogs, err
 	}
 	return allLogs, fmt.Errorf("provisioner job did not complete after %d retries", maxRetries)
 }
 
-func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, bool, error) {
-	logs, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, 0)
+func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion, after int64) ([]codersdk.ProvisionerJobLog, bool, error) {
+	logCh, closer, err := client.TemplateVersionLogsAfter(ctx, version.ID, after)
 	if err != nil {
 		return nil, false, fmt.Errorf("begin streaming logs: %w", err)
 	}
@@ -1132,19 +1144,19 @@ func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *coder
 	}()
 	var jobLogs []codersdk.ProvisionerJobLog
 	for {
-		logs, ok := <-logs
+		logMsg, ok := <-logCh
 		if !ok {
 			break
 		}
-		tflog.Info(ctx, logs.Output, map[string]interface{}{
-			"job_id":     logs.ID,
-			"job_stage":  logs.Stage,
-			"log_source": logs.Source,
-			"level":      logs.Level,
-			"created_at": logs.CreatedAt,
+		tflog.Info(ctx, logMsg.Output, map[string]interface{}{
+			"job_id":     logMsg.ID,
+			"job_stage":  logMsg.Stage,
+			"log_source": logMsg.Source,
+			"level":      logMsg.Level,
+			"created_at": logMsg.CreatedAt,
 		})
-		if logs.Output != "" {
-			jobLogs = append(jobLogs, logs)
+		if logMsg.Output != "" {
+			jobLogs = append(jobLogs, logMsg)
 		}
 	}
 	latestResp, err := client.TemplateVersion(ctx, version.ID)
@@ -1152,7 +1164,6 @@ func waitForJobOnce(ctx context.Context, client *codersdk.Client, version *coder
 		return jobLogs, false, err
 	}
 	if latestResp.Job.Status.Active() {
-		tflog.Warn(ctx, fmt.Sprintf("provisioner job still active, continuing to wait...: %s", latestResp.Job.Status))
 		return jobLogs, false, nil
 	}
 	if latestResp.Job.Status != codersdk.ProvisionerJobSucceeded {
