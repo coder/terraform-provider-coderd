@@ -4,7 +4,9 @@ go 1.25.6
 
 require (
 	cdr.dev/slog/v3 v3.0.0-rc1
-	github.com/coder/coder/v2 v2.31.0
+	github.com/coder/coder/v2 v2.30.1
+	github.com/coder/retry v1.5.1
+	github.com/coder/websocket v1.8.14
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/google/uuid v1.6.0
@@ -63,7 +65,6 @@ require (
 	github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 // indirect
 	github.com/coder/serpent v0.13.0 // indirect
 	github.com/coder/terraform-provider-coder/v2 v2.13.1 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
