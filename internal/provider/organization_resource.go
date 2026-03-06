@@ -784,7 +784,7 @@ func isWorkspaceSharingExperimentOff(err error) bool {
 	}
 	// `httpmw.RequireExperiment` returns 403 and a message
 	if sdkErr.StatusCode() == http.StatusForbidden {
-		if strings.Contains(sdkErr.Message, string(codersdk.ExperimentWorkspaceSharing)) {
+		if strings.Contains(sdkErr.Message, "workspace-sharing") {
 			return true
 		}
 	}
