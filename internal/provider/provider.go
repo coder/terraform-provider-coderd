@@ -3,12 +3,14 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
 
 	"cdr.dev/slog/v3"
+	"github.com/coder/serpent"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
@@ -80,7 +82,8 @@ type CoderdProviderModel struct {
 	URL   types.String `tfsdk:"url"`
 	Token types.String `tfsdk:"token"`
 
-	DefaultOrganizationID UUID `tfsdk:"default_organization_id"`
+	DefaultOrganizationID UUID      `tfsdk:"default_organization_id"`
+	Headers               types.Map `tfsdk:"headers"`
 }
 
 func (p *CoderdProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -109,6 +112,14 @@ This provider is only compatible with Coder version [2.10.1](https://github.com/
 				MarkdownDescription: "Default organization ID to use when creating resources. Defaults to the first organization the token has access to.",
 				CustomType:          UUIDType,
 				Optional:            true,
+			},
+			"headers": schema.MapAttribute{
+				MarkdownDescription: "Additional HTTP headers to include in all API requests. " +
+					"Provide as a map of header names to values. " +
+					"For example, set `X-Coder-Bypass-Ratelimit` to `\"true\"` to bypass rate limits (requires Owner role). " +
+					"Can also be specified with the `CODER_HEADER` environment variable as comma-separated `key=value` pairs (CSV format, matching the coder CLI).",
+				ElementType: types.StringType,
+				Optional:    true,
 			},
 		},
 	}
@@ -156,6 +167,39 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	client := codersdk.New(url)
 	client.SetLogger(slog.Make(tfslog{}).Leveled(slog.LevelDebug))
 	client.SetSessionToken(data.Token.ValueString())
+
+	// Apply custom headers from the provider configuration or CODER_HEADERS env var.
+	httpHeaders := make(http.Header)
+	if !data.Headers.IsNull() && !data.Headers.IsUnknown() {
+		headerMap := make(map[string]string)
+		resp.Diagnostics.Append(data.Headers.ElementsAs(ctx, &headerMap, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for k, v := range headerMap {
+			httpHeaders.Set(k, v)
+		}
+	} else if headersEnv, ok := os.LookupEnv("CODER_HEADER"); ok && headersEnv != "" {
+		var sa serpent.StringArray
+		if err := sa.Set(headersEnv); err != nil {
+			resp.Diagnostics.AddError("headers", fmt.Sprintf("invalid CODER_HEADER value: %s", err))
+			return
+		}
+		for _, entry := range sa.Value() {
+			parts := strings.SplitN(entry, "=", 2)
+			if len(parts) != 2 {
+				resp.Diagnostics.AddError("headers", fmt.Sprintf("invalid CODER_HEADER entry %q, expected key=value", entry))
+				return
+			}
+			httpHeaders.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
+	}
+	if len(httpHeaders) > 0 {
+		client.HTTPClient.Transport = &codersdk.HeaderTransport{
+			Transport: client.HTTPClient.Transport,
+			Header:    httpHeaders,
+		}
+	}
 	if data.DefaultOrganizationID.IsNull() {
 		user, err := client.User(ctx, codersdk.Me)
 		if err != nil {
