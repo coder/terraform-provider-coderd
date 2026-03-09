@@ -23,10 +23,11 @@ import (
 // Using the pattern from
 // https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis
 type coderOptions struct {
-	useLicense  bool
-	image       string
-	version     string
-	experiments string
+	useLicense       bool
+	enableRateLimits bool
+	image            string
+	version          string
+	experiments      string
 }
 
 func UseLicense(opts *coderOptions) {
@@ -46,6 +47,10 @@ func CoderExperiments(experiments string) func(opts *coderOptions) {
 	return func(opts *coderOptions) {
 		opts.experiments = experiments
 	}
+}
+
+func EnableRateLimits(opts *coderOptions) {
+	opts.enableRateLimits = true
 }
 
 func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(*coderOptions)) *codersdk.Client {
@@ -97,10 +102,12 @@ func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(
 	require.NoError(t, err, "pull coder image")
 
 	env := []string{
-		"CODER_HTTP_ADDRESS=0.0.0.0:3000",          // Listen on all interfaces inside the container.
-		"CODER_ACCESS_URL=http://localhost:3000",   // Avoid creating try.coder.app URLs.
-		"CODER_TELEMETRY_ENABLE=false",             // Avoid creating noise.
-		"CODER_DANGEROUS_DISABLE_RATE_LIMITS=true", // Avoid hitting file rate limit in tests.
+		"CODER_HTTP_ADDRESS=0.0.0.0:3000",        // Listen on all interfaces inside the container.
+		"CODER_ACCESS_URL=http://localhost:3000", // Avoid creating try.coder.app URLs.
+		"CODER_TELEMETRY_ENABLE=false",           // Avoid creating noise.
+	}
+	if !opts.enableRateLimits {
+		env = append(env, "CODER_DANGEROUS_DISABLE_RATE_LIMITS=true")
 	}
 	if opts.experiments != "" {
 		env = append(env, "CODER_EXPERIMENTS="+opts.experiments)
