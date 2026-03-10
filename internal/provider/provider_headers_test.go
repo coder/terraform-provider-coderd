@@ -156,7 +156,7 @@ func TestProviderHeaders_InvalidEnvVar(t *testing.T) {
 
 	configResp := configureProvider(t, cfgVal)
 
-	require.True(t, configResp.Diagnostics.HasError(), "expected an error for malformed CODER_HEADERS")
+	require.True(t, configResp.Diagnostics.HasError(), "expected an error for malformed CODER_HEADER")
 	found := false
 	for _, d := range configResp.Diagnostics.Errors() {
 		if d.Summary() == "headers" {
