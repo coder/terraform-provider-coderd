@@ -53,6 +53,15 @@ func configureProvider(t *testing.T, cfgVal tftypes.Value) *provider.ConfigureRe
 	return configResp
 }
 
+func loadHeaders(t *testing.T, v *atomic.Value) http.Header {
+	t.Helper()
+	raw := v.Load()
+	require.NotNil(t, raw, "expected at least one HTTP request")
+	headers, ok := raw.(http.Header)
+	require.True(t, ok, "expected http.Header, got %T", raw)
+	return headers
+}
+
 func tfsdkConfig(t *testing.T, s schema.Schema, val tftypes.Value) tfsdk.Config {
 	t.Helper()
 	return tfsdk.Config{
@@ -80,8 +89,7 @@ func TestProviderHeaders_HCLConfig(t *testing.T) {
 
 	configureProvider(t, cfgVal)
 
-	require.NotNil(t, received.Load(), "expected at least one HTTP request")
-	headers := received.Load().(http.Header)
+	headers := loadHeaders(t, &received)
 	assert.Equal(t, "custom-value", headers.Get("X-Custom-Header"))
 	assert.Equal(t, "true", headers.Get("X-Coder-Bypass-Ratelimit"))
 }
@@ -103,8 +111,7 @@ func TestProviderHeaders_EnvVar(t *testing.T) {
 
 	configureProvider(t, cfgVal)
 
-	require.NotNil(t, received.Load(), "expected at least one HTTP request")
-	headers := received.Load().(http.Header)
+	headers := loadHeaders(t, &received)
 	assert.Equal(t, "env-value", headers.Get("X-Env-Header"))
 	assert.Equal(t, "second-value", headers.Get("X-Another"))
 }
@@ -128,8 +135,7 @@ func TestProviderHeaders_HCLOverridesEnv(t *testing.T) {
 
 	configureProvider(t, cfgVal)
 
-	require.NotNil(t, received.Load(), "expected at least one HTTP request")
-	headers := received.Load().(http.Header)
+	headers := loadHeaders(t, &received)
 	assert.Equal(t, "hcl-wins", headers.Get("X-HCL-Header"))
 	assert.Empty(t, headers.Get("X-Env-Header"), "env var headers should not appear when HCL headers are set")
 }
@@ -177,8 +183,7 @@ func TestProviderHeaders_NoHeaders(t *testing.T) {
 
 	configureProvider(t, cfgVal)
 
-	require.NotNil(t, received.Load(), "expected at least one HTTP request")
-	headers := received.Load().(http.Header)
+	headers := loadHeaders(t, &received)
 	assert.Empty(t, headers.Get("X-Custom-Header"))
 	assert.Empty(t, headers.Get("X-Coder-Bypass-Ratelimit"))
 }
