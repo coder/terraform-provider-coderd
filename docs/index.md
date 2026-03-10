@@ -84,5 +84,6 @@ resource "coderd_template" "example" {
 ### Optional
 
 - `default_organization_id` (String) Default organization ID to use when creating resources. Defaults to the first organization the token has access to.
+- `headers` (Map of String) Additional HTTP headers to include in all API requests. Provide as a map of header names to values. For example, set `X-Coder-Bypass-Ratelimit` to `"true"` to bypass rate limits (requires Owner role). Can also be specified with the `CODER_HEADER` environment variable as comma-separated `key=value` pairs (CSV format, matching the coder CLI).
 - `token` (String) API token for communicating with the deployment. Most resource types require elevated permissions. Defaults to `$CODER_SESSION_TOKEN`.
 - `url` (String) URL to the Coder deployment. Defaults to `$CODER_URL`.
