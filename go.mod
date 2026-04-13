@@ -1,10 +1,10 @@
 module github.com/coder/terraform-provider-coderd
 
-go 1.25.7
+go 1.25.8
 
 require (
 	cdr.dev/slog/v3 v3.0.0
-	github.com/coder/coder/v2 v2.31.7
+	github.com/coder/coder/v2 v2.31.9
 	github.com/coder/retry v1.5.1
 	github.com/coder/serpent v0.14.0
 	github.com/coder/websocket v1.8.14
@@ -193,10 +193,10 @@ require (
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.40.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
