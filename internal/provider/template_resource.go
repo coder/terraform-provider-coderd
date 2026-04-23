@@ -40,9 +40,11 @@ import (
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
-var _ resource.Resource = &TemplateResource{}
-var _ resource.ResourceWithImportState = &TemplateResource{}
-var _ resource.ResourceWithConfigValidators = &TemplateResource{}
+var (
+	_ resource.Resource                     = &TemplateResource{}
+	_ resource.ResourceWithImportState      = &TemplateResource{}
+	_ resource.ResourceWithConfigValidators = &TemplateResource{}
+)
 
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
@@ -390,7 +392,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
-					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
+					stringvalidator.OneOfCaseInsensitive(string(codersdk.WorkspaceAgentPortShareLevelAuthenticated), string(codersdk.WorkspaceAgentPortShareLevelOrganization), string(codersdk.WorkspaceAgentPortShareLevelOwner), string(codersdk.WorkspaceAgentPortShareLevelPublic)),
 				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -1251,11 +1253,11 @@ func markActive(ctx context.Context, client *codersdk.Client, templateID uuid.UU
 }
 
 func convertACLToRequest(curACL codersdk.TemplateACL, newACL ACL) codersdk.UpdateTemplateACL {
-	var userPerms = make(map[string]codersdk.TemplateRole)
+	userPerms := make(map[string]codersdk.TemplateRole)
 	for _, perm := range newACL.UserPermissions {
 		userPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
 	}
-	var groupPerms = make(map[string]codersdk.TemplateRole)
+	groupPerms := make(map[string]codersdk.TemplateRole)
 	for _, perm := range newACL.GroupPermissions {
 		groupPerms[perm.ID.ValueString()] = codersdk.TemplateRole(perm.Role.ValueString())
 	}
@@ -1598,7 +1600,6 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 		}
 	}
 	return true
-
 }
 
 func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
