@@ -163,8 +163,8 @@ type TemplateVersion struct {
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
-	TerraformVariables types.Set `tfsdk:"tf_vars"`
-	ProvisionerTags    types.Set `tfsdk:"provisioner_tags"`
+	TerraformVariables types.Set    `tfsdk:"tf_vars"`
+	ProvisionerTags    types.Set    `tfsdk:"provisioner_tags"`
 }
 
 type Versions []TemplateVersion
