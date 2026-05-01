@@ -1158,9 +1158,10 @@ resource "coderd_template" "test" {
 	versions = [
 	{{- range .Versions }}
 	{
-		name      = {{orNull .Name}}
-		directory = {{orNull .Directory}}
-		active    = {{orNull .Active}}
+		name         = {{orNull .Name}}
+		directory    = {{orNull .Directory}}
+		archive_path = {{orNull .ArchivePath}}
+		active       = {{orNull .Active}}
 
 		tf_vars = [
 			{{- range .TerraformVariables }}
@@ -1194,6 +1195,7 @@ type testAccTemplateVersionConfig struct {
 	Name               *string
 	Message            *string
 	Directory          *string
+	ArchivePath        *string
 	Active             *bool
 	TerraformVariables []testAccTemplateKeyValueConfig
 }
@@ -1591,6 +1593,72 @@ func TestReconcileVersionIDs(t *testing.T) {
 			},
 			cfgHasActiveVersion: false,
 			expectError:         true,
+		},
+		{
+			Name: "ArchiveHashMatching",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					ArchiveHash:        types.StringValue("archivehash123"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("archive-ver"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"archivehash123": {
+					{
+						ID:     aUUID,
+						Name:   "archive-ver",
+						TFVars: map[string]string{},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					ArchiveHash:        types.StringValue("archivehash123"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
+		{
+			Name: "ArchiveHashChanged",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					ArchiveHash:        types.StringValue("newhash456"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("archive-ver"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"oldhash123": {
+					{
+						ID:     aUUID,
+						Name:   "archive-ver",
+						TFVars: map[string]string{},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					ArchiveHash:        types.StringValue("newhash456"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
 		},
 	}
 

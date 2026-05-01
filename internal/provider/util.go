@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -82,6 +83,20 @@ func computeDirectoryHash(directory string) (string, error) {
 			return "", err
 		}
 		hash.Write(data)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func computeArchiveHash(archivePath string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close() //nolint:errcheck // Best-effort close of read-only file.
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
