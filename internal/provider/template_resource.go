@@ -163,8 +163,8 @@ type TemplateVersion struct {
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
-	TerraformVariables []Variable   `tfsdk:"tf_vars"`
-	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
+	TerraformVariables types.Set `tfsdk:"tf_vars"`
+	ProvisionerTags    types.Set `tfsdk:"provisioner_tags"`
 }
 
 type Versions []TemplateVersion
@@ -181,6 +181,34 @@ func (v Versions) ByID(id UUID) *TemplateVersion {
 type Variable struct {
 	Name  types.String `tfsdk:"name"`
 	Value types.String `tfsdk:"value"`
+}
+
+// variableAttrTypes returns the attribute type map for Variable objects
+// used to construct types.Set values.
+func variableAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"name":  types.StringType,
+		"value": types.StringType,
+	}
+}
+
+// variableObjectType returns the object type used as the element type
+// in Set attributes for Variable.
+func variableObjectType() types.ObjectType {
+	return types.ObjectType{
+		AttrTypes: variableAttrTypes(),
+	}
+}
+
+// varsFromSet converts a types.Set to a slice of Variable structs.
+// It returns nil with no error when the set is null or unknown.
+func varsFromSet(ctx context.Context, varSet types.Set) ([]Variable, diag.Diagnostics) {
+	if varSet.IsNull() || varSet.IsUnknown() {
+		return nil, nil
+	}
+	var vars []Variable
+	diags := varSet.ElementsAs(ctx, &vars, false)
+	return vars, diags
 }
 
 var variableNestedObject = schema.NestedAttributeObject{
@@ -1043,7 +1071,7 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		}
 	}
 
-	diag = planVersions.reconcileVersionIDs(lv, configVersions, hasActiveVersion)
+	diag = planVersions.reconcileVersionIDs(ctx, lv, configVersions, hasActiveVersion)
 	if diag.HasError() {
 		resp.Diagnostics.Append(diag...)
 		return
@@ -1199,14 +1227,22 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
 	})
-	for _, variable := range req.Version.TerraformVariables {
+	tfVarSlice, varDiags := varsFromSet(ctx, req.Version.TerraformVariables)
+	if varDiags.HasError() {
+		return nil, logs, fmt.Errorf("failed to convert terraform variables: %s", varDiags.Errors())
+	}
+	for _, variable := range tfVarSlice {
 		vars = append(vars, codersdk.VariableValue{
 			Name:  variable.Name.ValueString(),
 			Value: variable.Value.ValueString(),
 		})
 	}
-	provTags := make(map[string]string, len(req.Version.ProvisionerTags))
-	for _, provisionerTag := range req.Version.ProvisionerTags {
+	provTagSlice, tagDiags := varsFromSet(ctx, req.Version.ProvisionerTags)
+	if tagDiags.HasError() {
+		return nil, logs, fmt.Errorf("failed to convert provisioner tags: %s", tagDiags.Errors())
+	}
+	provTags := make(map[string]string, len(provTagSlice))
+	for _, provisionerTag := range provTagSlice {
 		provTags[provisionerTag.Name.ValueString()] = provisionerTag.Value.ValueString()
 	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
@@ -1444,8 +1480,13 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	lv := make(LastVersionsByHash)
 	for _, version := range v {
 		vbh, ok := lv[version.DirectoryHash.ValueString()]
-		tfVars := make(map[string]string, len(version.TerraformVariables))
-		for _, tfVar := range version.TerraformVariables {
+		tfVarSlice, varDiags := varsFromSet(ctx, version.TerraformVariables)
+		if varDiags.HasError() {
+			diags.Append(varDiags...)
+			return diags
+		}
+		tfVars := make(map[string]string, len(tfVarSlice))
+		for _, tfVar := range tfVarSlice {
 			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
 		}
 		// Store the IDs and names of all versions with the same directory hash,
@@ -1476,7 +1517,7 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	return ps.SetKey(ctx, LastVersionsKey, lvBytes)
 }
 
-func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions, hasOneActiveVersion bool) (diag diag.Diagnostics) {
+func (planVersions Versions) reconcileVersionIDs(ctx context.Context, lv LastVersionsByHash, configVersions Versions, hasOneActiveVersion bool) (diag diag.Diagnostics) {
 	// We remove versions that we've matched from `lv`, so make a copy for
 	// resolving tfvar changes at the end.
 	fullLv := make(LastVersionsByHash)
@@ -1532,7 +1573,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 			if !ok {
 				continue
 			}
-			if tfVariablesChanged(prevs, &planVersions[i]) {
+			if tfVariablesChanged(ctx, prevs, &planVersions[i]) {
 				planVersions[i].ID = NewUUIDUnknown()
 				// We could always set the name to unknown here, to generate a
 				// random one (this is what the Web UI currently does when
@@ -1581,7 +1622,7 @@ func versionDeactivated(prevs []PreviousTemplateVersion, planned *TemplateVersio
 	return false
 }
 
-func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
+func tfVariablesChanged(ctx context.Context, prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
 	for _, prev := range prevs {
 		if prev.ID == planned.ID.ValueUUID() {
 			// If the previous version has no TFVars, then it was created using
@@ -1589,7 +1630,16 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 			if prev.TFVars == nil {
 				return true
 			}
-			for _, tfVar := range planned.TerraformVariables {
+			plannedVars, diags := varsFromSet(ctx, planned.TerraformVariables)
+			if diags.HasError() {
+				return true
+			}
+			// If the set is unknown or null, we cannot compare and
+			// must treat it as changed.
+			if planned.TerraformVariables.IsUnknown() || planned.TerraformVariables.IsNull() {
+				return true
+			}
+			for _, tfVar := range plannedVars {
 				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
 					return true
 				}
@@ -1598,7 +1648,6 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 		}
 	}
 	return true
-
 }
 
 func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
