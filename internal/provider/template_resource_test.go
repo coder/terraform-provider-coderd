@@ -11,10 +11,12 @@ import (
 	"text/template"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
@@ -1031,6 +1033,79 @@ resource "coderd_template" "sample" {
 		Steps: []resource.TestStep{
 			{
 				Config: cfg,
+			},
+		},
+	})
+}
+
+func TestAccTemplateResourceSensitiveTFVars(t *testing.T) {
+	t.Parallel()
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+variable "secret" {
+	sensitive = true
+	default   = %q
+}
+
+resource "time_static" "trigger" {
+	triggers = {
+		secret = var.secret
+	}
+}
+
+resource "coderd_template" "sample" {
+  name = "sensitive-tfvars-test"
+  versions = [
+    {
+      name = "v_${time_static.trigger.unix}"
+      directory = %q
+      active    = true
+      tf_vars = [
+        {
+          name  = "secret"
+          value = var.secret
+        }
+      ]
+    }
+  ]
+}
+`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_sensitive_tfvars_acc")
+
+	exTemplate := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplate)
+	require.NoError(t, err)
+
+	cfgStep1 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "initial-secret", exTemplate)
+	cfgStep2 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "changed-secret", exTemplate)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// Terraform < 1.1 panics rendering plan diffs with sensitivity marks
+		// on nested attributes ("value is marked, so must be unmarked first").
+		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+			tfversion.SkipBelow(version.Must(version.NewVersion("1.1.0"))),
+		},
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"time": {
+				Source:            "hashicorp/time",
+				VersionConstraint: ">=0.9.0",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: cfgStep1,
+			},
+			{
+				Config: cfgStep2,
 			},
 		},
 	})
