@@ -43,6 +43,7 @@ import (
 var _ resource.Resource = &TemplateResource{}
 var _ resource.ResourceWithImportState = &TemplateResource{}
 var _ resource.ResourceWithConfigValidators = &TemplateResource{}
+var _ resource.ResourceWithModifyPlan = &TemplateResource{}
 
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
@@ -508,9 +509,6 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 						},
 					},
 				},
-				PlanModifiers: []planmodifier.List{
-					NewVersionsPlanModifier(),
-				},
 			},
 		},
 	}
@@ -821,8 +819,89 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		tflog.Info(ctx, "successfully updated template ACL")
 	}
 
+	// Read prior versions from private state to determine which versions
+	// need to be created vs. reused. This replaces the previous approach of
+	// relying on ID.IsUnknown() set by the plan modifier, which required
+	// reconstructing the entire versions list and stripped cty sensitivity marks.
+	var lv LastVersionsByHash
+	lvBytes, pvDiag := req.Private.GetKey(ctx, LastVersionsKey)
+	if pvDiag.HasError() {
+		resp.Diagnostics.Append(pvDiag...)
+		return
+	}
+	if lvBytes != nil {
+		if err := json.Unmarshal(lvBytes, &lv); err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to unmarshal private state in Update: %s", err))
+			return
+		}
+	} else {
+		lv = make(LastVersionsByHash)
+	}
+	// Keep an unmodified copy for tf_vars comparison.
+	fullLv := make(LastVersionsByHash)
+	for k, v := range lv {
+		fullLv[k] = slices.Clone(v)
+	}
+
+	// Read config to determine which version names are user-set vs computed.
+	var configVersions Versions
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("versions"), &configVersions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	for idx := range newState.Versions {
-		if newState.Versions[idx].ID.IsUnknown() {
+		needsNewVersion := false
+		var matchedPrev *PreviousTemplateVersion
+
+		hash := newState.Versions[idx].DirectoryHash.ValueString()
+		prevList, hashFound := lv[hash]
+
+		if !hashFound {
+			// Directory hash not in private state — new version needed.
+			needsNewVersion = true
+		} else {
+			// Try to find a matching previous version.
+			// First, try to match by name.
+			matched := false
+			for j, prev := range prevList {
+				if newState.Versions[idx].Name.ValueString() == prev.Name {
+					matchedPrev = &prevList[j]
+					// Remove from candidates
+					lv[hash] = append(prevList[:j], prevList[j+1:]...)
+					matched = true
+					break
+				}
+			}
+			// If no name match, use first available candidate.
+			if !matched && len(prevList) > 0 {
+				matchedPrev = &prevList[0]
+				lv[hash] = prevList[1:]
+			}
+		}
+
+		// If we found a matching previous version, check if tf_vars changed.
+		if matchedPrev != nil {
+			// Check tf_vars change using the full (unmodified) private state.
+			if fullPrevs, ok := fullLv[hash]; ok {
+				// Build a temporary version with the matched ID to use tfVariablesChanged.
+				tmpVersion := newState.Versions[idx]
+				tmpVersion.ID = UUIDValue(matchedPrev.ID)
+				if tfVariablesChanged(ctx, fullPrevs, &tmpVersion) {
+					needsNewVersion = true
+				}
+			}
+		} else {
+			needsNewVersion = true
+		}
+
+		if needsNewVersion {
+			// If the user didn't explicitly set a name in the config,
+			// clear it so that Coderd generates a fresh random name.
+			// Otherwise, the stale name from state would conflict.
+			if idx < len(configVersions) && configVersions[idx].Name.IsNull() {
+				newState.Versions[idx].Name = types.StringValue("")
+			}
 			tflog.Info(ctx, "discovered a new or modified template version")
 			uploadResp, logs, err := newVersion(ctx, client, newVersionRequest{
 				Version:        &newState.Versions[idx],
@@ -848,16 +927,14 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 				}
 			}
 		} else {
-			// Since the ID was not unknown, it must be in the current state,
-			// having been retrieved from the private state,
-			// but the list might be a different size.
-			curVersion := curState.Versions.ByID(newState.Versions[idx].ID)
-			if curVersion == nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Public/Private State Mismatch: failed to find template version with ID %s", newState.Versions[idx].ID))
-				return
+			// Reuse existing version — apply the known ID and name.
+			newState.Versions[idx].ID = UUIDValue(matchedPrev.ID)
+			if newState.Versions[idx].Name.IsUnknown() {
+				newState.Versions[idx].Name = types.StringValue(matchedPrev.Name)
 			}
-			if !curVersion.Name.Equal(newState.Versions[idx].Name) {
-				_, err := client.UpdateTemplateVersion(ctx, newState.Versions[idx].ID.ValueUUID(), codersdk.PatchTemplateVersionRequest{
+			// Check if name changed — rename via API.
+			if matchedPrev.Name != newState.Versions[idx].Name.ValueString() {
+				_, err := client.UpdateTemplateVersion(ctx, matchedPrev.ID, codersdk.PatchTemplateVersionRequest{
 					Name:    newState.Versions[idx].Name.ValueString(),
 					Message: newState.Versions[idx].Message.ValueStringPointer(),
 				})
@@ -866,8 +943,9 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 					return
 				}
 			}
-			if newState.Versions[idx].Active.ValueBool() && !curVersion.Active.ValueBool() {
-				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
+			// Check if active status changed.
+			if newState.Versions[idx].Active.ValueBool() && !matchedPrev.Active {
+				err := markActive(ctx, client, templateID, matchedPrev.ID)
 				if err != nil {
 					resp.Diagnostics.AddError("Client Error", err.Error())
 					return
@@ -944,6 +1022,168 @@ func (r *TemplateResource) ImportState(ctx context.Context, req resource.ImportS
 // ConfigValidators implements resource.ResourceWithConfigValidators.
 func (r *TemplateResource) ConfigValidators(context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{}
+}
+
+// ModifyPlan implements resource.ResourceWithModifyPlan.
+// It computes directory hashes for each version and validates version constraints.
+// Unlike the previous attribute-level plan modifier, this method only writes
+// directory_hash values via SetAttribute, avoiding reconstruction of the entire
+// versions list which would strip cty-level sensitivity marks from tf_vars.
+func (r *TemplateResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// On destroy, the plan will be null. Nothing to do.
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var planVersions Versions
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("versions"), &planVersions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var configVersions Versions
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("versions"), &configVersions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	hasActiveVersion, diag := hasOneActiveVersion(configVersions)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+
+	// Read previous versions from private state.
+	var lv LastVersionsByHash
+	lvBytes, diag := req.Private.GetKey(ctx, LastVersionsKey)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+	if lvBytes == nil {
+		lv = make(LastVersionsByHash)
+		// If there's no prior private state, this might be resource creation,
+		// in which case one version must be active.
+		if !hasActiveVersion {
+			resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
+				" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
+			return
+		}
+	} else {
+		err := json.Unmarshal(lvBytes, &lv)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to unmarshal private state when reading: %s", err))
+			return
+		}
+	}
+
+	// Keep an unmodified copy for deactivation checks.
+	fullLv := make(LastVersionsByHash)
+	for k, v := range lv {
+		fullLv[k] = slices.Clone(v)
+	}
+
+	// Phase 1: Compute directory hashes and reconcile IDs via SetAttribute.
+	for i := range planVersions {
+		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
+			return
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+			path.Root("versions").AtListIndex(i).AtName("directory_hash"),
+			types.StringValue(hash),
+		)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		planVersions[i].DirectoryHash = types.StringValue(hash)
+
+		// Reconcile version ID: determine if this version needs to be newly created.
+		needsNew := false
+		prevList, hashFound := lv[hash]
+		if !hashFound {
+			needsNew = true
+		} else {
+			// Try to match by name.
+			matched := false
+			for j, prev := range prevList {
+				if planVersions[i].Name.ValueString() == prev.Name {
+					planVersions[i].ID = UUIDValue(prev.ID)
+					lv[hash] = append(prevList[:j], prevList[j+1:]...)
+					matched = true
+					break
+				}
+			}
+			if !matched && len(prevList) > 0 {
+				// Use first available candidate.
+				planVersions[i].ID = UUIDValue(prevList[0].ID)
+				if planVersions[i].Name.IsUnknown() {
+					planVersions[i].Name = types.StringValue(prevList[0].Name)
+				}
+				lv[hash] = prevList[1:]
+			} else if !matched {
+				needsNew = true
+			}
+		}
+
+		// Check tf_vars change.
+		if !needsNew && !planVersions[i].ID.IsUnknown() {
+			if prevs, ok := fullLv[hash]; ok {
+				if tfVariablesChanged(ctx, prevs, &planVersions[i]) {
+					needsNew = true
+				}
+			}
+		}
+
+		if needsNew {
+			planVersions[i].ID = NewUUIDUnknown()
+			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+				path.Root("versions").AtListIndex(i).AtName("id"),
+				NewUUIDUnknown(),
+			)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			if configVersions[i].Name.IsNull() {
+				planVersions[i].Name = types.StringUnknown()
+				resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+					path.Root("versions").AtListIndex(i).AtName("name"),
+					types.StringUnknown(),
+				)...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+			}
+		} else {
+			// ID stays as-is (matched from state). Write it to ensure plan is consistent.
+			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+				path.Root("versions").AtListIndex(i).AtName("id"),
+				planVersions[i].ID,
+			)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+	}
+
+	// Deactivation check.
+	if !hasActiveVersion {
+		for i := range planVersions {
+			if planVersions[i].ID.IsUnknown() {
+				continue
+			}
+			prevs, ok := fullLv[planVersions[i].DirectoryHash.ValueString()]
+			if !ok {
+				continue
+			}
+			if versionDeactivated(prevs, &planVersions[i]) {
+				resp.Diagnostics.AddError("Client Error", "Plan could not determine which version should be active.\n"+
+					"Either specify an active version or modify the contents of the previously active version before marking it as inactive.")
+				return
+			}
+		}
+	}
 }
 
 type versionsValidator struct{}
@@ -1630,13 +1870,20 @@ func tfVariablesChanged(ctx context.Context, prevs []PreviousTemplateVersion, pl
 			if prev.TFVars == nil {
 				return true
 			}
+			// If the set is unknown, we cannot compare and must treat it as changed.
+			if planned.TerraformVariables.IsUnknown() {
+				return true
+			}
+			// If the set is null (tf_vars not specified), treat as no variables.
+			// Only consider this a change if the previous version had variables.
+			if planned.TerraformVariables.IsNull() {
+				return len(prev.TFVars) > 0
+			}
 			plannedVars, diags := varsFromSet(ctx, planned.TerraformVariables)
 			if diags.HasError() {
 				return true
 			}
-			// If the set is unknown or null, we cannot compare and
-			// must treat it as changed.
-			if planned.TerraformVariables.IsUnknown() || planned.TerraformVariables.IsNull() {
+			if len(plannedVars) != len(prev.TFVars) {
 				return true
 			}
 			for _, tfVar := range plannedVars {
