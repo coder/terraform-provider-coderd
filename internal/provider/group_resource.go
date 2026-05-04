@@ -215,7 +215,7 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	groupID := data.ID.ValueUUID()
 
-	group, err := client.Group(ctx, groupID)
+	group, err := client.Group(ctx, groupID, codersdk.GroupRequest{})
 	if err != nil {
 		if isNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))
@@ -259,7 +259,7 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	groupID := data.ID.ValueUUID()
 
-	group, err := client.Group(ctx, groupID)
+	group, err := client.Group(ctx, groupID, codersdk.GroupRequest{})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get group, got error: %s", err))
 		return
@@ -360,7 +360,7 @@ func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStat
 		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<group-name>`")
 		return
 	}
-	group, err := client.Group(ctx, groupID)
+	group, err := client.Group(ctx, groupID, codersdk.GroupRequest{})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get imported group, got error: %s", err))
 		return

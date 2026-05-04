@@ -181,7 +181,7 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	)
 	if !data.ID.IsNull() {
 		groupID := data.ID.ValueUUID()
-		group, err = client.Group(ctx, groupID)
+		group, err = client.Group(ctx, groupID, codersdk.GroupRequest{})
 		if err != nil {
 			if isNotFound(err) {
 				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Group with ID %s not found. Marking as deleted.", groupID.String()))

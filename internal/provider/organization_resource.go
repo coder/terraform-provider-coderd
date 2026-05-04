@@ -438,7 +438,7 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 			"orgID": orgID,
 		})
 
-		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.WorkspaceSharingSettings{
+		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.UpdateWorkspaceSharingSettingsRequest{
 			SharingDisabled: workspaceSharingDisabledFromValue(data.WorkspaceSharing.ValueString()),
 		})
 		if err != nil {
@@ -555,7 +555,7 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 			"orgID": orgID,
 		})
 
-		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.WorkspaceSharingSettings{
+		_, err := r.Client.PatchWorkspaceSharingSettings(ctx, orgID.String(), codersdk.UpdateWorkspaceSharingSettingsRequest{
 			SharingDisabled: workspaceSharingDisabledFromValue(data.WorkspaceSharing.ValueString()),
 		})
 		if err != nil {
