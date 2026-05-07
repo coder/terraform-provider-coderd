@@ -1000,25 +1000,31 @@ func (a *versionsValidator) ValidateList(ctx context.Context, req validator.List
 	uniqueNames := make(map[string]struct{})
 	for i, version := range data {
 		// Exactly one of directory or archive_path must be set.
+		// Skip validation when either value is unknown (depends on another
+		// resource). Terraform will re-run validators once values resolve.
 		dirSet := !version.Directory.IsNull()
 		archiveSet := !version.ArchivePath.IsNull()
-		if !dirSet && !archiveSet {
-			resp.Diagnostics.AddAttributeError(
-				req.Path.AtListIndex(i),
-				"Invalid Version Source",
-				"Exactly one of `directory` or `archive_path` must be specified for each template version.",
-			)
-			return
+		dirUnknown := version.Directory.IsUnknown()
+		archiveUnknown := version.ArchivePath.IsUnknown()
+		if !dirUnknown && !archiveUnknown {
+			if !dirSet && !archiveSet {
+				resp.Diagnostics.AddAttributeError(
+					req.Path.AtListIndex(i),
+					"Invalid Version Source",
+					"Exactly one of `directory` or `archive_path` must be specified for each template version.",
+				)
+				return
+			}
+			if dirSet && archiveSet {
+				resp.Diagnostics.AddAttributeError(
+					req.Path.AtListIndex(i),
+					"Invalid Version Source",
+					"`directory` and `archive_path` are mutually exclusive for each template version.",
+				)
+				return
+			}
 		}
-		if dirSet && archiveSet {
-			resp.Diagnostics.AddAttributeError(
-				req.Path.AtListIndex(i),
-				"Invalid Version Source",
-				"`directory` and `archive_path` are mutually exclusive for each template version.",
-			)
-			return
-		}
-		if archiveSet && !version.ArchivePath.IsUnknown() {
+		if archiveSet && !archiveUnknown {
 			archivePath := version.ArchivePath.ValueString()
 			if !strings.HasSuffix(archivePath, ".tar") && !strings.HasSuffix(archivePath, ".zip") {
 				resp.Diagnostics.AddAttributeError(
