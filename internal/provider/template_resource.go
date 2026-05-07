@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	stdpath "path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -1150,7 +1151,9 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 						fmt.Sprintf(
 							"Version %q (index %d) is switching from directory to archive_path. "+
 								"The archive may include hidden files (dotfiles) that were previously "+
-								"excluded by the directory source.",
+								"excluded by the directory source. Additionally, automatic tfvars file "+
+								"discovery (terraform.tfvars, *.auto.tfvars) is not performed for archive "+
+								"uploads — use the `tf_vars` attribute to provide variable values explicitly.",
 							planVersions[i].Name.ValueString(), i,
 						),
 					)
@@ -1277,14 +1280,14 @@ func normalizeZip(archivePath string) ([]byte, error) {
 	// Determine which intermediate directories are missing.
 	missingDirs := make(map[string]bool)
 	for _, f := range r.File {
-		dir := filepath.Dir(f.Name)
+		dir := stdpath.Dir(f.Name)
 		for dir != "." && dir != "/" && dir != "" {
 			dirEntry := dir + "/"
 			if existingDirs[dirEntry] || missingDirs[dirEntry] {
 				break
 			}
 			missingDirs[dirEntry] = true
-			dir = filepath.Dir(dir)
+			dir = stdpath.Dir(dir)
 		}
 	}
 
