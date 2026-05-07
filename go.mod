@@ -6,7 +6,7 @@ require (
 	cdr.dev/slog/v3 v3.0.0
 	github.com/coder/coder/v2 v2.32.1
 	github.com/coder/retry v1.5.1
-	github.com/coder/serpent v0.14.0
+	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.14
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0

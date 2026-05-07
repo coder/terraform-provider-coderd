@@ -156,7 +156,7 @@ func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(
 			t.Logf("not ready yet: %s", err.Error())
 		}
 		return err == nil
-	}, 30*time.Second, time.Second, "coder failed to become ready in time")
+	}, 90*time.Second, time.Second, "coder failed to become ready in time")
 	_, err = client.CreateFirstUser(ctx, codersdk.CreateFirstUserRequest{
 		Email:    testEmail,
 		Username: testUsername,

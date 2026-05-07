@@ -124,8 +124,8 @@ github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 h1:3A0ES21Ke+FxEM8CXx
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0/go.mod h1:5UuS2Ts+nTToAMeOjNlnHFkPahrtDkmpydBen/3wgZc=
 github.com/coder/retry v1.5.1 h1:iWu8YnD8YqHs3XwqrqsjoBTAVqT9ml6z9ViJ2wlMiqc=
 github.com/coder/retry v1.5.1/go.mod h1:blHMk9vs6LkoRT9ZHyuZo360cufXEhrxqvEzeMtRGoY=
-github.com/coder/serpent v0.14.0 h1:g7vt2zBMp3nWyAvyhvQduaI53Ku65U3wITMi01+/8pU=
-github.com/coder/serpent v0.14.0/go.mod h1:7OIvFBYMd+OqarMy5einBl8AtRr8LliopVU7pyrwucY=
+github.com/coder/serpent v0.15.0 h1:jobR7DnPsxzEMD0cRiailwlY+4v6HAPS/8emIgBpaIU=
+github.com/coder/serpent v0.15.0/go.mod h1:7OIvFBYMd+OqarMy5einBl8AtRr8LliopVU7pyrwucY=
 github.com/coder/terraform-provider-coder/v2 v2.15.0 h1:sdKV3JvwlL7FNuSfaba0pm2WsPTBG7d0H6lmbzX+q4M=
 github.com/coder/terraform-provider-coder/v2 v2.15.0/go.mod h1:++c+FmMAFj8+H8lxstoaGBmTM3YFSxnVRxSkkdAG+YA=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
