@@ -1546,7 +1546,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 		prevList := lv[planVersions[i].DirectoryHash.ValueString()]
 		if len(prevList) > 0 && planVersions[i].ID.IsUnknown() {
 			planVersions[i].ID = UUIDValue(prevList[0].ID)
-			if planVersions[i].Name.IsNull() {
+			if configVersions[i].Name.IsNull() {
 				planVersions[i].Name = types.StringValue(prevList[0].Name)
 			}
 			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]
