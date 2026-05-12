@@ -43,6 +43,7 @@ import (
 var _ resource.Resource = &TemplateResource{}
 var _ resource.ResourceWithImportState = &TemplateResource{}
 var _ resource.ResourceWithConfigValidators = &TemplateResource{}
+var _ resource.ResourceWithModifyPlan = &TemplateResource{}
 
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
@@ -163,8 +164,8 @@ type TemplateVersion struct {
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
-	TerraformVariables []Variable   `tfsdk:"tf_vars"`
-	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
+	TerraformVariables types.Set    `tfsdk:"tf_vars"`
+	ProvisionerTags    types.Set    `tfsdk:"provisioner_tags"`
 }
 
 type Versions []TemplateVersion
@@ -181,6 +182,34 @@ func (v Versions) ByID(id UUID) *TemplateVersion {
 type Variable struct {
 	Name  types.String `tfsdk:"name"`
 	Value types.String `tfsdk:"value"`
+}
+
+// variableAttrTypes returns the attribute type map for Variable objects
+// used to construct types.Set values.
+func variableAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"name":  types.StringType,
+		"value": types.StringType,
+	}
+}
+
+// variableObjectType returns the object type used as the element type
+// in Set attributes for Variable.
+func variableObjectType() types.ObjectType {
+	return types.ObjectType{
+		AttrTypes: variableAttrTypes(),
+	}
+}
+
+// varsFromSet converts a types.Set to a slice of Variable structs.
+// It returns nil with no error when the set is null or unknown.
+func varsFromSet(ctx context.Context, varSet types.Set) ([]Variable, diag.Diagnostics) {
+	if varSet.IsNull() || varSet.IsUnknown() {
+		return nil, nil
+	}
+	var vars []Variable
+	diags := varSet.ElementsAs(ctx, &vars, false)
+	return vars, diags
 }
 
 var variableNestedObject = schema.NestedAttributeObject{
@@ -479,9 +508,6 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							NestedObject:        variableNestedObject,
 						},
 					},
-				},
-				PlanModifiers: []planmodifier.List{
-					NewVersionsPlanModifier(),
 				},
 			},
 		},
@@ -793,8 +819,20 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		tflog.Info(ctx, "successfully updated template ACL")
 	}
 
+	// Read config to determine which version names are user-set vs computed.
+	var configVersions Versions
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("versions"), &configVersions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	for idx := range newState.Versions {
 		if newState.Versions[idx].ID.IsUnknown() {
+			// If the user didn't explicitly set a name in the config,
+			// clear it so that Coderd generates a fresh random name.
+			if idx < len(configVersions) && configVersions[idx].Name.IsNull() {
+				newState.Versions[idx].Name = types.StringValue("")
+			}
 			tflog.Info(ctx, "discovered a new or modified template version")
 			uploadResp, logs, err := newVersion(ctx, client, newVersionRequest{
 				Version:        &newState.Versions[idx],
@@ -918,6 +956,109 @@ func (r *TemplateResource) ConfigValidators(context.Context) []resource.ConfigVa
 	return []resource.ConfigValidator{}
 }
 
+// ModifyPlan implements resource.ResourceWithModifyPlan.
+// It computes directory hashes for each version and validates version constraints.
+// Unlike the previous attribute-level plan modifier, this method only writes
+// directory_hash values via SetAttribute, avoiding reconstruction of the entire
+// versions list which would strip cty-level sensitivity marks from tf_vars.
+func (r *TemplateResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// On destroy, the plan will be null. Nothing to do.
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var planVersions Versions
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("versions"), &planVersions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var configVersions Versions
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("versions"), &configVersions)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	hasActiveVersion, diag := hasOneActiveVersion(configVersions)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+
+	// Read previous versions from private state.
+	var lv LastVersionsByHash
+	lvBytes, diag := req.Private.GetKey(ctx, LastVersionsKey)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+	if lvBytes == nil {
+		lv = make(LastVersionsByHash)
+		// If there's no prior private state, this might be resource creation,
+		// in which case one version must be active.
+		if !hasActiveVersion {
+			resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
+				" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
+			return
+		}
+	} else {
+		err := json.Unmarshal(lvBytes, &lv)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to unmarshal private state when reading: %s", err))
+			return
+		}
+	}
+
+	// Compute directory hashes.
+	for i := range planVersions {
+		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
+			return
+		}
+		planVersions[i].DirectoryHash = types.StringValue(hash)
+	}
+
+	// Reconcile version IDs using the shared function.
+	diag = planVersions.reconcileVersionIDs(ctx, lv, configVersions, hasActiveVersion)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	}
+
+	// Write reconciled values back to plan via SetAttribute to preserve sensitivity marks.
+	for i := range planVersions {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+			path.Root("versions").AtListIndex(i).AtName("directory_hash"),
+			planVersions[i].DirectoryHash,
+		)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+			path.Root("versions").AtListIndex(i).AtName("id"),
+			planVersions[i].ID,
+		)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		// Only write name when the config name is null (auto-generated).
+		// When the user provides an explicit name expression, the plan already
+		// carries the correct cty value with any sensitivity marks from the
+		// config. reconcileVersionIDs only modifies name when config is null,
+		// so there's nothing new to write for user-set names.
+		if configVersions[i].Name.IsNull() {
+			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+				path.Root("versions").AtListIndex(i).AtName("name"),
+				planVersions[i].Name,
+			)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+	}
+}
+
 type versionsValidator struct{}
 
 func NewVersionsValidator() validator.List {
@@ -979,82 +1120,6 @@ func (a *versionsValidator) ValidateList(ctx context.Context, req validator.List
 
 var _ validator.List = &versionsValidator{}
 
-type versionsPlanModifier struct{}
-
-// Description implements planmodifier.Object.
-func (d *versionsPlanModifier) Description(ctx context.Context) string {
-	return d.MarkdownDescription(ctx)
-}
-
-// MarkdownDescription implements planmodifier.Object.
-func (d *versionsPlanModifier) MarkdownDescription(context.Context) string {
-	return "Compute the hash of a directory."
-}
-
-// PlanModifyObject implements planmodifier.List.
-func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
-	var planVersions Versions
-	resp.Diagnostics.Append(req.PlanValue.ElementsAs(ctx, &planVersions, false)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	var configVersions Versions
-	resp.Diagnostics.Append(req.ConfigValue.ElementsAs(ctx, &configVersions, false)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	hasActiveVersion, diag := hasOneActiveVersion(configVersions)
-	if diag.HasError() {
-		resp.Diagnostics.Append(diag...)
-		return
-	}
-
-	for i := range planVersions {
-		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
-			return
-		}
-		planVersions[i].DirectoryHash = types.StringValue(hash)
-	}
-
-	var lv LastVersionsByHash
-	lvBytes, diag := req.Private.GetKey(ctx, LastVersionsKey)
-	if diag.HasError() {
-		resp.Diagnostics.Append(diag...)
-		return
-	}
-	// If this is the first read, init the private state value
-	if lvBytes == nil {
-		lv = make(LastVersionsByHash)
-		// If there's no prior private state, this might be resource creation,
-		// in which case one version must be active.
-		if !hasActiveVersion {
-			resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
-				" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
-			return
-		}
-	} else {
-		err := json.Unmarshal(lvBytes, &lv)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to unmarshal private state when reading: %s", err))
-			return
-		}
-	}
-
-	diag = planVersions.reconcileVersionIDs(lv, configVersions, hasActiveVersion)
-	if diag.HasError() {
-		resp.Diagnostics.Append(diag...)
-		return
-	}
-
-	resp.PlanValue, diag = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), planVersions)
-	if diag.HasError() {
-		resp.Diagnostics.Append(diag...)
-	}
-}
-
 func hasOneActiveVersion(data Versions) (hasActiveVersion bool, diags diag.Diagnostics) {
 	active := false
 	for _, version := range data {
@@ -1072,12 +1137,6 @@ func hasOneActiveVersion(data Versions) (hasActiveVersion bool, diags diag.Diagn
 	}
 	return active, diags
 }
-
-func NewVersionsPlanModifier() planmodifier.List {
-	return &versionsPlanModifier{}
-}
-
-var _ planmodifier.List = &versionsPlanModifier{}
 
 var weekValidator = setvalidator.ValueStringsAre(
 	stringvalidator.OneOf("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
@@ -1199,14 +1258,22 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
 	})
-	for _, variable := range req.Version.TerraformVariables {
+	tfVarSlice, varDiags := varsFromSet(ctx, req.Version.TerraformVariables)
+	if varDiags.HasError() {
+		return nil, logs, fmt.Errorf("failed to convert terraform variables: %s", varDiags.Errors())
+	}
+	for _, variable := range tfVarSlice {
 		vars = append(vars, codersdk.VariableValue{
 			Name:  variable.Name.ValueString(),
 			Value: variable.Value.ValueString(),
 		})
 	}
-	provTags := make(map[string]string, len(req.Version.ProvisionerTags))
-	for _, provisionerTag := range req.Version.ProvisionerTags {
+	provTagSlice, tagDiags := varsFromSet(ctx, req.Version.ProvisionerTags)
+	if tagDiags.HasError() {
+		return nil, logs, fmt.Errorf("failed to convert provisioner tags: %s", tagDiags.Errors())
+	}
+	provTags := make(map[string]string, len(provTagSlice))
+	for _, provisionerTag := range provTagSlice {
 		provTags[provisionerTag.Name.ValueString()] = provisionerTag.Value.ValueString()
 	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
@@ -1444,8 +1511,13 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	lv := make(LastVersionsByHash)
 	for _, version := range v {
 		vbh, ok := lv[version.DirectoryHash.ValueString()]
-		tfVars := make(map[string]string, len(version.TerraformVariables))
-		for _, tfVar := range version.TerraformVariables {
+		tfVarSlice, varDiags := varsFromSet(ctx, version.TerraformVariables)
+		if varDiags.HasError() {
+			diags.Append(varDiags...)
+			return diags
+		}
+		tfVars := make(map[string]string, len(tfVarSlice))
+		for _, tfVar := range tfVarSlice {
 			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
 		}
 		// Store the IDs and names of all versions with the same directory hash,
@@ -1476,7 +1548,7 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	return ps.SetKey(ctx, LastVersionsKey, lvBytes)
 }
 
-func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVersions Versions, hasOneActiveVersion bool) (diag diag.Diagnostics) {
+func (planVersions Versions) reconcileVersionIDs(ctx context.Context, lv LastVersionsByHash, configVersions Versions, hasOneActiveVersion bool) (diag diag.Diagnostics) {
 	// We remove versions that we've matched from `lv`, so make a copy for
 	// resolving tfvar changes at the end.
 	fullLv := make(LastVersionsByHash)
@@ -1532,7 +1604,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 			if !ok {
 				continue
 			}
-			if tfVariablesChanged(prevs, &planVersions[i]) {
+			if tfVariablesChanged(ctx, prevs, &planVersions[i]) {
 				planVersions[i].ID = NewUUIDUnknown()
 				// We could always set the name to unknown here, to generate a
 				// random one (this is what the Web UI currently does when
@@ -1581,7 +1653,7 @@ func versionDeactivated(prevs []PreviousTemplateVersion, planned *TemplateVersio
 	return false
 }
 
-func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
+func tfVariablesChanged(ctx context.Context, prevs []PreviousTemplateVersion, planned *TemplateVersion) bool {
 	for _, prev := range prevs {
 		if prev.ID == planned.ID.ValueUUID() {
 			// If the previous version has no TFVars, then it was created using
@@ -1589,7 +1661,23 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 			if prev.TFVars == nil {
 				return true
 			}
-			for _, tfVar := range planned.TerraformVariables {
+			// If the set is unknown, we cannot compare and must treat it as changed.
+			if planned.TerraformVariables.IsUnknown() {
+				return true
+			}
+			// If the set is null (tf_vars not specified), treat as no variables.
+			// Only consider this a change if the previous version had variables.
+			if planned.TerraformVariables.IsNull() {
+				return len(prev.TFVars) > 0
+			}
+			plannedVars, diags := varsFromSet(ctx, planned.TerraformVariables)
+			if diags.HasError() {
+				return true
+			}
+			if len(plannedVars) != len(prev.TFVars) {
+				return true
+			}
+			for _, tfVar := range plannedVars {
 				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
 					return true
 				}
@@ -1598,7 +1686,6 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 		}
 	}
 	return true
-
 }
 
 func formatLogs(err error, logs []codersdk.ProvisionerJobLog) string {
