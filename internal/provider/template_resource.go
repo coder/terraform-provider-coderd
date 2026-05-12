@@ -1049,39 +1049,39 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		return
 	}
 
-    // Now patch the original plan elements with only the fields we changed
-    planElements := req.PlanValue.Elements()
-    newElements := make([]attr.Value, len(planElements))
+	// Now patch the original plan elements with only the fields we changed
+	planElements := req.PlanValue.Elements()
+	newElements := make([]attr.Value, len(planElements))
 
-    for i, elem := range planElements {
-        obj, ok := elem.(types.Object)
-        if !ok {
-            resp.Diagnostics.AddError("Client Error", "Expected object element in versions list")
-            return
-        }
+	for i, elem := range planElements {
+		obj, ok := elem.(types.Object)
+		if !ok {
+			resp.Diagnostics.AddError("Client Error", "Expected object element in versions list")
+			return
+		}
 
-        attrs := obj.Attributes()
-        attrTypes := obj.AttributeTypes(ctx)
+		attrs := obj.Attributes()
+		attrTypes := obj.AttributeTypes(ctx)
 
-        // Overwrite only the fields the plan modifier manages
-        attrs["id"] = planVersions[i].ID
-        attrs["name"] = planVersions[i].Name
-        attrs["directory_hash"] = planVersions[i].DirectoryHash
+		// Overwrite only the fields the plan modifier manages
+		attrs["id"] = planVersions[i].ID
+		attrs["name"] = planVersions[i].Name
+		attrs["directory_hash"] = planVersions[i].DirectoryHash
 
-        // tf_vars, provisioner_tags, directory, active, message — all untouched
+		// tf_vars, provisioner_tags, directory, active, message — all untouched
 
-        newObj, objDiag := types.ObjectValue(attrTypes, attrs)
-        if objDiag.HasError() {
-            resp.Diagnostics.Append(objDiag...)
-            return
-        }
-        newElements[i] = newObj
-    }
+		newObj, objDiag := types.ObjectValue(attrTypes, attrs)
+		if objDiag.HasError() {
+			resp.Diagnostics.Append(objDiag...)
+			return
+		}
+		newElements[i] = newObj
+	}
 
-    resp.PlanValue, diag = types.ListValue(req.PlanValue.ElementType(ctx), newElements)
-    if diag.HasError() {
-        resp.Diagnostics.Append(diag...)
-    }
+	resp.PlanValue, diag = types.ListValue(req.PlanValue.ElementType(ctx), newElements)
+	if diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+	}
 }
 
 func hasOneActiveVersion(data Versions) (hasActiveVersion bool, diags diag.Diagnostics) {
