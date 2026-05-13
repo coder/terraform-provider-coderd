@@ -3,7 +3,6 @@ package provider
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -1780,40 +1779,5 @@ func TestAccArchiveUploadFlow(t *testing.T) {
 		hash2, err := computeArchiveHash(zipPath)
 		require.NoError(t, err)
 		require.Equal(t, hash1, hash2)
-	})
-
-	t.Run("ZipArchiveNormalization", func(t *testing.T) {
-		t.Parallel()
-		tmpDir := t.TempDir()
-
-		// Create a zip with a file in a nested directory but no directory entries
-		zipPath := filepath.Join(tmpDir, "template.zip")
-		zipFile, err := os.Create(zipPath)
-		require.NoError(t, err)
-		defer zipFile.Close() //nolint:errcheck
-
-		zw := zip.NewWriter(zipFile)
-		w, err := zw.Create("subdir/template.tf")
-		require.NoError(t, err)
-		_, err = w.Write([]byte("resource \"null_resource\" \"test\" {}"))
-		require.NoError(t, err)
-		_ = zw.Close() //nolint:errcheck
-
-		// Normalize the zip
-		normalized, err := normalizeZip(zipPath)
-		require.NoError(t, err)
-
-		// Verify normalized zip has directory entry for "subdir/"
-		zr, err := zip.NewReader(bytes.NewReader(normalized), int64(len(normalized)))
-		require.NoError(t, err)
-
-		hasSubdirEntry := false
-		for _, f := range zr.File {
-			if f.Name == "subdir/" {
-				hasSubdirEntry = true
-				break
-			}
-		}
-		require.True(t, hasSubdirEntry, "normalized zip should contain directory entry for subdir/")
 	})
 }

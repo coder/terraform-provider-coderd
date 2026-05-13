@@ -1,18 +1,14 @@
 package provider
 
 import (
-	"archive/zip"
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	stdpath "path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -1241,121 +1237,19 @@ func archiveContentType(archivePath string) (string, error) {
 	}
 }
 
-// normalizeZip rewrites a zip archive to ensure that all intermediate directory
-// entries exist. Some tools (e.g. Terraform's archive_file data source) produce
-// zips that contain only file entries without explicit directory entries. Coder's
-// server-side zip extractor expects directories to be present.
-func normalizeZip(archivePath string) ([]byte, error) {
-	r, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open zip: %w", err)
-	}
-	defer r.Close() //nolint:errcheck // Best-effort close of read-only zip.
-
-	// Collect the set of directories that already have explicit entries.
-	existingDirs := make(map[string]bool)
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
-			existingDirs[f.Name] = true
-		}
-	}
-
-	// Determine which intermediate directories are missing.
-	missingDirs := make(map[string]bool)
-	for _, f := range r.File {
-		dir := stdpath.Dir(f.Name)
-		for dir != "." && dir != "/" && dir != "" {
-			dirEntry := dir + "/"
-			if existingDirs[dirEntry] || missingDirs[dirEntry] {
-				break
-			}
-			missingDirs[dirEntry] = true
-			dir = stdpath.Dir(dir)
-		}
-	}
-
-	// If nothing is missing, read and return the original file as-is.
-	if len(missingDirs) == 0 {
-		data, err := os.ReadFile(archivePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read archive: %w", err)
-		}
-		return data, nil
-	}
-
-	// Sort missing dirs so parents come before children.
-	sortedMissing := make([]string, 0, len(missingDirs))
-	for d := range missingDirs {
-		sortedMissing = append(sortedMissing, d)
-	}
-	sort.Strings(sortedMissing)
-
-	// Rewrite the zip with directory entries first, then all original entries.
-	var buf bytes.Buffer
-	w := zip.NewWriter(&buf)
-
-	// Add missing directory entries.
-	for _, d := range sortedMissing {
-		_, err := w.CreateHeader(&zip.FileHeader{
-			Name:           d,
-			ExternalAttrs:  0o755 << 16, // rwxr-xr-x in Unix mode
-			CreatorVersion: 3 << 8,      // Unix
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create directory entry %q: %w", d, err)
-		}
-	}
-
-	// Copy all original entries.
-	for _, f := range r.File {
-		fw, err := w.CreateHeader(&f.FileHeader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create entry %q: %w", f.Name, err)
-		}
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return nil, fmt.Errorf("failed to open entry %q: %w", f.Name, err)
-		}
-		_, err = io.Copy(fw, rc)
-		_ = rc.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to copy entry %q: %w", f.Name, err)
-		}
-	}
-
-	if err := w.Close(); err != nil {
-		return nil, fmt.Errorf("failed to finalize zip: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
 func uploadArchive(ctx context.Context, client *codersdk.Client, archivePath string) (*codersdk.UploadResponse, error) {
 	contentType, err := archiveContentType(archivePath)
 	if err != nil {
 		return nil, err
 	}
 
-	var reader io.Reader
-	if contentType == codersdk.ContentTypeZip {
-		// Normalize the zip to ensure intermediate directory entries exist.
-		data, err := normalizeZip(archivePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to normalize zip: %w", err)
-		}
-		reader = bytes.NewReader(data)
-	} else {
-		f, err := os.Open(archivePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open archive: %w", err)
-		}
-		defer f.Close() //nolint:errcheck // Best-effort close; upload already consumed the reader.
-		reader = bufio.NewReader(f)
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open archive: %w", err)
 	}
+	defer f.Close() //nolint:errcheck // Best-effort close; upload already consumed the reader.
 
-	resp, err := client.Upload(ctx, contentType, reader)
+	resp, err := client.Upload(ctx, contentType, bufio.NewReader(f))
 	if err != nil {
 		return nil, err
 	}
