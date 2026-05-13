@@ -169,18 +169,13 @@ type TemplateVersion struct {
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	ArchivePath        types.String `tfsdk:"archive_path"`
-	ArchiveHash        types.String `tfsdk:"archive_hash"`
 	Active             types.Bool   `tfsdk:"active"`
 	TerraformVariables []Variable   `tfsdk:"tf_vars"`
 	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
 }
 
-// contentHash returns the relevant hash for change detection, regardless of
-// whether the version source is a directory or an archive.
+// contentHash returns the relevant hash for change detection.
 func (v TemplateVersion) contentHash() string {
-	if !v.ArchiveHash.IsNull() && !v.ArchiveHash.IsUnknown() && v.ArchiveHash.ValueString() != "" {
-		return v.ArchiveHash.ValueString()
-	}
 	if !v.DirectoryHash.IsNull() && !v.DirectoryHash.IsUnknown() {
 		return v.DirectoryHash.ValueString()
 	}
@@ -486,9 +481,6 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Optional:            true,
 							MarkdownDescription: "A path to a `.tar` or `.zip` archive file to upload as the template version source. Mutually exclusive with `directory`. Changes in the archive contents will trigger the creation of a new template version. The archive must not exceed 100 MiB (the Coder server upload limit).",
 						},
-						"archive_hash": schema.StringAttribute{
-							Computed: true,
-						},
 						"active": schema.BoolAttribute{
 							MarkdownDescription: "Whether this version is the active version of the template. Only one version can be active at a time.",
 							Computed:            true,
@@ -626,9 +618,6 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		// set the other to empty string so Terraform doesn't see unknown values.
 		if data.Versions[idx].DirectoryHash.IsUnknown() {
 			data.Versions[idx].DirectoryHash = types.StringValue("")
-		}
-		if data.Versions[idx].ArchiveHash.IsUnknown() {
-			data.Versions[idx].ArchiveHash = types.StringValue("")
 		}
 	}
 	data.ID = UUIDValue(templateResp.ID)
@@ -852,9 +841,6 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			if newState.Versions[idx].DirectoryHash.IsUnknown() {
 				newState.Versions[idx].DirectoryHash = types.StringValue("")
 			}
-			if newState.Versions[idx].ArchiveHash.IsUnknown() {
-				newState.Versions[idx].ArchiveHash = types.StringValue("")
-			}
 			if newState.Versions[idx].Active.ValueBool() {
 				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
 				if err != nil {
@@ -892,9 +878,6 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			// even for reused versions.
 			if newState.Versions[idx].DirectoryHash.IsUnknown() {
 				newState.Versions[idx].DirectoryHash = types.StringValue("")
-			}
-			if newState.Versions[idx].ArchiveHash.IsUnknown() {
-				newState.Versions[idx].ArchiveHash = types.StringValue("")
 			}
 		}
 	}
@@ -1105,11 +1088,11 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute archive hash: %s", err))
 				return
 			}
-			planVersions[i].ArchiveHash = types.StringValue(hash)
+			planVersions[i].DirectoryHash = types.StringValue(hash)
 		} else if !planVersions[i].ArchivePath.IsNull() && planVersions[i].ArchivePath.IsUnknown() {
 			// archive_path is set but not yet known (depends on another resource).
 			// We can't compute the hash yet; mark it as unknown.
-			planVersions[i].ArchiveHash = types.StringUnknown()
+			planVersions[i].DirectoryHash = types.StringUnknown()
 		} else if !planVersions[i].Directory.IsNull() && !planVersions[i].Directory.IsUnknown() {
 			hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
 			if err != nil {

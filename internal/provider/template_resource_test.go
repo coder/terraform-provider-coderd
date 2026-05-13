@@ -1599,7 +1599,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 			planVersions: []TemplateVersion{
 				{
 					Name:               types.StringValue("archive-ver"),
-					ArchiveHash:        types.StringValue("archivehash123"),
+					DirectoryHash:      types.StringValue("archivehash123"),
 					ID:                 NewUUIDUnknown(),
 					TerraformVariables: []Variable{},
 				},
@@ -1621,7 +1621,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 			expectedVersions: []TemplateVersion{
 				{
 					Name:               types.StringValue("archive-ver"),
-					ArchiveHash:        types.StringValue("archivehash123"),
+					DirectoryHash:      types.StringValue("archivehash123"),
 					ID:                 UUIDValue(aUUID),
 					TerraformVariables: []Variable{},
 				},
@@ -1632,7 +1632,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 			planVersions: []TemplateVersion{
 				{
 					Name:               types.StringValue("archive-ver"),
-					ArchiveHash:        types.StringValue("newhash456"),
+					DirectoryHash:      types.StringValue("newhash456"),
 					ID:                 NewUUIDUnknown(),
 					TerraformVariables: []Variable{},
 				},
@@ -1654,7 +1654,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 			expectedVersions: []TemplateVersion{
 				{
 					Name:               types.StringValue("archive-ver"),
-					ArchiveHash:        types.StringValue("newhash456"),
+					DirectoryHash:      types.StringValue("newhash456"),
 					ID:                 NewUUIDUnknown(),
 					TerraformVariables: []Variable{},
 				},
