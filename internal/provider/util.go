@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -86,6 +87,20 @@ func computeDirectoryHash(directory string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+func computeArchiveHash(archivePath string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close() //nolint:errcheck // Best-effort close of read-only file.
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
 // memberDiff returns the members to add and remove from the group, given the
 // current members and the planned members. plannedMembers is deliberately our
 // custom type, as Terraform cannot automatically produce `[]uuid.UUID` from a
@@ -143,4 +158,17 @@ func corsPtr(v types.String) *codersdk.CORSBehavior {
 	}
 	b := codersdk.CORSBehavior(v.ValueString())
 	return &b
+}
+
+// validateArchiveSize checks that an archive file does not exceed the server upload limit.
+func validateArchiveSize(archivePath string) error {
+	const maxArchiveSize = 10 * (10 << 20) // 100 MiB
+	fileInfo, err := os.Stat(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat archive: %s", err)
+	}
+	if fileInfo.Size() > maxArchiveSize {
+		return fmt.Errorf("archive file exceeds 100 MiB limit: %d bytes", fileInfo.Size())
+	}
+	return nil
 }

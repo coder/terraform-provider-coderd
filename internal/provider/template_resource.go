@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -162,6 +164,7 @@ type TemplateVersion struct {
 	Message            types.String `tfsdk:"message"`
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
+	ArchivePath        types.String `tfsdk:"archive_path"`
 	Active             types.Bool   `tfsdk:"active"`
 	TerraformVariables []Variable   `tfsdk:"tf_vars"`
 	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
@@ -456,11 +459,15 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Default:             stringdefault.StaticString(""),
 						},
 						"directory": schema.StringAttribute{
-							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version.",
-							Required:            true,
+							Optional:            true,
+							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Conflicts with `archive_path`.",
 						},
 						"directory_hash": schema.StringAttribute{
 							Computed: true,
+						},
+						"archive_path": schema.StringAttribute{
+							Optional:            true,
+							MarkdownDescription: "A path to a `.tar` or `.zip` archive file to upload as the template version source. Mutually exclusive with `directory`. Changes in the archive contents will trigger the creation of a new template version. The archive must not exceed 100 MiB (the Coder server upload limit).",
 						},
 						"active": schema.BoolAttribute{
 							MarkdownDescription: "Whether this version is the active version of the template. Only one version can be active at a time.",
@@ -594,6 +601,22 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		}
 		data.Versions[idx].ID = UUIDValue(versionResp.ID)
 		data.Versions[idx].Name = types.StringValue(versionResp.Name)
+		// If the plan modifier couldn't compute the hash (source path was unknown
+		// at plan time), compute it now that all values are resolved.
+		if data.Versions[idx].DirectoryHash.IsUnknown() {
+			var hash string
+			var hashErr error
+			if !data.Versions[idx].ArchivePath.IsNull() {
+				hash, hashErr = computeArchiveHash(data.Versions[idx].ArchivePath.ValueString())
+			} else {
+				hash, hashErr = computeDirectoryHash(data.Versions[idx].Directory.ValueString())
+			}
+			if hashErr != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute content hash: %s", hashErr))
+				return
+			}
+			data.Versions[idx].DirectoryHash = types.StringValue(hash)
+		}
 	}
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
@@ -812,6 +835,22 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			}
 			newState.Versions[idx].ID = UUIDValue(versionResp.ID)
 			newState.Versions[idx].Name = types.StringValue(versionResp.Name)
+			// If the plan modifier couldn't compute the hash (source path was unknown
+			// at plan time), compute it now that all values are resolved.
+			if newState.Versions[idx].DirectoryHash.IsUnknown() {
+				var hash string
+				var hashErr error
+				if !newState.Versions[idx].ArchivePath.IsNull() {
+					hash, hashErr = computeArchiveHash(newState.Versions[idx].ArchivePath.ValueString())
+				} else {
+					hash, hashErr = computeDirectoryHash(newState.Versions[idx].Directory.ValueString())
+				}
+				if hashErr != nil {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute content hash: %s", hashErr))
+					return
+				}
+				newState.Versions[idx].DirectoryHash = types.StringValue(hash)
+			}
 			if newState.Versions[idx].Active.ValueBool() {
 				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
 				if err != nil {
@@ -844,6 +883,22 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 					resp.Diagnostics.AddError("Client Error", err.Error())
 					return
 				}
+			}
+			// If the plan modifier couldn't compute the hash (source path was unknown
+			// at plan time), compute it now that all values are resolved.
+			if newState.Versions[idx].DirectoryHash.IsUnknown() {
+				var hash string
+				var hashErr error
+				if !newState.Versions[idx].ArchivePath.IsNull() {
+					hash, hashErr = computeArchiveHash(newState.Versions[idx].ArchivePath.ValueString())
+				} else {
+					hash, hashErr = computeDirectoryHash(newState.Versions[idx].Directory.ValueString())
+				}
+				if hashErr != nil {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute content hash: %s", hashErr))
+					return
+				}
+				newState.Versions[idx].DirectoryHash = types.StringValue(hash)
 			}
 		}
 	}
@@ -948,7 +1003,44 @@ func (a *versionsValidator) ValidateList(ctx context.Context, req validator.List
 
 	// Check all versions have unique names
 	uniqueNames := make(map[string]struct{})
-	for _, version := range data {
+	for i, version := range data {
+		// Exactly one of directory or archive_path must be set.
+		// Skip validation when either value is unknown (depends on another
+		// resource). Terraform will re-run validators once values resolve.
+		dirSet := !version.Directory.IsNull()
+		archiveSet := !version.ArchivePath.IsNull()
+		dirUnknown := version.Directory.IsUnknown()
+		archiveUnknown := version.ArchivePath.IsUnknown()
+		if !dirUnknown && !archiveUnknown {
+			if !dirSet && !archiveSet {
+				resp.Diagnostics.AddAttributeError(
+					req.Path.AtListIndex(i),
+					"Invalid Version Source",
+					"Exactly one of `directory` or `archive_path` must be specified for each template version.",
+				)
+				return
+			}
+			if dirSet && archiveSet {
+				resp.Diagnostics.AddAttributeError(
+					req.Path.AtListIndex(i),
+					"Invalid Version Source",
+					"`directory` and `archive_path` are mutually exclusive for each template version.",
+				)
+				return
+			}
+		}
+		if archiveSet && !archiveUnknown {
+			archivePath := version.ArchivePath.ValueString()
+			if !strings.HasSuffix(archivePath, ".tar") && !strings.HasSuffix(archivePath, ".zip") {
+				resp.Diagnostics.AddAttributeError(
+					req.Path.AtListIndex(i).AtName("archive_path"),
+					"Invalid Archive Format",
+					fmt.Sprintf("archive_path must reference a .tar or .zip file, got %q", filepath.Base(archivePath)),
+				)
+				return
+			}
+		}
+
 		if version.Name.IsNull() || version.Name.IsUnknown() {
 			continue
 		}
@@ -1011,12 +1103,67 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 	}
 
 	for i := range planVersions {
-		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
-			return
+		if !planVersions[i].ArchivePath.IsNull() && !planVersions[i].ArchivePath.IsUnknown() {
+			hash, err := computeArchiveHash(planVersions[i].ArchivePath.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute archive hash: %s", err))
+				return
+			}
+			planVersions[i].DirectoryHash = types.StringValue(hash)
+		} else if !planVersions[i].ArchivePath.IsNull() && planVersions[i].ArchivePath.IsUnknown() {
+			// archive_path is set but not yet known (depends on another resource).
+			// We can't compute the hash yet; mark it as unknown.
+			planVersions[i].DirectoryHash = types.StringUnknown()
+		} else if !planVersions[i].Directory.IsNull() && !planVersions[i].Directory.IsUnknown() {
+			hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
+				return
+			}
+			planVersions[i].DirectoryHash = types.StringValue(hash)
 		}
-		planVersions[i].DirectoryHash = types.StringValue(hash)
+	}
+
+	// Warn if any version is switching between archive_path and directory.
+	if !req.StateValue.IsNull() {
+		var stateVersions Versions
+		resp.Diagnostics.Append(req.StateValue.ElementsAs(ctx, &stateVersions, false)...)
+		if !resp.Diagnostics.HasError() {
+			for i := range planVersions {
+				if i >= len(stateVersions) {
+					break
+				}
+				hadArchive := !stateVersions[i].ArchivePath.IsNull() && stateVersions[i].ArchivePath.ValueString() != ""
+				hadDirectory := !stateVersions[i].Directory.IsNull() && stateVersions[i].Directory.ValueString() != ""
+				nowArchive := !planVersions[i].ArchivePath.IsNull()
+				nowDirectory := !planVersions[i].Directory.IsNull()
+
+				if hadArchive && nowDirectory {
+					resp.Diagnostics.AddWarning(
+						"Switching from archive_path to directory",
+						fmt.Sprintf(
+							"Version %q (index %d) is switching from archive_path to directory. "+
+								"The directory source uses provisionersdk.Tar, which skips hidden files "+
+								"(dotfiles such as .claude.json, .mcp.json, etc.). If your template relies "+
+								"on hidden files, consider continuing to use archive_path instead.",
+							planVersions[i].Name.ValueString(), i,
+						),
+					)
+				} else if hadDirectory && nowArchive {
+					resp.Diagnostics.AddWarning(
+						"Switching from directory to archive_path",
+						fmt.Sprintf(
+							"Version %q (index %d) is switching from directory to archive_path. "+
+								"The archive may include hidden files (dotfiles) that were previously "+
+								"excluded by the directory source. Additionally, automatic tfvars file "+
+								"discovery (terraform.tfvars, *.auto.tfvars) is not performed for archive "+
+								"uploads — use the `tf_vars` attribute to provide variable values explicitly.",
+							planVersions[i].Name.ValueString(), i,
+						),
+					)
+				}
+			}
+		}
 	}
 
 	var lv LastVersionsByHash
@@ -1104,6 +1251,36 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 	return &resp, nil
 }
 
+func archiveContentType(archivePath string) (string, error) {
+	switch {
+	case strings.HasSuffix(archivePath, ".tar"):
+		return codersdk.ContentTypeTar, nil
+	case strings.HasSuffix(archivePath, ".zip"):
+		return codersdk.ContentTypeZip, nil
+	default:
+		return "", fmt.Errorf("unsupported archive format %q: must be .tar or .zip", filepath.Ext(archivePath))
+	}
+}
+
+func uploadArchive(ctx context.Context, client *codersdk.Client, archivePath string) (*codersdk.UploadResponse, error) {
+	contentType, err := archiveContentType(archivePath)
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open archive: %w", err)
+	}
+	defer f.Close() //nolint:errcheck // Best-effort close; upload already consumed the reader.
+
+	resp, err := client.Upload(ctx, contentType, bufio.NewReader(f))
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
 	const maxRetries = 3
 	var allLogs []codersdk.ProvisionerJobLog
@@ -1180,21 +1357,39 @@ type newVersionRequest struct {
 
 func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, []codersdk.ProvisionerJobLog, error) {
 	var logs []codersdk.ProvisionerJobLog
-	directory := req.Version.Directory.ValueString()
-	tflog.Info(ctx, "uploading directory")
-	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
-	if err != nil {
-		return nil, logs, fmt.Errorf("failed to upload directory: %s", err)
-	}
-	tflog.Info(ctx, "successfully uploaded directory")
-	tflog.Info(ctx, "discovering and parsing vars files")
-	varFiles, err := codersdk.DiscoverVarsFiles(directory)
-	if err != nil {
-		return nil, logs, fmt.Errorf("failed to discover vars files: %s", err)
-	}
-	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
-	if err != nil {
-		return nil, logs, fmt.Errorf("failed to parse user variable values: %s", err)
+	var err error
+	var uploadResp *codersdk.UploadResponse
+	var vars []codersdk.VariableValue
+
+	if !req.Version.ArchivePath.IsNull() && !req.Version.ArchivePath.IsUnknown() {
+		archivePath := req.Version.ArchivePath.ValueString()
+		if err := validateArchiveSize(archivePath); err != nil {
+			return nil, logs, err
+		}
+		tflog.Info(ctx, "uploading archive", map[string]any{"archive_path": archivePath})
+		uploadResp, err = uploadArchive(ctx, client, archivePath)
+		if err != nil {
+			return nil, logs, fmt.Errorf("failed to upload archive: %s", err)
+		}
+		tflog.Info(ctx, "successfully uploaded archive")
+		tflog.Info(ctx, "skipping vars file discovery for archive upload, use tf_vars to provide variables")
+	} else {
+		directory := req.Version.Directory.ValueString()
+		tflog.Info(ctx, "uploading directory")
+		uploadResp, err = uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
+		if err != nil {
+			return nil, logs, fmt.Errorf("failed to upload directory: %s", err)
+		}
+		tflog.Info(ctx, "successfully uploaded directory")
+		tflog.Info(ctx, "discovering and parsing vars files")
+		varFiles, err := codersdk.DiscoverVarsFiles(directory)
+		if err != nil {
+			return nil, logs, fmt.Errorf("failed to discover vars files: %s", err)
+		}
+		vars, err = codersdk.ParseUserVariableValues(varFiles, "", []string{})
+		if err != nil {
+			return nil, logs, fmt.Errorf("failed to parse user variable values: %s", err)
+		}
 	}
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
