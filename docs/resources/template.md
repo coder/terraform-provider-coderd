@@ -105,7 +105,6 @@ Optional:
 
 Read-Only:
 
-- `archive_hash` (String)
 - `directory_hash` (String)
 - `id` (String)
 
