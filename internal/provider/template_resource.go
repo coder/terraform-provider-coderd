@@ -601,11 +601,21 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		}
 		data.Versions[idx].ID = UUIDValue(versionResp.ID)
 		data.Versions[idx].Name = types.StringValue(versionResp.Name)
-		// Ensure computed hash fields have concrete values after apply.
-		// Only one of directory_hash or archive_hash will be meaningful;
-		// set the other to empty string so Terraform doesn't see unknown values.
+		// If the plan modifier couldn't compute the hash (source path was unknown
+		// at plan time), compute it now that all values are resolved.
 		if data.Versions[idx].DirectoryHash.IsUnknown() {
-			data.Versions[idx].DirectoryHash = types.StringValue("")
+			var hash string
+			var hashErr error
+			if !data.Versions[idx].ArchivePath.IsNull() {
+				hash, hashErr = computeArchiveHash(data.Versions[idx].ArchivePath.ValueString())
+			} else {
+				hash, hashErr = computeDirectoryHash(data.Versions[idx].Directory.ValueString())
+			}
+			if hashErr != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute content hash: %s", hashErr))
+				return
+			}
+			data.Versions[idx].DirectoryHash = types.StringValue(hash)
 		}
 	}
 	data.ID = UUIDValue(templateResp.ID)
@@ -825,9 +835,21 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			}
 			newState.Versions[idx].ID = UUIDValue(versionResp.ID)
 			newState.Versions[idx].Name = types.StringValue(versionResp.Name)
-			// Ensure computed hash fields have concrete values after apply.
+			// If the plan modifier couldn't compute the hash (source path was unknown
+			// at plan time), compute it now that all values are resolved.
 			if newState.Versions[idx].DirectoryHash.IsUnknown() {
-				newState.Versions[idx].DirectoryHash = types.StringValue("")
+				var hash string
+				var hashErr error
+				if !newState.Versions[idx].ArchivePath.IsNull() {
+					hash, hashErr = computeArchiveHash(newState.Versions[idx].ArchivePath.ValueString())
+				} else {
+					hash, hashErr = computeDirectoryHash(newState.Versions[idx].Directory.ValueString())
+				}
+				if hashErr != nil {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute content hash: %s", hashErr))
+					return
+				}
+				newState.Versions[idx].DirectoryHash = types.StringValue(hash)
 			}
 			if newState.Versions[idx].Active.ValueBool() {
 				err := markActive(ctx, client, templateID, newState.Versions[idx].ID.ValueUUID())
@@ -862,10 +884,21 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 					return
 				}
 			}
-			// Ensure computed hash fields have concrete values after apply,
-			// even for reused versions.
+			// If the plan modifier couldn't compute the hash (source path was unknown
+			// at plan time), compute it now that all values are resolved.
 			if newState.Versions[idx].DirectoryHash.IsUnknown() {
-				newState.Versions[idx].DirectoryHash = types.StringValue("")
+				var hash string
+				var hashErr error
+				if !newState.Versions[idx].ArchivePath.IsNull() {
+					hash, hashErr = computeArchiveHash(newState.Versions[idx].ArchivePath.ValueString())
+				} else {
+					hash, hashErr = computeDirectoryHash(newState.Versions[idx].Directory.ValueString())
+				}
+				if hashErr != nil {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute content hash: %s", hashErr))
+					return
+				}
+				newState.Versions[idx].DirectoryHash = types.StringValue(hash)
 			}
 		}
 	}
