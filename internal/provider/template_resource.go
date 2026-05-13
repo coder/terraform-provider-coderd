@@ -1444,14 +1444,8 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 
 	if !req.Version.ArchivePath.IsNull() && !req.Version.ArchivePath.IsUnknown() {
 		archivePath := req.Version.ArchivePath.ValueString()
-		// Check archive file size (100 MiB limit)
-		const maxArchiveSize = 10 * (10 << 20) // 100 MiB
-		fileInfo, err := os.Stat(archivePath)
-		if err != nil {
-			return nil, logs, fmt.Errorf("failed to stat archive: %s", err)
-		}
-		if fileInfo.Size() > maxArchiveSize {
-			return nil, logs, fmt.Errorf("archive file exceeds 100 MiB limit: %d bytes", fileInfo.Size())
+		if err := validateArchiveSize(archivePath); err != nil {
+			return nil, logs, err
 		}
 		tflog.Info(ctx, "uploading archive", map[string]any{"archive_path": archivePath})
 		uploadResp, err = uploadArchive(ctx, client, archivePath)

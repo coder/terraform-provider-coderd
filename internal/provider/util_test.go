@@ -329,3 +329,57 @@ func TestArchiveContentType(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateArchiveSize(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ValidArchiveUnder100MiB", func(t *testing.T) {
+		t.Parallel()
+		tmpFile, err := os.CreateTemp(t.TempDir(), "archive_*.tar")
+		require.NoError(t, err)
+		defer tmpFile.Close() //nolint:errcheck
+
+		// Create a 10 MiB file
+		_, err = tmpFile.Write(make([]byte, 10*1024*1024))
+		require.NoError(t, err)
+
+		err = validateArchiveSize(tmpFile.Name())
+		require.NoError(t, err)
+	})
+
+	t.Run("InvalidArchiveExceeds100MiB", func(t *testing.T) {
+		t.Parallel()
+		tmpFile, err := os.CreateTemp(t.TempDir(), "archive_*.tar")
+		require.NoError(t, err)
+		defer tmpFile.Close() //nolint:errcheck
+
+		// Create a 101 MiB file (exceeds limit)
+		_, err = tmpFile.Write(make([]byte, 101*1024*1024))
+		require.NoError(t, err)
+
+		err = validateArchiveSize(tmpFile.Name())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds 100 MiB limit")
+	})
+
+	t.Run("NonexistentFile", func(t *testing.T) {
+		t.Parallel()
+		err := validateArchiveSize("/nonexistent/path/archive.tar")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to stat archive")
+	})
+
+	t.Run("ExactlyAtLimit", func(t *testing.T) {
+		t.Parallel()
+		tmpFile, err := os.CreateTemp(t.TempDir(), "archive_*.tar")
+		require.NoError(t, err)
+		defer tmpFile.Close() //nolint:errcheck
+
+		// Create exactly 100 MiB file
+		_, err = tmpFile.Write(make([]byte, 100*1024*1024))
+		require.NoError(t, err)
+
+		err = validateArchiveSize(tmpFile.Name())
+		require.NoError(t, err)
+	})
+}

@@ -159,3 +159,16 @@ func corsPtr(v types.String) *codersdk.CORSBehavior {
 	b := codersdk.CORSBehavior(v.ValueString())
 	return &b
 }
+
+// validateArchiveSize checks that an archive file does not exceed the server upload limit.
+func validateArchiveSize(archivePath string) error {
+	const maxArchiveSize = 10 * (10 << 20) // 100 MiB
+	fileInfo, err := os.Stat(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat archive: %s", err)
+	}
+	if fileInfo.Size() > maxArchiveSize {
+		return fmt.Errorf("archive file exceeds 100 MiB limit: %d bytes", fileInfo.Size())
+	}
+	return nil
+}
