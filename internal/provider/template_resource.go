@@ -1049,7 +1049,36 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		return
 	}
 
-	resp.PlanValue, diag = types.ListValueFrom(ctx, req.PlanValue.ElementType(ctx), planVersions)
+	// Now patch the original plan elements with only the fields we changed
+	planElements := req.PlanValue.Elements()
+	newElements := make([]attr.Value, len(planElements))
+
+	for i, elem := range planElements {
+		obj, ok := elem.(types.Object)
+		if !ok {
+			resp.Diagnostics.AddError("Client Error", "Expected object element in versions list")
+			return
+		}
+
+		attrs := obj.Attributes()
+		attrTypes := obj.AttributeTypes(ctx)
+
+		// Overwrite only the fields the plan modifier manages
+		attrs["id"] = planVersions[i].ID
+		attrs["name"] = planVersions[i].Name
+		attrs["directory_hash"] = planVersions[i].DirectoryHash
+
+		// tf_vars, provisioner_tags, directory, active, message — all untouched
+
+		newObj, objDiag := types.ObjectValue(attrTypes, attrs)
+		if objDiag.HasError() {
+			resp.Diagnostics.Append(objDiag...)
+			return
+		}
+		newElements[i] = newObj
+	}
+
+	resp.PlanValue, diag = types.ListValue(req.PlanValue.ElementType(ctx), newElements)
 	if diag.HasError() {
 		resp.Diagnostics.Append(diag...)
 	}
@@ -1517,7 +1546,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 		prevList := lv[planVersions[i].DirectoryHash.ValueString()]
 		if len(prevList) > 0 && planVersions[i].ID.IsUnknown() {
 			planVersions[i].ID = UUIDValue(prevList[0].ID)
-			if planVersions[i].Name.IsUnknown() {
+			if configVersions[i].Name.IsNull() {
 				planVersions[i].Name = types.StringValue(prevList[0].Name)
 			}
 			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]

@@ -1388,7 +1388,65 @@ func TestReconcileVersionIDs(t *testing.T) {
 			},
 		},
 		{
+			// Config name is null (auto-generated), plan name is unknown.
+			// Should backfill name from state since the user didn't set one.
 			Name: "UnknownUsesStateInOrder",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+				{
+					Name:               types.StringUnknown(),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+				{
+					Name: types.StringNull(),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:     aUUID,
+						Name:   "qux",
+						TFVars: map[string]string{},
+					},
+					{
+						ID:     bUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
+				},
+				{
+					Name:               types.StringValue("baz"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(bUUID),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
+		{
+			// Config name is non-null (e.g. random_uuid.result), plan name is unknown
+			// because the upstream resource is being recreated.
+			// Should NOT backfill name — leave it unknown to resolve after apply.
+			Name: "UnknownNonNullConfigNameNotBackfilled",
 			planVersions: []TemplateVersion{
 				{
 					Name:               types.StringValue("foo"),
@@ -1433,7 +1491,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 					TerraformVariables: []Variable{},
 				},
 				{
-					Name:               types.StringValue("baz"),
+					Name:               types.StringUnknown(),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(bUUID),
 					TerraformVariables: []Variable{},
