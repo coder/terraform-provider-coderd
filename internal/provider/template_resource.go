@@ -170,14 +170,6 @@ type TemplateVersion struct {
 	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
 }
 
-// contentHash returns the relevant hash for change detection.
-func (v TemplateVersion) contentHash() string {
-	if !v.DirectoryHash.IsNull() && !v.DirectoryHash.IsUnknown() {
-		return v.DirectoryHash.ValueString()
-	}
-	return ""
-}
-
 type Versions []TemplateVersion
 
 func (v Versions) ByID(id UUID) *TemplateVersion {
@@ -1613,7 +1605,7 @@ type privateState interface {
 func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags diag.Diagnostics) {
 	lv := make(LastVersionsByHash)
 	for _, version := range v {
-		vbh, ok := lv[version.contentHash()]
+		vbh, ok := lv[version.DirectoryHash.ValueString()]
 		tfVars := make(map[string]string, len(version.TerraformVariables))
 		for _, tfVar := range version.TerraformVariables {
 			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
@@ -1621,14 +1613,14 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 		// Store the IDs and names of all versions with the same directory hash,
 		// in the order they appear
 		if ok {
-			lv[version.contentHash()] = append(vbh, PreviousTemplateVersion{
+			lv[version.DirectoryHash.ValueString()] = append(vbh, PreviousTemplateVersion{
 				ID:     version.ID.ValueUUID(),
 				Name:   version.Name.ValueString(),
 				TFVars: tfVars,
 				Active: version.Active.ValueBool(),
 			})
 		} else {
-			lv[version.contentHash()] = []PreviousTemplateVersion{
+			lv[version.DirectoryHash.ValueString()] = []PreviousTemplateVersion{
 				{
 					ID:     version.ID.ValueUUID(),
 					Name:   version.Name.ValueString(),
@@ -1655,7 +1647,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 	}
 
 	for i := range planVersions {
-		prevList, ok := lv[planVersions[i].contentHash()]
+		prevList, ok := lv[planVersions[i].DirectoryHash.ValueString()]
 		// If not in state, mark as known after apply since we'll create a new version.
 		// Versions whose Terraform configuration has not changed will have known
 		// IDs at this point, so we need to set this manually.
@@ -1674,7 +1666,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 				// it from the previous version candidates
 				if planVersions[i].Name.ValueString() == prev.Name {
 					planVersions[i].ID = UUIDValue(prev.ID)
-					lv[planVersions[i].contentHash()] = append(prevList[:j], prevList[j+1:]...)
+					lv[planVersions[i].DirectoryHash.ValueString()] = append(prevList[:j], prevList[j+1:]...)
 					break
 				}
 			}
@@ -1684,13 +1676,13 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 	// For versions whose hash was found in the private state but couldn't be
 	// matched, use the leftovers in the order they appear
 	for i := range planVersions {
-		prevList := lv[planVersions[i].contentHash()]
+		prevList := lv[planVersions[i].DirectoryHash.ValueString()]
 		if len(prevList) > 0 && planVersions[i].ID.IsUnknown() {
 			planVersions[i].ID = UUIDValue(prevList[0].ID)
 			if planVersions[i].Name.IsUnknown() {
 				planVersions[i].Name = types.StringValue(prevList[0].Name)
 			}
-			lv[planVersions[i].contentHash()] = prevList[1:]
+			lv[planVersions[i].DirectoryHash.ValueString()] = prevList[1:]
 		}
 	}
 
@@ -1698,7 +1690,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 	// we need to create a new version with the new variables.
 	for i := range planVersions {
 		if !planVersions[i].ID.IsUnknown() {
-			prevs, ok := fullLv[planVersions[i].contentHash()]
+			prevs, ok := fullLv[planVersions[i].DirectoryHash.ValueString()]
 			if !ok {
 				continue
 			}
@@ -1722,7 +1714,7 @@ func (planVersions Versions) reconcileVersionIDs(lv LastVersionsByHash, configVe
 	if !hasOneActiveVersion {
 		for i := range planVersions {
 			if !planVersions[i].ID.IsUnknown() {
-				prevs, ok := fullLv[planVersions[i].contentHash()]
+				prevs, ok := fullLv[planVersions[i].DirectoryHash.ValueString()]
 				if !ok {
 					continue
 				}
