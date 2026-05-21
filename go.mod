@@ -4,7 +4,7 @@ go 1.25.10
 
 require (
 	cdr.dev/slog/v3 v3.0.0
-	github.com/coder/coder/v2 v2.33.3
+	github.com/coder/coder/v2 v2.33.5
 	github.com/coder/retry v1.5.1
 	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.14
