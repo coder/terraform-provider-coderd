@@ -636,6 +636,34 @@ func TestAccTemplateResource(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("InvalidMaxPortShareLevel", func(t *testing.T) {
+		cfg1 := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("example-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					Directory: &exTemplateOne,
+					Active:    ptr.Ref(true),
+				},
+			},
+			ACL:               testAccTemplateACLConfig{null: true},
+			MaxPortShareLevel: ptr.Ref("invalid"),
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg1.String(t),
+					ExpectError: regexp.MustCompile(`value must be one of`),
+				},
+			},
+		})
+	})
 }
 
 func TestAccTemplateResourceEnterprise(t *testing.T) {
@@ -790,10 +818,10 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		})
 	})
 
-	// Verifies that when `max_port_share_level` is set to to the default value,
-	// an update request that would return HTTP Not Modified is not sent.
-	t.Run("DefaultMaxPortShareLevel", func(t *testing.T) {
-		cfg1 := testAccTemplateResourceConfig{
+	// Verifies that all valid max_port_share_level constants are accepted and
+	// round-trip correctly through the API, including updates between values.
+	t.Run("MaxPortShareLevelConstants", func(t *testing.T) {
+		baseCfg := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
@@ -803,8 +831,19 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 					Active:    ptr.Ref(true),
 				},
 			},
-			MaxPortShareLevel: ptr.Ref("owner"),
 		}
+
+		cfgOwner := baseCfg
+		cfgOwner.MaxPortShareLevel = ptr.Ref("owner")
+
+		cfgAuthenticated := baseCfg
+		cfgAuthenticated.MaxPortShareLevel = ptr.Ref("authenticated")
+
+		cfgOrganization := baseCfg
+		cfgOrganization.MaxPortShareLevel = ptr.Ref("organization")
+
+		cfgPublic := baseCfg
+		cfgPublic.MaxPortShareLevel = ptr.Ref("public")
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -812,8 +851,20 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
-					Config: cfg1.String(t),
+					Config: cfgOwner.String(t),
 					Check:  resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "owner"),
+				},
+				{
+					Config: cfgAuthenticated.String(t),
+					Check:  resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "authenticated"),
+				},
+				{
+					Config: cfgOrganization.String(t),
+					Check:  resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "organization"),
+				},
+				{
+					Config: cfgPublic.String(t),
+					Check:  resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
 				},
 			},
 		})
@@ -1595,7 +1646,6 @@ func TestReconcileVersionIDs(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1606,6 +1656,5 @@ func TestReconcileVersionIDs(t *testing.T) {
 				require.Equal(t, c.expectedVersions, c.planVersions)
 			}
 		})
-
 	}
 }

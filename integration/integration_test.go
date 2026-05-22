@@ -146,6 +146,17 @@ func TestIntegration(t *testing.T) {
 			},
 		},
 		{
+			name: "template-port-share-test",
+			preF: func(t testing.TB, c *codersdk.Client) {},
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				templates, err := c.Templates(ctx, codersdk.TemplateFilter{})
+				require.NoError(t, err)
+				require.Len(t, templates, 1)
+				require.Equal(t, "port-share-test", templates[0].Name)
+				require.Equal(t, codersdk.WorkspaceAgentPortShareLevelOrganization, templates[0].MaxPortShareLevel)
+			},
+		},
+		{
 			name: "template-test",
 			preF: func(t testing.TB, c *codersdk.Client) {},
 			assertF: func(t testing.TB, c *codersdk.Client) {
