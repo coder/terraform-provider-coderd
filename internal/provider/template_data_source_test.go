@@ -72,12 +72,12 @@ func TestAccTemplateDataSource(t *testing.T) {
 
 	// Can't set some fields on create, like deprecated.
 	tpl, err = client.UpdateTemplateMeta(ctx, tpl.ID, codersdk.UpdateTemplateMeta{
-		Name:               tpl.Name,
+		Name:               ptr.Ref(tpl.Name),
 		DisplayName:        &tpl.DisplayName,
 		Description:        &tpl.Description,
 		Icon:               &tpl.Icon,
-		DefaultTTLMillis:   tpl.DefaultTTLMillis,
-		ActivityBumpMillis: tpl.ActivityBumpMillis,
+		DefaultTTLMillis:   ptr.Ref(tpl.DefaultTTLMillis),
+		ActivityBumpMillis: ptr.Ref(tpl.ActivityBumpMillis),
 		AutostopRequirement: &codersdk.TemplateAutostopRequirement{
 			DaysOfWeek: tpl.AutostopRequirement.DaysOfWeek,
 			Weeks:      tpl.AutostopRequirement.Weeks,
@@ -85,17 +85,17 @@ func TestAccTemplateDataSource(t *testing.T) {
 		AutostartRequirement: &codersdk.TemplateAutostartRequirement{
 			DaysOfWeek: tpl.AutostartRequirement.DaysOfWeek,
 		},
-		AllowUserAutostart:             tpl.AllowUserAutostart,
-		AllowUserAutostop:              tpl.AllowUserAutostop,
-		AllowUserCancelWorkspaceJobs:   tpl.AllowUserCancelWorkspaceJobs,
-		FailureTTLMillis:               tpl.FailureTTLMillis,
-		TimeTilDormantMillis:           tpl.TimeTilDormantMillis,
-		TimeTilDormantAutoDeleteMillis: tpl.TimeTilDormantAutoDeleteMillis,
-		UpdateWorkspaceLastUsedAt:      false,
-		UpdateWorkspaceDormantAt:       false,
-		RequireActiveVersion:           tpl.RequireActiveVersion,
+		AllowUserAutostart:             ptr.Ref(tpl.AllowUserAutostart),
+		AllowUserAutostop:              ptr.Ref(tpl.AllowUserAutostop),
+		AllowUserCancelWorkspaceJobs:   ptr.Ref(tpl.AllowUserCancelWorkspaceJobs),
+		FailureTTLMillis:               ptr.Ref(tpl.FailureTTLMillis),
+		TimeTilDormantMillis:           ptr.Ref(tpl.TimeTilDormantMillis),
+		TimeTilDormantAutoDeleteMillis: ptr.Ref(tpl.TimeTilDormantAutoDeleteMillis),
+		UpdateWorkspaceLastUsedAt:      ptr.Ref(false),
+		UpdateWorkspaceDormantAt:       ptr.Ref(false),
+		RequireActiveVersion:           ptr.Ref(tpl.RequireActiveVersion),
 		DeprecationMessage:             ptr.Ref("This template is deprecated"),
-		DisableEveryoneGroupAccess:     true,
+		DisableEveryoneGroupAccess:     ptr.Ref(true),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevelOwner),
 	})
 	require.NoError(t, err)
