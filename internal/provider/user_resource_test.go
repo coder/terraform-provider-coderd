@@ -10,6 +10,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/stretchr/testify/require"
 )
@@ -174,6 +175,15 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 		IsServiceAccount: ptr.Ref(true),
 	}
 
+	// Flipping is_service_account is immutable server-side (enforced by DB CHECK
+	// constraints), so the attribute carries RequiresReplace(). Turning it off
+	// makes this a regular user, which then requires an email/password.
+	cfgRegular := cfg
+	cfgRegular.IsServiceAccount = ptr.Ref(false)
+	cfgRegular.Email = ptr.Ref("service-account@coder.com")
+	cfgRegular.LoginType = ptr.Ref("password")
+	cfgRegular.Password = ptr.Ref("SomeSecurePassword!")
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -199,6 +209,21 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"roles"},
+			},
+			// Toggling is_service_account must force a replacement, locking the
+			// immutability contract guaranteed by RequiresReplace().
+			{
+				Config: cfgRegular.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_user.test", plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "false"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", "service-account@coder.com"),
+					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "password"),
+				),
 			},
 		},
 	})
