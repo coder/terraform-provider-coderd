@@ -26,3 +26,12 @@ resource "coderd_user" "admin" {
   suspended = true
   email     = "admin@example.com"
 }
+
+// Create a service account for automation (Premium). Unlike a `login_type =
+// none` user, a service account has no email and does not consume a user seat.
+resource "coderd_user" "automation" {
+  username           = "automation"
+  name               = "Automation"
+  roles              = ["template-admin"]
+  is_service_account = true
+}

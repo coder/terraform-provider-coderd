@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -27,6 +28,7 @@ import (
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &UserResource{}
 var _ resource.ResourceWithImportState = &UserResource{}
+var _ resource.ResourceWithValidateConfig = &UserResource{}
 
 func NewUserResource() resource.Resource {
 	return &UserResource{}
@@ -41,13 +43,14 @@ type UserResource struct {
 type UserResourceModel struct {
 	ID UUID `tfsdk:"id"`
 
-	Username  types.String `tfsdk:"username"`
-	Name      types.String `tfsdk:"name"`
-	Email     types.String `tfsdk:"email"`
-	Roles     types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
-	LoginType types.String `tfsdk:"login_type"` // none, password, github, oidc
-	Password  types.String `tfsdk:"password"`   // only when login_type is password
-	Suspended types.Bool   `tfsdk:"suspended"`
+	Username         types.String `tfsdk:"username"`
+	Name             types.String `tfsdk:"name"`
+	Email            types.String `tfsdk:"email"`
+	Roles            types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
+	LoginType        types.String `tfsdk:"login_type"` // none, password, github, oidc
+	Password         types.String `tfsdk:"password"`   // only when login_type is password
+	Suspended        types.Bool   `tfsdk:"suspended"`
+	IsServiceAccount types.Bool   `tfsdk:"is_service_account"`
 }
 
 func (r *UserResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -83,8 +86,9 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				},
 			},
 			"email": schema.StringAttribute{
-				MarkdownDescription: "Email address of the user.",
-				Required:            true,
+				MarkdownDescription: "Email address of the user. Required unless `is_service_account` is `true`, in which case it must be omitted (service accounts have no email).",
+				Optional:            true,
+				Computed:            true,
 			},
 			"roles": schema.SetAttribute{
 				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`. If `null`, roles will not be managed by Terraform. This attribute must be null if the user is an OIDC user and role sync is configured",
@@ -119,6 +123,15 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Optional:            true,
 				Default:             booldefault.StaticBool(false),
 			},
+			"is_service_account": schema.BoolAttribute{
+				MarkdownDescription: "Whether the user is a service account. Service accounts are admin-managed accounts that cannot log in interactively: they have no password or email and use `login_type` `none`. Unlike a regular `login_type = none` user, a service account does not consume a licensed user seat. This is immutable after creation.",
+				Computed:            true,
+				Optional:            true,
+				Default:             booldefault.StaticBool(false),
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
 		},
 	}
 }
@@ -141,6 +154,44 @@ func (r *UserResource) Configure(ctx context.Context, req resource.ConfigureRequ
 	}
 
 	r.data = data
+}
+
+func (r *UserResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data UserResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() || data.IsServiceAccount.IsUnknown() {
+		return
+	}
+
+	emailKnown := !data.Email.IsUnknown()
+	emailSet := emailKnown && !data.Email.IsNull() && data.Email.ValueString() != ""
+
+	if data.IsServiceAccount.ValueBool() {
+		// Service accounts cannot log in, so they carry no email or credentials
+		// and must use login_type 'none' (enforced server-side).
+		if emailSet {
+			resp.Diagnostics.AddAttributeError(path.Root("email"),
+				"Invalid Attribute Combination",
+				"`email` must not be set when `is_service_account` is `true`.")
+		}
+		if !data.Password.IsNull() {
+			resp.Diagnostics.AddAttributeError(path.Root("password"),
+				"Invalid Attribute Combination",
+				"`password` must not be set when `is_service_account` is `true`.")
+		}
+		// Compared as a string literal to match the schema default/validator and
+		// avoid the deprecated codersdk.LoginTypeNone constant.
+		if !data.LoginType.IsNull() && !data.LoginType.IsUnknown() &&
+			data.LoginType.ValueString() != "none" {
+			resp.Diagnostics.AddAttributeError(path.Root("login_type"),
+				"Invalid Attribute Combination",
+				"`login_type` must be `none` when `is_service_account` is `true`.")
+		}
+	} else if emailKnown && !emailSet {
+		resp.Diagnostics.AddAttributeError(path.Root("email"),
+			"Missing Required Attribute",
+			"`email` is required when `is_service_account` is `false`.")
+	}
 }
 
 func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -174,17 +225,32 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Data Error", "Password is only allowed when login_type is 'password'")
 		return
 	}
-	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-		Email:          data.Email.ValueString(),
-		Username:       data.Username.ValueString(),
-		Password:       data.Password.ValueString(),
-		UserLoginType:  loginType,
-		OrganizationID: me.OrganizationIDs[0],
-	})
+	var user codersdk.User
+	if data.IsServiceAccount.ValueBool() {
+		// Service accounts have no email and use a dedicated endpoint that
+		// flags the account as `is_service_account` in the database.
+		user, err = client.CreateUserWithOrgs(ctx, codersdk.CreateUserRequestWithOrgs{
+			Username:        data.Username.ValueString(),
+			Name:            data.Name.ValueString(),
+			UserLoginType:   loginType,
+			OrganizationIDs: []uuid.UUID{me.OrganizationIDs[0]},
+			ServiceAccount:  true,
+		})
+	} else {
+		user, err = client.CreateUser(ctx, codersdk.CreateUserRequest{
+			Email:          data.Email.ValueString(),
+			Username:       data.Username.ValueString(),
+			Password:       data.Password.ValueString(),
+			UserLoginType:  loginType,
+			OrganizationID: me.OrganizationIDs[0],
+		})
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create user, got error: %s", err))
 		return
 	}
+	data.Email = types.StringValue(user.Email)
+	data.IsServiceAccount = types.BoolValue(user.IsServiceAccount)
 	tflog.Info(ctx, "successfully created user", map[string]any{
 		"id": user.ID.String(),
 	})
@@ -273,6 +339,7 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
+	data.IsServiceAccount = types.BoolValue(user.IsServiceAccount)
 
 	// The user-by-ID API returns deleted users if the authorized user has
 	// permission. It does not indicate whether the user is deleted or not.

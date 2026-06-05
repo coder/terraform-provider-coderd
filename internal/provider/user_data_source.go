@@ -32,15 +32,16 @@ type UserDataSourceModel struct {
 	ID       UUID         `tfsdk:"id"`
 	Username types.String `tfsdk:"username"`
 
-	Name            types.String `tfsdk:"name"`
-	Email           types.String `tfsdk:"email"`
-	Roles           types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
-	LoginType       types.String `tfsdk:"login_type"` // none, password, github, oidc
-	Suspended       types.Bool   `tfsdk:"suspended"`
-	AvatarURL       types.String `tfsdk:"avatar_url"`
-	OrganizationIDs types.Set    `tfsdk:"organization_ids"`
-	CreatedAt       types.Int64  `tfsdk:"created_at"` // Unix timestamp
-	LastSeenAt      types.Int64  `tfsdk:"last_seen_at"`
+	Name             types.String `tfsdk:"name"`
+	Email            types.String `tfsdk:"email"`
+	Roles            types.Set    `tfsdk:"roles"`      // owner, template-admin, user-admin, auditor (member is implicit)
+	LoginType        types.String `tfsdk:"login_type"` // none, password, github, oidc
+	Suspended        types.Bool   `tfsdk:"suspended"`
+	IsServiceAccount types.Bool   `tfsdk:"is_service_account"`
+	AvatarURL        types.String `tfsdk:"avatar_url"`
+	OrganizationIDs  types.Set    `tfsdk:"organization_ids"`
+	CreatedAt        types.Int64  `tfsdk:"created_at"` // Unix timestamp
+	LastSeenAt       types.Int64  `tfsdk:"last_seen_at"`
 }
 
 func (d *UserDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -81,6 +82,10 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 			},
 			"suspended": schema.BoolAttribute{
 				MarkdownDescription: "Whether the user is suspended.",
+				Computed:            true,
+			},
+			"is_service_account": schema.BoolAttribute{
+				MarkdownDescription: "Whether the user is a service account: an admin-managed account that cannot log in interactively and does not consume a licensed user seat.",
 				Computed:            true,
 			},
 			"avatar_url": schema.StringAttribute{
@@ -175,6 +180,7 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	data.Roles = types.SetValueMust(types.StringType, roles)
 	data.LoginType = types.StringValue(string(user.LoginType))
 	data.Suspended = types.BoolValue(user.Status == codersdk.UserStatusSuspended)
+	data.IsServiceAccount = types.BoolValue(user.IsServiceAccount)
 
 	orgIDs := make([]attr.Value, 0, len(user.OrganizationIDs))
 	for _, orgID := range user.OrganizationIDs {

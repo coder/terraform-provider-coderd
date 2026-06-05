@@ -155,17 +155,66 @@ func TestAccUserResource(t *testing.T) {
 	})
 }
 
+func TestAccUserResourceServiceAccount(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	// Service accounts are a Premium feature, so a licensed deployment is required.
+	client := integration.StartCoder(ctx, t, "user_service_account_acc", integration.UseLicense)
+
+	cfg := testAccUserResourceConfig{
+		URL:              client.URL.String(),
+		Token:            client.SessionToken(),
+		Username:         ptr.Ref("service-account"),
+		Name:             ptr.Ref("Service Account"),
+		Roles:            ptr.Ref([]string{"template-admin"}),
+		IsServiceAccount: ptr.Ref(true),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create and Read testing
+			{
+				Config: cfg.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "service-account"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Service Account"),
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "none"),
+					// Service accounts have no email.
+					resource.TestCheckResourceAttr("coderd_user.test", "email", ""),
+					resource.TestCheckResourceAttr("coderd_user.test", "roles.#", "1"),
+					resource.TestCheckTypeSetElemAttr("coderd_user.test", "roles.*", "template-admin"),
+				),
+			},
+			// Import by ID
+			{
+				ResourceName:            "coderd_user.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"roles"},
+			},
+		},
+	})
+}
+
 type testAccUserResourceConfig struct {
 	URL   string
 	Token string
 
-	Username  *string
-	Name      *string
-	Email     *string
-	Roles     *[]string
-	LoginType *string
-	Password  *string
-	Suspended *bool
+	Username         *string
+	Name             *string
+	Email            *string
+	Roles            *[]string
+	LoginType        *string
+	Password         *string
+	Suspended        *bool
+	IsServiceAccount *bool
 }
 
 func (c testAccUserResourceConfig) String(t *testing.T) string {
@@ -184,6 +233,7 @@ resource "coderd_user" "test" {
 	login_type = {{orNull .LoginType}}
 	password   = {{orNull .Password}}
 	suspended  = {{orNull .Suspended}}
+	is_service_account = {{orNull .IsServiceAccount}}
 }
 `
 	// Define template functions
