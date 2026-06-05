@@ -2,6 +2,7 @@ package provider
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
@@ -198,6 +199,68 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"roles"},
+			},
+		},
+	})
+}
+
+// TestAccUserResourceValidateConfig exercises the plan-time validation around
+// the now-optional email and the service-account constraints. These are config
+// errors caught before any API call, so an unlicensed deployment is sufficient.
+func TestAccUserResourceValidateConfig(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "user_validate_acc")
+
+	base := testAccUserResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+	}
+
+	// Regular user (not a service account) must still provide an email, even
+	// though the attribute is now Optional in the schema.
+	noEmail := base
+	noEmail.Username = ptr.Ref("no-email")
+
+	// Service accounts must not carry an email, password, or non-none login_type.
+	saWithEmail := base
+	saWithEmail.Username = ptr.Ref("sa-email")
+	saWithEmail.IsServiceAccount = ptr.Ref(true)
+	saWithEmail.Email = ptr.Ref("sa@coder.com")
+
+	saWithPassword := base
+	saWithPassword.Username = ptr.Ref("sa-password")
+	saWithPassword.IsServiceAccount = ptr.Ref(true)
+	saWithPassword.Password = ptr.Ref("SomeSecurePassword!")
+
+	saWithLoginType := base
+	saWithLoginType.Username = ptr.Ref("sa-login")
+	saWithLoginType.IsServiceAccount = ptr.Ref(true)
+	saWithLoginType.LoginType = ptr.Ref("password")
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      noEmail.String(t),
+				ExpectError: regexp.MustCompile(`email.+is required`),
+			},
+			{
+				Config:      saWithEmail.String(t),
+				ExpectError: regexp.MustCompile(`email.+must not be set`),
+			},
+			{
+				Config:      saWithPassword.String(t),
+				ExpectError: regexp.MustCompile(`password.+must not be set`),
+			},
+			{
+				Config:      saWithLoginType.String(t),
+				ExpectError: regexp.MustCompile(`login_type.+must be`),
 			},
 		},
 	})
