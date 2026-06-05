@@ -45,6 +45,8 @@ type OrganizationResourceModel struct {
 	Icon             types.String `tfsdk:"icon"`
 	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
 
+	DefaultOrgMemberRoles types.List `tfsdk:"default_org_member_roles"`
+
 	OrgSyncIdpGroups types.Set    `tfsdk:"org_sync_idp_groups"`
 	GroupSync        types.Object `tfsdk:"group_sync"`
 	RoleSync         types.Object `tfsdk:"role_sync"`
@@ -147,6 +149,15 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				Validators: []validator.String{
 					stringvalidator.OneOf(workspaceSharingNone, workspaceSharingEveryone),
 				},
+			},
+
+			"default_org_member_roles": schema.ListAttribute{
+				ElementType: types.StringType,
+				MarkdownDescription: "Built-in organization role names that are unioned into every member's effective roles. " +
+					"Changes propagate to members on their next request. Setting any value other than the deployment defaults " +
+					"requires the `minimum-implicit-member` experiment to be enabled on the Coder Deployment.",
+				Optional: true,
+				Computed: true,
 			},
 
 			"org_sync_idp_groups": schema.SetAttribute{
@@ -352,6 +363,13 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 	data.Icon = types.StringValue(org.Icon)
 	data.WorkspaceSharing = workspaceSharing
 
+	defaultOrgMemberRoles, diags := defaultOrgMemberRolesValueFromAPI(ctx, org.DefaultOrgMemberRoles)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.DefaultOrgMemberRoles = defaultOrgMemberRoles
+
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -456,6 +474,26 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 		}
 	}
 
+	// Apply default_org_member_roles if the user specified them.
+	if !data.DefaultOrgMemberRoles.IsNull() && !data.DefaultOrgMemberRoles.IsUnknown() {
+		tflog.Trace(ctx, "updating default org member roles", map[string]any{
+			"orgID": orgID,
+		})
+
+		var roles []string
+		resp.Diagnostics.Append(data.DefaultOrgMemberRoles.ElementsAs(ctx, &roles, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		org, err = r.Client.UpdateOrganization(ctx, orgID.String(), codersdk.UpdateOrganizationRequest{
+			DefaultOrgMemberRoles: &roles,
+		})
+		if err != nil {
+			resp.Diagnostics.AddError("Default Org Member Roles Update error", err.Error())
+			return
+		}
+	}
+
 	// This is computed, we need to write a known value to the state
 	// in any case.
 	workspaceSharing, err := fetchWorkspaceSharingValue(ctx, r.Client, orgID.String())
@@ -465,6 +503,13 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 	data.WorkspaceSharing = workspaceSharing
+
+	defaultOrgMemberRoles, diags := defaultOrgMemberRolesValueFromAPI(ctx, org.DefaultOrgMemberRoles)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.DefaultOrgMemberRoles = defaultOrgMemberRoles
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -488,11 +533,23 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		"new_description":  data.Description.ValueString(),
 		"new_icon":         data.Icon.ValueString(),
 	})
+
+	var defaultRolesPtr *[]string
+	if !data.DefaultOrgMemberRoles.IsNull() && !data.DefaultOrgMemberRoles.IsUnknown() {
+		var roles []string
+		resp.Diagnostics.Append(data.DefaultOrgMemberRoles.ElementsAs(ctx, &roles, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		defaultRolesPtr = &roles
+	}
+
 	org, err := r.Client.UpdateOrganization(ctx, orgID.String(), codersdk.UpdateOrganizationRequest{
-		Name:        data.Name.ValueString(),
-		DisplayName: data.DisplayName.ValueString(),
-		Description: data.Description.ValueStringPointer(),
-		Icon:        data.Icon.ValueStringPointer(),
+		Name:                  data.Name.ValueString(),
+		DisplayName:           data.DisplayName.ValueString(),
+		Description:           data.Description.ValueStringPointer(),
+		Icon:                  data.Icon.ValueStringPointer(),
+		DefaultOrgMemberRoles: defaultRolesPtr,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update organization %s, got error: %s", orgID, err))
@@ -578,6 +635,13 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 	data.WorkspaceSharing = workspaceSharing
+
+	defaultOrgMemberRoles, diags := defaultOrgMemberRolesValueFromAPI(ctx, org.DefaultOrgMemberRoles)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.DefaultOrgMemberRoles = defaultOrgMemberRoles
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -789,4 +853,14 @@ func isWorkspaceSharingExperimentOff(err error) bool {
 		}
 	}
 	return false
+}
+
+// defaultOrgMemberRolesValueFromAPI converts the API's []string into a
+// types.List[string]. A nil slice from an older server is treated as an
+// empty list so the attribute always has a known value.
+func defaultOrgMemberRolesValueFromAPI(ctx context.Context, roles []string) (types.List, diag.Diagnostics) {
+	if roles == nil {
+		roles = []string{}
+	}
+	return types.ListValueFrom(ctx, types.StringType, roles)
 }
