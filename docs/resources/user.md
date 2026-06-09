@@ -62,7 +62,7 @@ resource "coderd_user" "automation" {
 ### Optional
 
 - `email` (String) Email address of the user. Required unless `is_service_account` is `true`, in which case it must be omitted (service accounts have no email).
-- `is_service_account` (Boolean) Whether the user is a service account. Service accounts are admin-managed accounts that cannot log in interactively: they have no password or email and use `login_type` `none`. Unlike a regular `login_type = none` user, a service account does not consume a licensed user seat. This is immutable after creation.
+- `is_service_account` (Boolean) Whether the user is a service account. Service accounts are admin-managed accounts that cannot log in interactively: they have no password or email and use `login_type` `none`. Unlike a regular `login_type = none` user, a service account does not consume a licensed user seat. Changing this attribute forces replacement.
 - `login_type` (String) Type of login for the user. Valid types are `none`, `password`, `github`, and `oidc`.
 - `name` (String) Display name of the user. Defaults to username.
 - `password` (String, Sensitive) Password for the user. Required when `login_type` is `password`. Passwords are saved into the state as plain text and should only be used for testing purposes.

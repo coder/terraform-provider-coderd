@@ -128,7 +128,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Default:             booldefault.StaticBool(false),
 			},
 			"is_service_account": schema.BoolAttribute{
-				MarkdownDescription: "Whether the user is a service account. Service accounts are admin-managed accounts that cannot log in interactively: they have no password or email and use `login_type` `none`. Unlike a regular `login_type = none` user, a service account does not consume a licensed user seat. This is immutable after creation.",
+				MarkdownDescription: "Whether the user is a service account. Service accounts are admin-managed accounts that cannot log in interactively: they have no password or email and use `login_type` `none`. Unlike a regular `login_type = none` user, a service account does not consume a licensed user seat. Changing this attribute forces replacement.",
 				Computed:            true,
 				Optional:            true,
 				Default:             booldefault.StaticBool(false),
