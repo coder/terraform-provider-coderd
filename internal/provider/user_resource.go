@@ -89,6 +89,10 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				MarkdownDescription: "Email address of the user. Required unless `is_service_account` is `true`, in which case it must be omitted (service accounts have no email).",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
 			},
 			"roles": schema.SetAttribute{
 				MarkdownDescription: "Roles assigned to the user. Valid roles are `owner`, `template-admin`, `user-admin`, and `auditor`. If `null`, roles will not be managed by Terraform. This attribute must be null if the user is an OIDC user and role sync is configured",
@@ -129,7 +133,7 @@ func (r *UserResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				Optional:            true,
 				Default:             booldefault.StaticBool(false),
 				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplace(),
+					boolplanmodifier.RequiresReplaceIfConfigured(),
 				},
 			},
 		},
@@ -225,26 +229,15 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 		resp.Diagnostics.AddError("Data Error", "Password is only allowed when login_type is 'password'")
 		return
 	}
-	var user codersdk.User
-	if data.IsServiceAccount.ValueBool() {
-		// Service accounts have no email and use a dedicated endpoint that
-		// flags the account as `is_service_account` in the database.
-		user, err = client.CreateUserWithOrgs(ctx, codersdk.CreateUserRequestWithOrgs{
-			Username:        data.Username.ValueString(),
-			Name:            data.Name.ValueString(),
-			UserLoginType:   loginType,
-			OrganizationIDs: []uuid.UUID{me.OrganizationIDs[0]},
-			ServiceAccount:  true,
-		})
-	} else {
-		user, err = client.CreateUser(ctx, codersdk.CreateUserRequest{
-			Email:          data.Email.ValueString(),
-			Username:       data.Username.ValueString(),
-			Password:       data.Password.ValueString(),
-			UserLoginType:  loginType,
-			OrganizationID: me.OrganizationIDs[0],
-		})
-	}
+	user, err := client.CreateUserWithOrgs(ctx, codersdk.CreateUserRequestWithOrgs{
+		Email:           data.Email.ValueString(),
+		Username:        data.Username.ValueString(),
+		Name:            data.Name.ValueString(),
+		Password:        data.Password.ValueString(),
+		UserLoginType:   loginType,
+		OrganizationIDs: []uuid.UUID{me.OrganizationIDs[0]},
+		ServiceAccount:  data.IsServiceAccount.ValueBool(),
+	})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create user, got error: %s", err))
 		return

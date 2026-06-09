@@ -10,8 +10,10 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,7 +42,10 @@ func TestAccUserResource(t *testing.T) {
 	cfg3 := cfg2
 	cfg3.Name = ptr.Ref("Example New")
 
-	cfg4 := cfg3
+	cfgEmailChanged := cfg3
+	cfgEmailChanged.Email = ptr.Ref("example-new@coder.com")
+
+	cfg4 := cfgEmailChanged
 	cfg4.LoginType = ptr.Ref("github")
 	cfg4.Password = nil
 
@@ -97,6 +102,21 @@ func TestAccUserResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example New"),
+				),
+			},
+			// Email is immutable server-side, so changing it must replace the user
+			// instead of writing the planned value into state and drifting on refresh.
+			{
+				Config: cfgEmailChanged.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_user.test", plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example New"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", "example-new@coder.com"),
 				),
 			},
 			// Replace triggered
@@ -175,10 +195,18 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 		IsServiceAccount: ptr.Ref(true),
 	}
 
-	// Flipping is_service_account is immutable server-side (enforced by DB CHECK
-	// constraints), so the attribute carries RequiresReplace(). Turning it off
-	// makes this a regular user, which then requires an email/password.
-	cfgRegular := cfg
+	// Changing an unrelated attribute (name) on a service account exercises the
+	// UseStateForUnknown plan modifier on `email`: without it the planned value
+	// for `email` would be "(known after apply)" on every update, producing
+	// spurious plan churn for SAs (which have no email).
+	cfgRenamed := cfg
+	cfgRenamed.Name = ptr.Ref("Service Account v2")
+
+	// Flipping `is_service_account` explicitly from true to false is the
+	// supported way to "convert" an SA into a regular user; it is immutable
+	// server-side, so RequiresReplaceIfConfigured triggers a replacement when
+	// the value is set in config.
+	cfgRegular := cfgRenamed
 	cfgRegular.IsServiceAccount = ptr.Ref(false)
 	cfgRegular.Email = ptr.Ref("service-account@coder.com")
 	cfgRegular.LoginType = ptr.Ref("password")
@@ -210,8 +238,38 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"roles"},
 			},
-			// Toggling is_service_account must force a replacement, locking the
-			// immutability contract guaranteed by RequiresReplace().
+			// No-op after import: Coder returns an empty email for service accounts,
+			// while config omits email. Optional+Computed plus UseStateForUnknown
+			// must make that clean instead of producing a null-vs-empty-string diff.
+			{
+				Config: cfg.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "service-account"),
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", ""),
+				),
+			},
+			// Update-only step: changing `name` must not mark `email` as
+			// "(known after apply)" — the email attribute's UseStateForUnknown
+			// modifier preserves the prior state value across unrelated updates.
+			{
+				Config: cfgRenamed.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_user.test", plancheck.ResourceActionUpdate),
+						// Without UseStateForUnknown on `email`, this would be
+						// unknown and ExpectKnownValue would fail.
+						plancheck.ExpectKnownValue("coderd_user.test", tfjsonpath.New("email"), knownvalue.StringExact("")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Service Account v2"),
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", ""),
+				),
+			},
+			// Explicitly flipping is_service_account from true to false is the
+			// supported conversion path and must force replacement.
 			{
 				Config: cfgRegular.String(t),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -261,6 +319,11 @@ func TestAccUserResourceValidateConfig(t *testing.T) {
 	saWithPassword.IsServiceAccount = ptr.Ref(true)
 	saWithPassword.Password = ptr.Ref("SomeSecurePassword!")
 
+	saWithEmptyPassword := base
+	saWithEmptyPassword.Username = ptr.Ref("sa-empty-password")
+	saWithEmptyPassword.IsServiceAccount = ptr.Ref(true)
+	saWithEmptyPassword.Password = ptr.Ref("")
+
 	saWithLoginType := base
 	saWithLoginType.Username = ptr.Ref("sa-login")
 	saWithLoginType.IsServiceAccount = ptr.Ref(true)
@@ -281,6 +344,10 @@ func TestAccUserResourceValidateConfig(t *testing.T) {
 			},
 			{
 				Config:      saWithPassword.String(t),
+				ExpectError: regexp.MustCompile(`password.+must not be set`),
+			},
+			{
+				Config:      saWithEmptyPassword.String(t),
 				ExpectError: regexp.MustCompile(`password.+must not be set`),
 			},
 			{
