@@ -1357,27 +1357,27 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		Weeks:      reqs.Weeks,
 	}
 	return &codersdk.UpdateTemplateMeta{
-		Name:                           r.Name.ValueString(),
+		Name:                           r.Name.ValueStringPointer(),
 		DisplayName:                    r.DisplayName.ValueStringPointer(),
 		Description:                    r.Description.ValueStringPointer(),
 		Icon:                           r.Icon.ValueStringPointer(),
-		DefaultTTLMillis:               r.DefaultTTLMillis.ValueInt64(),
-		ActivityBumpMillis:             r.ActivityBumpMillis.ValueInt64(),
+		DefaultTTLMillis:               r.DefaultTTLMillis.ValueInt64Pointer(),
+		ActivityBumpMillis:             r.ActivityBumpMillis.ValueInt64Pointer(),
 		AutostopRequirement:            autoStop,
 		AutostartRequirement:           autoStart,
-		AllowUserCancelWorkspaceJobs:   r.AllowUserCancelWorkspaceJobs.ValueBool(),
-		AllowUserAutostart:             r.AllowUserAutostart.ValueBool(),
-		AllowUserAutostop:              r.AllowUserAutostop.ValueBool(),
-		FailureTTLMillis:               r.FailureTTLMillis.ValueInt64(),
-		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64(),
-		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64(),
-		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
+		AllowUserCancelWorkspaceJobs:   r.AllowUserCancelWorkspaceJobs.ValueBoolPointer(),
+		AllowUserAutostart:             r.AllowUserAutostart.ValueBoolPointer(),
+		AllowUserAutostop:              r.AllowUserAutostop.ValueBoolPointer(),
+		FailureTTLMillis:               r.FailureTTLMillis.ValueInt64Pointer(),
+		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64Pointer(),
+		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
+		RequireActiveVersion:           r.RequireActiveVersion.ValueBoolPointer(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
-		UseClassicParameterFlow:        ptr.Ref(r.UseClassicParameterFlow.ValueBool()),
-		// If we're managing ACL, we want to delete the everyone group
-		DisableEveryoneGroupAccess: !r.ACL.IsNull(),
+		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		// If we're managing ACL, we want to delete the everyone group.
+		DisableEveryoneGroupAccess: ptr.Ref(!r.ACL.IsNull()),
 	}
 }
 

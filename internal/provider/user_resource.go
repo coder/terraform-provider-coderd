@@ -261,11 +261,6 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user by ID, got error: %s", err))
 		return
 	}
-	if len(user.OrganizationIDs) < 1 {
-		resp.Diagnostics.AddError("Client Error", "User is not associated with any organizations")
-		return
-	}
-
 	data.Email = types.StringValue(user.Email)
 	data.Name = types.StringValue(user.Name)
 	data.Username = types.StringValue(user.Username)
@@ -282,7 +277,8 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	// The user-by-ID API returns deleted users if the authorized user has
 	// permission. It does not indicate whether the user is deleted or not.
 	// The user-by-username API will never return deleted users.
-	// So, we do another lookup by username.
+	// So, we do another lookup by username before validating OrganizationIDs,
+	// as deleted users may no longer have organization memberships.
 	userByName, err := client.User(ctx, data.Username.ValueString())
 	if err != nil {
 		if isNotFound(err) {
@@ -300,6 +296,11 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 			"The username %q has been reassigned to a new user not managed by this Terraform resource. Marking resource as deleted.",
 			user.Username))
 		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	if len(user.OrganizationIDs) < 1 {
+		resp.Diagnostics.AddError("Client Error", "User is not associated with any organizations")
 		return
 	}
 
