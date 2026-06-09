@@ -10,6 +10,7 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +50,7 @@ func TestAccUserDataSource(t *testing.T) {
 		resource.TestCheckResourceAttr("data.coderd_user.test", "roles.0", "auditor"),
 		resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "password"),
 		resource.TestCheckResourceAttr("data.coderd_user.test", "suspended", "false"),
+		resource.TestCheckResourceAttr("data.coderd_user.test", "is_service_account", "false"),
 	)
 	t.Run("UserByUsernameOk", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
@@ -124,6 +126,51 @@ func TestAccUserDataSource(t *testing.T) {
 				},
 			},
 		})
+	})
+}
+
+// TestAccUserDataSourceServiceAccount verifies the data source surfaces
+// is_service_account==true and an empty email for a service account. Service
+// accounts are a Premium feature, so a licensed deployment is required.
+func TestAccUserDataSourceServiceAccount(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "user_data_service_account_acc", integration.UseLicense)
+	firstUser, err := client.User(ctx, codersdk.Me)
+	require.NoError(t, err)
+	user, err := client.CreateUserWithOrgs(ctx, codersdk.CreateUserRequestWithOrgs{
+		Username:        "service-account",
+		Name:            "Service Account",
+		UserLoginType:   "none",
+		OrganizationIDs: []uuid.UUID{firstUser.OrganizationIDs[0]},
+		ServiceAccount:  true,
+	})
+	require.NoError(t, err)
+
+	cfg := testAccUserDataSourceConfig{
+		URL:      client.URL.String(),
+		Token:    client.SessionToken(),
+		Username: ptr.Ref(user.Username),
+	}
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.coderd_user.test", "username", "service-account"),
+					resource.TestCheckResourceAttr("data.coderd_user.test", "is_service_account", "true"),
+					// Service accounts have no email.
+					resource.TestCheckResourceAttr("data.coderd_user.test", "email", ""),
+					resource.TestCheckResourceAttr("data.coderd_user.test", "login_type", "none"),
+				),
+			},
+		},
 	})
 }
 

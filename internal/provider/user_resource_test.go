@@ -2,6 +2,7 @@ package provider
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
@@ -9,7 +10,10 @@ import (
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,7 +42,10 @@ func TestAccUserResource(t *testing.T) {
 	cfg3 := cfg2
 	cfg3.Name = ptr.Ref("Example New")
 
-	cfg4 := cfg3
+	cfgEmailChanged := cfg3
+	cfgEmailChanged.Email = ptr.Ref("example-new@coder.com")
+
+	cfg4 := cfgEmailChanged
 	cfg4.LoginType = ptr.Ref("github")
 	cfg4.Password = nil
 
@@ -95,6 +102,21 @@ func TestAccUserResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
 					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example New"),
+				),
+			},
+			// Email is immutable server-side, so changing it must replace the user
+			// instead of writing the planned value into state and drifting on refresh.
+			{
+				Config: cfgEmailChanged.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_user.test", plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "exampleNew"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Example New"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", "example-new@coder.com"),
 				),
 			},
 			// Replace triggered
@@ -155,17 +177,199 @@ func TestAccUserResource(t *testing.T) {
 	})
 }
 
+func TestAccUserResourceServiceAccount(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	// Service accounts are a Premium feature, so a licensed deployment is required.
+	client := integration.StartCoder(ctx, t, "user_service_account_acc", integration.UseLicense)
+
+	cfg := testAccUserResourceConfig{
+		URL:              client.URL.String(),
+		Token:            client.SessionToken(),
+		Username:         ptr.Ref("service-account"),
+		Name:             ptr.Ref("Service Account"),
+		Roles:            ptr.Ref([]string{"template-admin"}),
+		IsServiceAccount: ptr.Ref(true),
+	}
+
+	// Changing an unrelated attribute (name) on a service account exercises the
+	// UseStateForUnknown plan modifier on `email`: without it the planned value
+	// for `email` would be "(known after apply)" on every update, producing
+	// spurious plan churn for SAs (which have no email).
+	cfgRenamed := cfg
+	cfgRenamed.Name = ptr.Ref("Service Account v2")
+
+	// Flipping `is_service_account` explicitly from true to false is the
+	// supported way to "convert" an SA into a regular user; it is immutable
+	// server-side, so RequiresReplaceIfConfigured triggers a replacement when
+	// the value is set in config.
+	cfgRegular := cfgRenamed
+	cfgRegular.IsServiceAccount = ptr.Ref(false)
+	cfgRegular.Email = ptr.Ref("service-account@coder.com")
+	cfgRegular.LoginType = ptr.Ref("password")
+	cfgRegular.Password = ptr.Ref("SomeSecurePassword!")
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create and Read testing
+			{
+				Config: cfg.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "service-account"),
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Service Account"),
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "none"),
+					// Service accounts have no email.
+					resource.TestCheckResourceAttr("coderd_user.test", "email", ""),
+					resource.TestCheckResourceAttr("coderd_user.test", "roles.#", "1"),
+					resource.TestCheckTypeSetElemAttr("coderd_user.test", "roles.*", "template-admin"),
+				),
+			},
+			// Import by ID
+			{
+				ResourceName:            "coderd_user.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"roles"},
+			},
+			// No-op after import: Coder returns an empty email for service accounts,
+			// while config omits email. Optional+Computed plus UseStateForUnknown
+			// must make that clean instead of producing a null-vs-empty-string diff.
+			{
+				Config: cfg.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "username", "service-account"),
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", ""),
+				),
+			},
+			// Update-only step: changing `name` must not mark `email` as
+			// "(known after apply)" — the email attribute's UseStateForUnknown
+			// modifier preserves the prior state value across unrelated updates.
+			{
+				Config: cfgRenamed.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_user.test", plancheck.ResourceActionUpdate),
+						// Without UseStateForUnknown on `email`, this would be
+						// unknown and ExpectKnownValue would fail.
+						plancheck.ExpectKnownValue("coderd_user.test", tfjsonpath.New("email"), knownvalue.StringExact("")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "name", "Service Account v2"),
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "true"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", ""),
+				),
+			},
+			// Explicitly flipping is_service_account from true to false is the
+			// supported conversion path and must force replacement.
+			{
+				Config: cfgRegular.String(t),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_user.test", plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_user.test", "is_service_account", "false"),
+					resource.TestCheckResourceAttr("coderd_user.test", "email", "service-account@coder.com"),
+					resource.TestCheckResourceAttr("coderd_user.test", "login_type", "password"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccUserResourceValidateConfig exercises the plan-time validation around
+// the now-optional email and the service-account constraints. These are config
+// errors caught before any API call, so an unlicensed deployment is sufficient.
+func TestAccUserResourceValidateConfig(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "user_validate_acc")
+
+	base := testAccUserResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+	}
+
+	// Regular user (not a service account) must still provide an email, even
+	// though the attribute is now Optional in the schema.
+	noEmail := base
+	noEmail.Username = ptr.Ref("no-email")
+
+	// Service accounts must not carry an email, password, or non-none login_type.
+	saWithEmail := base
+	saWithEmail.Username = ptr.Ref("sa-email")
+	saWithEmail.IsServiceAccount = ptr.Ref(true)
+	saWithEmail.Email = ptr.Ref("sa@coder.com")
+
+	saWithPassword := base
+	saWithPassword.Username = ptr.Ref("sa-password")
+	saWithPassword.IsServiceAccount = ptr.Ref(true)
+	saWithPassword.Password = ptr.Ref("SomeSecurePassword!")
+
+	saWithEmptyPassword := base
+	saWithEmptyPassword.Username = ptr.Ref("sa-empty-password")
+	saWithEmptyPassword.IsServiceAccount = ptr.Ref(true)
+	saWithEmptyPassword.Password = ptr.Ref("")
+
+	saWithLoginType := base
+	saWithLoginType.Username = ptr.Ref("sa-login")
+	saWithLoginType.IsServiceAccount = ptr.Ref(true)
+	saWithLoginType.LoginType = ptr.Ref("password")
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      noEmail.String(t),
+				ExpectError: regexp.MustCompile(`email.+is required`),
+			},
+			{
+				Config:      saWithEmail.String(t),
+				ExpectError: regexp.MustCompile(`email.+must not be set`),
+			},
+			{
+				Config:      saWithPassword.String(t),
+				ExpectError: regexp.MustCompile(`password.+must not be set`),
+			},
+			{
+				Config:      saWithEmptyPassword.String(t),
+				ExpectError: regexp.MustCompile(`password.+must not be set`),
+			},
+			{
+				Config:      saWithLoginType.String(t),
+				ExpectError: regexp.MustCompile(`login_type.+must be`),
+			},
+		},
+	})
+}
+
 type testAccUserResourceConfig struct {
 	URL   string
 	Token string
 
-	Username  *string
-	Name      *string
-	Email     *string
-	Roles     *[]string
-	LoginType *string
-	Password  *string
-	Suspended *bool
+	Username         *string
+	Name             *string
+	Email            *string
+	Roles            *[]string
+	LoginType        *string
+	Password         *string
+	Suspended        *bool
+	IsServiceAccount *bool
 }
 
 func (c testAccUserResourceConfig) String(t *testing.T) string {
@@ -184,6 +388,7 @@ resource "coderd_user" "test" {
 	login_type = {{orNull .LoginType}}
 	password   = {{orNull .Password}}
 	suspended  = {{orNull .Suspended}}
+	is_service_account = {{orNull .IsServiceAccount}}
 }
 `
 	// Define template functions
