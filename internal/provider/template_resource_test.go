@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -1209,9 +1212,10 @@ resource "coderd_template" "test" {
 	versions = [
 	{{- range .Versions }}
 	{
-		name      = {{orNull .Name}}
-		directory = {{orNull .Directory}}
-		active    = {{orNull .Active}}
+		name         = {{orNull .Name}}
+		directory    = {{orNull .Directory}}
+		archive_path = {{orNull .ArchivePath}}
+		active       = {{orNull .Active}}
 
 		tf_vars = [
 			{{- range .TerraformVariables }}
@@ -1245,6 +1249,7 @@ type testAccTemplateVersionConfig struct {
 	Name               *string
 	Message            *string
 	Directory          *string
+	ArchivePath        *string
 	Active             *bool
 	TerraformVariables []testAccTemplateKeyValueConfig
 }
@@ -1643,6 +1648,72 @@ func TestReconcileVersionIDs(t *testing.T) {
 			cfgHasActiveVersion: false,
 			expectError:         true,
 		},
+		{
+			Name: "ArchiveHashMatching",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					DirectoryHash:      types.StringValue("archivehash123"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("archive-ver"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"archivehash123": {
+					{
+						ID:     aUUID,
+						Name:   "archive-ver",
+						TFVars: map[string]string{},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					DirectoryHash:      types.StringValue("archivehash123"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
+		{
+			Name: "ArchiveHashChanged",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					DirectoryHash:      types.StringValue("newhash456"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("archive-ver"),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"oldhash123": {
+					{
+						ID:     aUUID,
+						Name:   "archive-ver",
+						TFVars: map[string]string{},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("archive-ver"),
+					DirectoryHash:      types.StringValue("newhash456"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -1657,4 +1728,105 @@ func TestReconcileVersionIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAccArchiveUploadFlow(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	t.Run("TarArchive", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+
+		// Create a test file
+		testFile := filepath.Join(tmpDir, "template.tf")
+		err := os.WriteFile(testFile, []byte("resource \"null_resource\" \"test\" {}"), 0644)
+		require.NoError(t, err)
+
+		// Create a tar archive
+		tarPath := filepath.Join(tmpDir, "template.tar")
+		tarFile, err := os.Create(tarPath)
+		require.NoError(t, err)
+		defer tarFile.Close() //nolint:errcheck
+
+		tw := tar.NewWriter(tarFile)
+		defer tw.Close() //nolint:errcheck
+
+		fileInfo, err := os.Stat(testFile)
+		require.NoError(t, err)
+
+		header := &tar.Header{
+			Name: "template.tf",
+			Size: fileInfo.Size(),
+			Mode: 0644,
+		}
+		err = tw.WriteHeader(header)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(testFile)
+		require.NoError(t, err)
+		_, err = tw.Write(content)
+		require.NoError(t, err)
+
+		// Verify archive content type
+		ct, err := archiveContentType(tarPath)
+		require.NoError(t, err)
+		require.Equal(t, "application/x-tar", ct)
+
+		// Verify archive passes size validation
+		err = validateArchiveSize(tarPath)
+		require.NoError(t, err)
+
+		// Verify archive hash is consistent
+		hash1, err := computeArchiveHash(tarPath)
+		require.NoError(t, err)
+		hash2, err := computeArchiveHash(tarPath)
+		require.NoError(t, err)
+		require.Equal(t, hash1, hash2)
+	})
+
+	t.Run("ZipArchive", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+
+		// Create a test file
+		testFile := filepath.Join(tmpDir, "template.tf")
+		err := os.WriteFile(testFile, []byte("resource \"null_resource\" \"test\" {}"), 0644)
+		require.NoError(t, err)
+
+		// Create a zip archive
+		zipPath := filepath.Join(tmpDir, "template.zip")
+		zipFile, err := os.Create(zipPath)
+		require.NoError(t, err)
+		defer zipFile.Close() //nolint:errcheck
+
+		zw := zip.NewWriter(zipFile)
+		defer zw.Close() //nolint:errcheck
+
+		content, err := os.ReadFile(testFile)
+		require.NoError(t, err)
+
+		w, err := zw.Create("template.tf")
+		require.NoError(t, err)
+		_, err = w.Write(content)
+		require.NoError(t, err)
+
+		// Verify archive content type
+		ct, err := archiveContentType(zipPath)
+		require.NoError(t, err)
+		require.Equal(t, "application/zip", ct)
+
+		// Verify archive passes size validation
+		err = validateArchiveSize(zipPath)
+		require.NoError(t, err)
+
+		// Verify archive hash is consistent
+		hash1, err := computeArchiveHash(zipPath)
+		require.NoError(t, err)
+		hash2, err := computeArchiveHash(zipPath)
+		require.NoError(t, err)
+		require.Equal(t, hash1, hash2)
+	})
 }

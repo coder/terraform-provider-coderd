@@ -93,13 +93,11 @@ resource "coderd_template" "ubuntu-main" {
 <a id="nestedatt--versions"></a>
 ### Nested Schema for `versions`
 
-Required:
-
-- `directory` (String) A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version.
-
 Optional:
 
 - `active` (Boolean) Whether this version is the active version of the template. Only one version can be active at a time.
+- `archive_path` (String) A path to a `.tar` or `.zip` archive file to upload as the template version source. Mutually exclusive with `directory`. Changes in the archive contents will trigger the creation of a new template version. The archive must not exceed 100 MiB (the Coder server upload limit).
+- `directory` (String) A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Conflicts with `archive_path`.
 - `message` (String) A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.
 - `name` (String) The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.
 - `provisioner_tags` (Attributes Set) Provisioner tags for the template version. (see [below for nested schema](#nestedatt--versions--provisioner_tags))
