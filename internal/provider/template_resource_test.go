@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
@@ -1070,6 +1071,108 @@ resource "coderd_template" "sample" {
 	})
 }
 
+func TestAccTemplateResourceSensitiveTFVarsDeferredReplan(t *testing.T) {
+	t.Parallel()
+
+	// Changing the sensitive tf_var forces random_uuid to be replaced, which
+	// makes the version name unknown during planning and triggers a deferred
+	// re-plan during apply. Before PlanModifyList started patching the original
+	// attr.Values instead of rebuilding the whole list, this failed with:
+	// "Provider produced inconsistent final plan ... inconsistent values for
+	// sensitive attribute".
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+variable "secret_one" {
+	type      = string
+	sensitive = true
+	default   = %q
+}
+
+locals {
+	my_secrets = {
+		normal = "hi"
+		secret = var.secret_one
+	}
+}
+
+resource "random_uuid" "uuid" {
+	keepers = local.my_secrets
+}
+
+resource "coderd_template" "test" {
+	name = "sensitive-template"
+
+	versions = [{
+		name      = random_uuid.uuid.result
+		directory = %q
+		active    = true
+		tf_vars = [for k, v in local.my_secrets : {
+			name  = k
+			value = tostring(v)
+		}]
+	}]
+}
+`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_sensitive_tfvars_acc")
+
+	exTemplateOne := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
+	cfg1 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "no", exTemplateOne)
+	cfg2 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "yes", exTemplateOne)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:   func() { testAccPreCheck(t) },
+		IsUnitTest: true,
+		// Terraform 1.0 panics while formatting plans that contain marked nested
+		// values in this scenario ("value is marked, so must be unmarked first").
+		// The provider regression is still covered on Terraform 1.1+.
+		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+			tfversion.SkipBelow(tfversion.Version1_1_0),
+		},
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"random": {
+				Source:            "hashicorp/random",
+				VersionConstraint: "~> 3.7",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: cfg1,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+						"name":           regexp.MustCompile(".+"),
+						"id":             regexp.MustCompile(".+"),
+						"directory_hash": regexp.MustCompile(".+"),
+					}),
+					testAccCheckNumTemplateVersions(ctx, client, 1),
+				),
+			},
+			{
+				Config: cfg2,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+						"name":           regexp.MustCompile(".+"),
+						"id":             regexp.MustCompile(".+"),
+						"directory_hash": regexp.MustCompile(".+"),
+					}),
+					testAccCheckNumTemplateVersions(ctx, client, 2),
+				),
+			},
+		},
+	})
+}
+
 type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string
@@ -1439,7 +1542,65 @@ func TestReconcileVersionIDs(t *testing.T) {
 			},
 		},
 		{
+			// Config name is null (auto-generated), plan name is unknown.
+			// Should backfill name from state since the user didn't set one.
 			Name: "UnknownUsesStateInOrder",
+			planVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+				{
+					Name:               types.StringUnknown(),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 NewUUIDUnknown(),
+					TerraformVariables: []Variable{},
+				},
+			},
+			configVersions: []TemplateVersion{
+				{
+					Name: types.StringValue("foo"),
+				},
+				{
+					Name: types.StringNull(),
+				},
+			},
+			inputState: map[string][]PreviousTemplateVersion{
+				"aaa": {
+					{
+						ID:     aUUID,
+						Name:   "qux",
+						TFVars: map[string]string{},
+					},
+					{
+						ID:     bUUID,
+						Name:   "baz",
+						TFVars: map[string]string{},
+					},
+				},
+			},
+			expectedVersions: []TemplateVersion{
+				{
+					Name:               types.StringValue("foo"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(aUUID),
+					TerraformVariables: []Variable{},
+				},
+				{
+					Name:               types.StringValue("baz"),
+					DirectoryHash:      types.StringValue("aaa"),
+					ID:                 UUIDValue(bUUID),
+					TerraformVariables: []Variable{},
+				},
+			},
+		},
+		{
+			// Config name is non-null (e.g. random_uuid.result), plan name is unknown
+			// because the upstream resource is being recreated.
+			// Should NOT backfill name — leave it unknown to resolve after apply.
+			Name: "UnknownNonNullConfigNameNotBackfilled",
 			planVersions: []TemplateVersion{
 				{
 					Name:               types.StringValue("foo"),
@@ -1484,7 +1645,7 @@ func TestReconcileVersionIDs(t *testing.T) {
 					TerraformVariables: []Variable{},
 				},
 				{
-					Name:               types.StringValue("baz"),
+					Name:               types.StringUnknown(),
 					DirectoryHash:      types.StringValue("aaa"),
 					ID:                 UUIDValue(bUUID),
 					TerraformVariables: []Variable{},
