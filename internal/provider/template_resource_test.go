@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
@@ -1077,8 +1078,14 @@ resource "coderd_template" "test" {
 	cfg2 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "yes", exTemplateOne)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		IsUnitTest:               true,
+		PreCheck:   func() { testAccPreCheck(t) },
+		IsUnitTest: true,
+		// Terraform 1.0 panics while formatting plans that contain marked nested
+		// values in this scenario ("value is marked, so must be unmarked first").
+		// The provider regression is still covered on Terraform 1.1+.
+		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+			tfversion.SkipBelow(tfversion.Version1_1_0),
+		},
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		ExternalProviders: map[string]resource.ExternalProvider{
 			"random": {
