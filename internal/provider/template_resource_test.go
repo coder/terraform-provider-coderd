@@ -1019,6 +1019,102 @@ resource "coderd_template" "sample" {
 	})
 }
 
+func TestAccTemplateResourceSensitiveTFVarsDeferredReplan(t *testing.T) {
+	t.Parallel()
+
+	// Changing the sensitive tf_var forces random_uuid to be replaced, which
+	// makes the version name unknown during planning and triggers a deferred
+	// re-plan during apply. Before PlanModifyList started patching the original
+	// attr.Values instead of rebuilding the whole list, this failed with:
+	// "Provider produced inconsistent final plan ... inconsistent values for
+	// sensitive attribute".
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+variable "secret_one" {
+	type      = string
+	sensitive = true
+	default   = %q
+}
+
+locals {
+	my_secrets = {
+		normal = "hi"
+		secret = var.secret_one
+	}
+}
+
+resource "random_uuid" "uuid" {
+	keepers = local.my_secrets
+}
+
+resource "coderd_template" "test" {
+	name = "sensitive-template"
+
+	versions = [{
+		name      = random_uuid.uuid.result
+		directory = %q
+		active    = true
+		tf_vars = [for k, v in local.my_secrets : {
+			name  = k
+			value = tostring(v)
+		}]
+	}]
+}
+`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_sensitive_tfvars_acc")
+
+	exTemplateOne := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
+	cfg1 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "no", exTemplateOne)
+	cfg2 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "yes", exTemplateOne)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		ExternalProviders: map[string]resource.ExternalProvider{
+			"random": {
+				Source:            "hashicorp/random",
+				VersionConstraint: "~> 3.7",
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: cfg1,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+						"name":           regexp.MustCompile(".+"),
+						"id":             regexp.MustCompile(".+"),
+						"directory_hash": regexp.MustCompile(".+"),
+					}),
+					testAccCheckNumTemplateVersions(ctx, client, 1),
+				),
+			},
+			{
+				Config: cfg2,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestMatchTypeSetElemNestedAttrs("coderd_template.test", "versions.*", map[string]*regexp.Regexp{
+						"name":           regexp.MustCompile(".+"),
+						"id":             regexp.MustCompile(".+"),
+						"directory_hash": regexp.MustCompile(".+"),
+					}),
+					testAccCheckNumTemplateVersions(ctx, client, 2),
+				),
+			},
+		},
+	})
+}
+
 type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string

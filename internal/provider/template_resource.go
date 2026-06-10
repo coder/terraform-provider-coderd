@@ -1049,7 +1049,12 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		return
 	}
 
-	// Now patch the original plan elements with only the fields we changed
+	// Patch the original plan elements instead of rebuilding the entire list
+	// from planVersions. Re-encoding the whole list with ListValueFrom() strips
+	// Terraform Core's cty-level marks from nested values (for example sensitive
+	// tf_vars entries), which can surface later as an inconsistent final plan
+	// during deferred re-plans. Keeping the original attr.Values intact preserves
+	// those marks on untouched fields.
 	planElements := req.PlanValue.Elements()
 	newElements := make([]attr.Value, len(planElements))
 
@@ -1060,6 +1065,8 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 			return
 		}
 
+		// types.Object.Attributes returns a copy of the attribute map, so it is
+		// safe to mutate attrs before constructing the replacement object.
 		attrs := obj.Attributes()
 		attrTypes := obj.AttributeTypes(ctx)
 
