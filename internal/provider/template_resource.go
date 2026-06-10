@@ -165,8 +165,8 @@ type TemplateVersion struct {
 	Directory          types.String `tfsdk:"directory"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
-	TerraformVariables []Variable   `tfsdk:"tf_vars"`
-	ProvisionerTags    []Variable   `tfsdk:"provisioner_tags"`
+	TerraformVariables types.Set    `tfsdk:"tf_vars"`
+	ProvisionerTags    types.Set    `tfsdk:"provisioner_tags"`
 }
 
 type Versions []TemplateVersion
@@ -194,6 +194,41 @@ var variableNestedObject = schema.NestedAttributeObject{
 			Required: true,
 		},
 	},
+}
+
+// variableSetElemType is the attr.Type for each element in a Set of Variable.
+var variableSetElemType = types.ObjectType{
+	AttrTypes: map[string]attr.Type{
+		"name":  types.StringType,
+		"value": types.StringType,
+	},
+}
+
+// variablesFromSet extracts a []Variable from a types.Set. It returns nil when
+// the set is null or unknown, so callers must treat those states as "no known
+// variables" rather than relying on the slice contents.
+func variablesFromSet(ctx context.Context, s types.Set) ([]Variable, diag.Diagnostics) {
+	if s.IsNull() || s.IsUnknown() {
+		return nil, nil
+	}
+	var vars []Variable
+	diags := s.ElementsAs(ctx, &vars, false)
+	return vars, diags
+}
+
+// variablesToSet converts a []Variable into a types.Set. A nil slice becomes a
+// null set so it round-trips through variablesFromSet.
+func variablesToSet(ctx context.Context, vars []Variable) (types.Set, diag.Diagnostics) {
+	if vars == nil {
+		return types.SetNull(variableSetElemType), nil
+	}
+	return types.SetValueFrom(ctx, variableSetElemType, vars)
+}
+
+// emptyVariableSet returns an empty (non-null, known) types.Set with the
+// correct element type.
+func emptyVariableSet() types.Set {
+	return types.SetValueMust(variableSetElemType, []attr.Value{})
 }
 
 type ACL struct {
@@ -1237,14 +1272,22 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
 		"vars": vars,
 	})
-	for _, variable := range req.Version.TerraformVariables {
+	tfVars, diags := variablesFromSet(ctx, req.Version.TerraformVariables)
+	if diags.HasError() {
+		return nil, logs, fmt.Errorf("failed to extract terraform variables: %s", diags.Errors()[0].Detail())
+	}
+	for _, variable := range tfVars {
 		vars = append(vars, codersdk.VariableValue{
 			Name:  variable.Name.ValueString(),
 			Value: variable.Value.ValueString(),
 		})
 	}
-	provTags := make(map[string]string, len(req.Version.ProvisionerTags))
-	for _, provisionerTag := range req.Version.ProvisionerTags {
+	provTagVars, diags := variablesFromSet(ctx, req.Version.ProvisionerTags)
+	if diags.HasError() {
+		return nil, logs, fmt.Errorf("failed to extract provisioner tags: %s", diags.Errors()[0].Detail())
+	}
+	provTags := make(map[string]string, len(provTagVars))
+	for _, provisionerTag := range provTagVars {
 		provTags[provisionerTag.Name.ValueString()] = provisionerTag.Value.ValueString()
 	}
 	tmplVerReq := codersdk.CreateTemplateVersionRequest{
@@ -1482,8 +1525,13 @@ func (v Versions) setPrivateState(ctx context.Context, ps privateState) (diags d
 	lv := make(LastVersionsByHash)
 	for _, version := range v {
 		vbh, ok := lv[version.DirectoryHash.ValueString()]
-		tfVars := make(map[string]string, len(version.TerraformVariables))
-		for _, tfVar := range version.TerraformVariables {
+		versionTfVars, varDiags := variablesFromSet(ctx, version.TerraformVariables)
+		if varDiags.HasError() {
+			diags.Append(varDiags...)
+			return diags
+		}
+		tfVars := make(map[string]string, len(versionTfVars))
+		for _, tfVar := range versionTfVars {
 			tfVars[tfVar.Name.ValueString()] = tfVar.Value.ValueString()
 		}
 		// Store the IDs and names of all versions with the same directory hash,
@@ -1627,7 +1675,13 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 			if prev.TFVars == nil {
 				return true
 			}
-			for _, tfVar := range planned.TerraformVariables {
+			// If the planned set is unknown we cannot compare values, so assume
+			// the variables changed and let a new version be created.
+			if planned.TerraformVariables.IsUnknown() {
+				return true
+			}
+			plannedVars, _ := variablesFromSet(context.Background(), planned.TerraformVariables)
+			for _, tfVar := range plannedVars {
 				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
 					return true
 				}
