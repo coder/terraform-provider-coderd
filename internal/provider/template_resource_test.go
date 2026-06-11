@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
@@ -1179,6 +1180,91 @@ resource "coderd_template" "test" {
 						"directory_hash": regexp.MustCompile(".+"),
 					}),
 					testAccCheckNumTemplateVersions(ctx, client, 2),
+				),
+			},
+		},
+	})
+}
+
+// TestAccTemplateResourceTFVarsFromVariable reproduces issue #305: tf_vars and
+// provisioner_tags supplied through required input variables (the equivalent
+// of `terraform plan -var-file=...`) are unknown while Terraform's validate
+// walk runs at the start of plan and apply, because the validate walk
+// evaluates input variables without values as unknown. With []Variable struct
+// fields this failed with "Value Conversion Error ... Path: [0].tf_vars"
+// before the provider was even configured. The variables must not have
+// defaults; a default would make them known during the validate walk and skip
+// the regression entirely. The two variables deliberately use different type
+// constraints, list(object) and list(map(string)), to cover both input shapes
+// from the original reports.
+func TestAccTemplateResourceTFVarsFromVariable(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+variable "template_variables" {
+	type = list(object({
+		name = string,
+		value = any
+	}))
+}
+
+variable "provisioner_tags" {
+	type = list(map(string))
+}
+
+resource "coderd_template" "test" {
+	name = "tf-vars-from-variable"
+
+	versions = [{
+		directory        = %q
+		active           = true
+		tf_vars          = var.template_variables
+		provisioner_tags = var.provisioner_tags
+	}]
+}
+`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_tfvars_from_var_acc")
+
+	exTemplateOne := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
+	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), exTemplateOne)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				ConfigVariables: config.Variables{
+					"template_variables": config.ListVariable(
+						config.MapVariable(map[string]config.Variable{
+							"name":  config.StringVariable("name"),
+							"value": config.StringVariable("world"),
+						}),
+					),
+					"provisioner_tags": config.ListVariable(),
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.tf_vars.#", "1"),
+					resource.TestCheckTypeSetElemNestedAttrs("coderd_template.test", "versions.0.tf_vars.*", map[string]string{
+						"name":  "name",
+						"value": "world",
+					}),
+					testAccCheckNumTemplateVersions(ctx, client, 1),
 				),
 			},
 		},
