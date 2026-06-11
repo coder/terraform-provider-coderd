@@ -1680,7 +1680,18 @@ func tfVariablesChanged(prevs []PreviousTemplateVersion, planned *TemplateVersio
 			if planned.TerraformVariables.IsUnknown() {
 				return true
 			}
-			plannedVars, _ := variablesFromSet(context.Background(), planned.TerraformVariables)
+			plannedVars, diags := variablesFromSet(context.Background(), planned.TerraformVariables)
+			// If we can't decode the planned variables, fail toward creating a
+			// new version rather than silently reusing a stale one.
+			if diags.HasError() {
+				return true
+			}
+			// A subset comparison alone would miss removed variables (a planned
+			// strict subset of prev passes every check), so compare counts
+			// first. This also covers a null set: nil plannedVars has len 0.
+			if len(plannedVars) != len(prev.TFVars) {
+				return true
+			}
 			for _, tfVar := range plannedVars {
 				if prev.TFVars[tfVar.Name.ValueString()] != tfVar.Value.ValueString() {
 					return true
