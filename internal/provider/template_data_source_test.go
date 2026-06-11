@@ -35,12 +35,12 @@ func TestAccTemplateDataSource(t *testing.T) {
 			Name:      types.StringValue("main"),
 			Message:   types.StringValue("Initial commit"),
 			Directory: types.StringValue("../../integration/template-test/example-template/"),
-			TerraformVariables: []Variable{
+			TerraformVariables: mustVariablesToSet([]Variable{
 				{
 					Name:  types.StringValue("name"),
 					Value: types.StringValue("world"),
 				},
-			},
+			}),
 		},
 	})
 	require.NoError(t, err)
