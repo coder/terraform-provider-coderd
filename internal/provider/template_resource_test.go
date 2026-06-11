@@ -1194,7 +1194,9 @@ resource "coderd_template" "test" {
 // fields this failed with "Value Conversion Error ... Path: [0].tf_vars"
 // before the provider was even configured. The variables must not have
 // defaults; a default would make them known during the validate walk and skip
-// the regression entirely.
+// the regression entirely. The two variables deliberately use different type
+// constraints, list(object) and list(map(string)), to cover both input shapes
+// from the original reports.
 func TestAccTemplateResourceTFVarsFromVariable(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -1208,7 +1210,10 @@ provider coderd {
 }
 
 variable "template_variables" {
-	type = list(map(string))
+	type = list(object({
+		name = string,
+		value = any
+	}))
 }
 
 variable "provisioner_tags" {
