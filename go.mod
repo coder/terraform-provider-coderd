@@ -7,7 +7,7 @@ require (
 	github.com/coder/coder/v2 v2.34.1
 	github.com/coder/retry v1.5.1
 	github.com/coder/serpent v0.15.0
-	github.com/coder/websocket v1.8.14
+	github.com/coder/websocket v1.8.15
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
 	github.com/google/uuid v1.6.0
