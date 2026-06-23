@@ -1024,6 +1024,9 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 
 func TestAccTemplateResourceVariables(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 	cfg := `
 provider coderd {
 	url   = %q
@@ -1085,6 +1088,9 @@ resource "coderd_template" "sample" {
 
 func TestAccTemplateResourceSensitiveTFVarsDeferredReplan(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	// Changing the sensitive tf_var forces random_uuid to be replaced, which
 	// makes the version name unknown during planning and triggers a deferred
