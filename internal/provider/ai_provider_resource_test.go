@@ -55,14 +55,14 @@ func TestAccAIProviderResource(t *testing.T) {
 			{
 				Config: cfg1.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.openai", "name", "openai-acc"),
-					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg1.OpenAIKey)),
-					resource.TestCheckNoResourceAttr("coderd_experimental_ai_provider.openai", "api_key_wo"),
-					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.bedrock", "settings.bedrock.region", "us-east-1"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "name", "openai-acc"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg1.OpenAIKey)),
+					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_wo"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-east-1"),
 				),
 			},
 			{
-				ResourceName:            "coderd_experimental_ai_provider.openai",
+				ResourceName:            "coderd_ai_provider.openai",
 				ImportState:             true,
 				ImportStateId:           "openai-acc",
 				ImportStateVerify:       true,
@@ -71,14 +71,14 @@ func TestAccAIProviderResource(t *testing.T) {
 			{
 				Config: cfg2.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.openai", "api_key_wo_version", "2"),
-					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg2.OpenAIKey)),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_wo_version", "2"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg2.OpenAIKey)),
 				),
 			},
 			{
 				Config: cfg3.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
 				),
 			},
 		},
@@ -101,18 +101,18 @@ provider "coderd" {
   token = "{{.Token}}"
 }
 
-resource "coderd_experimental_ai_provider" "openai" {
+resource "coderd_ai_provider" "openai" {
   type         = "openai"
   name         = "openai-acc"
   display_name = "OpenAI Acceptance"
   enabled      = true
-  base_url     = "https://api.openai.com"
+  base_url     = "https://api.openai.com/v1"
 
   api_key_wo         = "{{.OpenAIKey}}"
   api_key_wo_version = {{.OpenAIKeyVersion}}
 }
 
-resource "coderd_experimental_ai_provider" "bedrock" {
+resource "coderd_ai_provider" "bedrock" {
   type         = "bedrock"
   name         = "aws-bedrock-acc"
   display_name = "AWS Bedrock Acceptance"
@@ -141,20 +141,20 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 		wantError string
 	}{
 		"api key requires version": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type       = "openai"
   name       = "openai-test"
-  base_url   = "https://api.openai.com"
+  base_url   = "https://api.openai.com/v1"
   api_key_wo = "sk-test"
 }
 `,
 			wantError: `api_key_wo_version`,
 		},
 		"api key cannot be empty": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type               = "openai"
   name               = "openai-test"
-  base_url           = "https://api.openai.com"
+  base_url           = "https://api.openai.com/v1"
   api_key_wo         = ""
   api_key_wo_version = 1
 }
@@ -162,7 +162,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: `string length must be at least 1`,
 		},
 		"bedrock known config requires region or credentials": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://example.com"
@@ -175,7 +175,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: `Missing Bedrock Settings`,
 		},
 		"bedrock access key requires secret": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
@@ -191,7 +191,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: `access_key_secret_wo`,
 		},
 		"bedrock secret requires version": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
@@ -207,7 +207,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: `credentials_wo_version`,
 		},
 		"api key rejected for copilot": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type               = "copilot"
   name               = "copilot-test"
   base_url           = "https://api.githubcopilot.com"
@@ -218,10 +218,10 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: "must not be configured when `type` is `copilot`",
 		},
 		"settings.bedrock rejected for openai": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type     = "openai"
   name     = "openai-test"
-  base_url = "https://api.openai.com"
+  base_url = "https://api.openai.com/v1"
 
   settings = {
     bedrock = {
@@ -233,7 +233,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: "only valid when `type` is `anthropic` or `bedrock`",
 		},
 		"invalid base url": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type     = "openai"
   name     = "openai-test"
   base_url = "not-a-url"
@@ -242,7 +242,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: `Invalid Base URL`,
 		},
 		"api key rejected for anthropic with bedrock settings": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type               = "anthropic"
   name               = "anthropic-test"
   base_url           = "https://api.anthropic.com"
@@ -259,10 +259,10 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 			wantError: "settings.bedrock",
 		},
 		"empty settings rejected for non-bedrock": {
-			body: `resource "coderd_experimental_ai_provider" "test" {
+			body: `resource "coderd_ai_provider" "test" {
   type     = "openai"
   name     = "openai-test"
-  base_url = "https://api.openai.com"
+  base_url = "https://api.openai.com/v1"
 
   settings = {}
 }
@@ -313,7 +313,7 @@ func TestAIProviderResourceValidationDefersUnknownBedrockConfig(t *testing.T) {
   type = string
 }
 
-resource "coderd_experimental_ai_provider" "test" {
+resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = var.base_url
@@ -336,7 +336,7 @@ variable "secret" {
   type = string
 }
 
-resource "coderd_experimental_ai_provider" "test" {
+resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://example.com"
@@ -360,7 +360,7 @@ resource "coderd_experimental_ai_provider" "test" {
   type = string
 }
 
-resource "coderd_experimental_ai_provider" "test" {
+resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://example.com"
@@ -385,7 +385,7 @@ resource "coderd_experimental_ai_provider" "test" {
   })
 }
 
-resource "coderd_experimental_ai_provider" "test" {
+resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://example.com"
@@ -408,7 +408,7 @@ resource "coderd_experimental_ai_provider" "test" {
   })
 }
 
-resource "coderd_experimental_ai_provider" "test" {
+resource "coderd_ai_provider" "test" {
   type     = "bedrock"
   name     = "bedrock-test"
   base_url = "https://example.com"
@@ -563,7 +563,7 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 	state := AIProviderResourceModel{
 		DisplayName:     types.StringValue("OpenAI"),
 		Enabled:         types.BoolValue(true),
-		BaseURL:         types.StringValue("https://api.openai.com"),
+		BaseURL:         types.StringValue("https://api.openai.com/v1"),
 		APIKeyWOVersion: types.Int64Value(1),
 	}
 

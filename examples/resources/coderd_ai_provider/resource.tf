@@ -1,4 +1,4 @@
-resource "coderd_experimental_ai_provider" "bedrock" {
+resource "coderd_ai_provider" "bedrock" {
   type         = "bedrock"
   name         = "aws-bedrock"
   display_name = "AWS Bedrock"
@@ -19,12 +19,12 @@ resource "coderd_experimental_ai_provider" "bedrock" {
   }
 }
 
-resource "coderd_experimental_ai_provider" "openai" {
+resource "coderd_ai_provider" "openai" {
   type         = "openai"
   name         = "openai"
   display_name = "OpenAI"
   enabled      = true
-  base_url     = "https://api.openai.com"
+  base_url     = "https://api.openai.com/v1"
 
   api_key_wo         = var.openai_api_key
   api_key_wo_version = 1

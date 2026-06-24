@@ -28,6 +28,7 @@ var (
 	_ resource.Resource                   = &AIProviderResource{}
 	_ resource.ResourceWithImportState    = &AIProviderResource{}
 	_ resource.ResourceWithValidateConfig = &AIProviderResource{}
+	_ resource.ResourceWithModifyPlan     = &AIProviderResource{}
 
 	_ planmodifier.String = bedrockRegionPlanModifier{}
 )
@@ -69,14 +70,22 @@ type AIProviderBedrockSettingsModel struct {
 }
 
 func (r *AIProviderResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_experimental_ai_provider"
+	resp.TypeName = req.ProviderTypeName + "_ai_provider"
+}
+
+func (r *AIProviderResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	resp.Diagnostics.AddWarning(
+		"Experimental Resource",
+		"coderd_ai_provider is experimental. Changes are expected, and it is not recommended for production use.",
+	)
 }
 
 func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Experimental Coder AI provider configuration.\n\n" +
-			"`_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): " +
+		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
+			"-> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): " +
 			"their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.\n\n" +
+			"Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.\n\n" +
 			"For `type = \"bedrock\"`, omit `settings.bedrock.access_key_wo` and `settings.bedrock.access_key_secret_wo` to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -118,7 +127,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				},
 			},
 			"display_name": schema.StringAttribute{
-				MarkdownDescription: "Display name shown in Coder. If omitted, Coder returns the provider name.",
+				MarkdownDescription: "Display name shown in Coder. If omitted, defaults to the provider name.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -286,6 +295,17 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 		return
 	}
 	providerType := codersdk.AIProviderType(data.Type.ValueString())
+
+	isOpenAILike := providerType == codersdk.AIProviderTypeOpenAI || providerType == codersdk.AIProviderTypeOpenAICompat
+	if parsed, err := url.Parse(strings.TrimSpace(baseURL)); baseURLKnown && isOpenAILike && err == nil && strings.Trim(parsed.Path, "/") == "" {
+		resp.Diagnostics.AddAttributeWarning(
+			path.Root("base_url"),
+			"Base URL May Be Missing API Version",
+			"`base_url` has no path segment. Coder sends requests to `<base_url>/chat/completions` without adding a "+
+				"version prefix such as `/v1`, so a bare host targets `/chat/completions` at the root. Most "+
+				"OpenAI-compatible endpoints require a version path, for example `https://api.openai.com/v1`.",
+		)
+	}
 
 	if !data.APIKeyWO.IsNull() && !data.APIKeyWO.IsUnknown() {
 		switch {
