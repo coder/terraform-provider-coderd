@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -27,6 +28,8 @@ var (
 	_ resource.Resource                   = &AIProviderResource{}
 	_ resource.ResourceWithImportState    = &AIProviderResource{}
 	_ resource.ResourceWithValidateConfig = &AIProviderResource{}
+
+	_ planmodifier.String = bedrockRegionPlanModifier{}
 )
 
 func NewAIProviderResource() resource.Resource {
@@ -162,6 +165,9 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								MarkdownDescription: "AWS region for Bedrock. If omitted, derived from the canonical Bedrock `base_url` attribute.",
 								Optional:            true,
 								Computed:            true,
+								PlanModifiers: []planmodifier.String{
+									bedrockRegionPlanModifier{},
+								},
 							},
 							"model": schema.StringAttribute{
 								MarkdownDescription: "Primary Bedrock model identifier.",
@@ -214,6 +220,9 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 			"created_at": schema.Int64Attribute{
 				MarkdownDescription: "Creation timestamp as Unix seconds.",
 				Computed:            true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"updated_at": schema.Int64Attribute{
 				MarkdownDescription: "Last update timestamp as Unix seconds.",
@@ -582,6 +591,8 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 		APIKeyWOVersion: m.APIKeyWOVersion,
 		APIKeyMasked:    types.StringNull(),
 	}
+	// This resource manages a single key and replaces all keys on rotation, so
+	// len(APIKeys) is always 0 or 1; index 0 is the key we manage.
 	if len(provider.APIKeys) > 0 {
 		out.APIKeyMasked = types.StringValue(provider.APIKeys[0].Masked)
 	}
@@ -628,6 +639,46 @@ func parseBedrockRegionFromBaseURL(baseURL string) string {
 		return ""
 	}
 	return strings.ToLower(match[1])
+}
+
+// bedrockRegionPlanModifier derives the planned Bedrock region from base_url
+// when region is not explicitly configured.
+type bedrockRegionPlanModifier struct{}
+
+func (bedrockRegionPlanModifier) Description(_ context.Context) string {
+	return "Derives the Bedrock region from base_url when region is not explicitly set."
+}
+
+func (m bedrockRegionPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (bedrockRegionPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	// User set region explicitly: keep their value.
+	if !req.ConfigValue.IsNull() && !req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	var baseURL types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("base_url"), &baseURL)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// base_url not yet known: region resolves after apply.
+	if baseURL.IsUnknown() {
+		resp.PlanValue = types.StringUnknown()
+		return
+	}
+	// Canonical Bedrock URL: derive the region so plan matches apply.
+	if region := parseBedrockRegionFromBaseURL(baseURL.ValueString()); region != "" {
+		resp.PlanValue = types.StringValue(region)
+		return
+	}
+	// Otherwise the region is stable across this change: preserve prior state.
+	if !req.StateValue.IsNull() {
+		resp.PlanValue = req.StateValue
+	}
 }
 
 func validateAIProviderBaseURL(addError func(path.Path, string, string), attrPath path.Path, raw string) {

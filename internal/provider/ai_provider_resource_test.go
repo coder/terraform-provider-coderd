@@ -37,10 +37,14 @@ func TestAccAIProviderResource(t *testing.T) {
 		Token:            client.SessionToken(),
 		OpenAIKey:        "sk-test-primary-000000",
 		OpenAIKeyVersion: 1,
+		BedrockBaseURL:   "https://bedrock-runtime.us-east-1.amazonaws.com",
 	}
 	cfg2 := cfg1
 	cfg2.OpenAIKey = "sk-test-primary-111111"
 	cfg2.OpenAIKeyVersion = 2
+	// Changing base_url to a different region must re-derive settings.bedrock.region.
+	cfg3 := cfg2
+	cfg3.BedrockBaseURL = "https://bedrock-runtime.us-west-2.amazonaws.com"
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -71,6 +75,12 @@ func TestAccAIProviderResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg2.OpenAIKey)),
 				),
 			},
+			{
+				Config: cfg3.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_experimental_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
+				),
+			},
 		},
 	})
 }
@@ -80,6 +90,7 @@ type testAccAIProviderResourceConfig struct {
 	Token            string
 	OpenAIKey        string
 	OpenAIKeyVersion int
+	BedrockBaseURL   string
 }
 
 func (c testAccAIProviderResourceConfig) String(t *testing.T) string {
@@ -106,11 +117,11 @@ resource "coderd_experimental_ai_provider" "bedrock" {
   name         = "aws-bedrock-acc"
   display_name = "AWS Bedrock Acceptance"
   enabled      = true
-  base_url     = "https://bedrock-runtime.us-east-1.amazonaws.com"
+  base_url     = "{{.BedrockBaseURL}}"
 
   settings = {
     bedrock = {
-      region           = "us-east-1"
+      # region omitted on purpose: it is derived from base_url.
       model            = "anthropic.claude-3-5-sonnet-20241022-v2:0"
       small_fast_model = "anthropic.claude-3-5-haiku-20241022-v1:0"
     }
@@ -556,45 +567,47 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 		APIKeyWOVersion: types.Int64Value(1),
 	}
 
-	// Version unchanged: keys are left untouched (no api_keys in the patch).
-	unchanged := state
-	var diags diag.Diagnostics
-	patch := unchanged.updateRequest(state, unchanged, &diags)
-	require.False(t, diags.HasError(), diags.Errors())
-	require.Nil(t, patch.APIKeys)
+	t.Run("version unchanged", func(t *testing.T) {
+		unchanged := state
+		var diags diag.Diagnostics
+		patch := unchanged.updateRequest(state, unchanged, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.Nil(t, patch.APIKeys)
+	})
 
-	// Version bumped: the new plaintext is sent as a single insert mutation,
-	// which replaces the old key (its ID is absent from the list).
-	plan := state
-	plan.APIKeyWOVersion = types.Int64Value(2)
-	config := plan
-	config.APIKeyWO = types.StringValue("sk-rotated")
+	t.Run("version bumped", func(t *testing.T) {
+		plan := state
+		plan.APIKeyWOVersion = types.Int64Value(2)
+		config := plan
+		config.APIKeyWO = types.StringValue("sk-rotated")
 
-	diags = diag.Diagnostics{}
-	patch = plan.updateRequest(state, config, &diags)
-	require.False(t, diags.HasError(), diags.Errors())
-	require.NotNil(t, patch.APIKeys)
-	require.Len(t, *patch.APIKeys, 1)
-	require.Nil(t, (*patch.APIKeys)[0].ID)
-	require.Equal(t, "sk-rotated", *(*patch.APIKeys)[0].APIKey)
+		var diags diag.Diagnostics
+		patch := plan.updateRequest(state, config, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.NotNil(t, patch.APIKeys)
+		require.Len(t, *patch.APIKeys, 1)
+		require.Nil(t, (*patch.APIKeys)[0].ID)
+		require.Equal(t, "sk-rotated", *(*patch.APIKeys)[0].APIKey)
+	})
 
-	// Version removed (planned null): the stored key is preserved, not cleared.
-	removed := state
-	removed.APIKeyWOVersion = types.Int64Null()
-	diags = diag.Diagnostics{}
-	patch = removed.updateRequest(state, removed, &diags)
-	require.False(t, diags.HasError(), diags.Errors())
-	require.Nil(t, patch.APIKeys)
+	t.Run("version removed", func(t *testing.T) {
+		removed := state
+		removed.APIKeyWOVersion = types.Int64Null()
+		var diags diag.Diagnostics
+		patch := removed.updateRequest(state, removed, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.Nil(t, patch.APIKeys)
+	})
 
-	// Version bumped without a configured key is rejected rather than silently
-	// clearing the server's keys.
-	bumpedNoKey := state
-	bumpedNoKey.APIKeyWOVersion = types.Int64Value(2)
-	diags = diag.Diagnostics{}
-	patch = bumpedNoKey.updateRequest(state, bumpedNoKey, &diags)
-	require.True(t, diags.HasError())
-	require.Contains(t, diags.Errors()[0].Summary(), "Missing API Key")
-	require.Nil(t, patch.APIKeys)
+	t.Run("version bumped without key", func(t *testing.T) {
+		bumpedNoKey := state
+		bumpedNoKey.APIKeyWOVersion = types.Int64Value(2)
+		var diags diag.Diagnostics
+		patch := bumpedNoKey.updateRequest(state, bumpedNoKey, &diags)
+		require.True(t, diags.HasError())
+		require.Contains(t, diags.Errors()[0].Summary(), "Missing API Key")
+		require.Nil(t, patch.APIKeys)
+	})
 }
 
 func TestAIProviderUpdateRejectsBedrockCredentialBumpWithoutCredentials(t *testing.T) {
@@ -625,6 +638,47 @@ func TestAIProviderUpdateRejectsBedrockCredentialBumpWithoutCredentials(t *testi
 	_ = plan.updateRequest(state, config, &diags)
 	require.True(t, diags.HasError())
 	require.Contains(t, diags.Errors()[0].Summary(), "Missing Bedrock Credentials")
+}
+
+func TestAIProviderUpdateRotatesBedrockCredentials(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:    types.StringValue(string(codersdk.AIProviderTypeBedrock)),
+		Enabled: types.BoolValue(true),
+		BaseURL: types.StringValue("https://bedrock-runtime.us-east-1.amazonaws.com"),
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringValue("us-east-1"),
+			CredentialsWOVersion: types.Int64Value(1),
+		}},
+	}
+	plan := AIProviderResourceModel{
+		Type:    state.Type,
+		Enabled: state.Enabled,
+		BaseURL: state.BaseURL,
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringValue("us-east-1"),
+			CredentialsWOVersion: types.Int64Value(2),
+		}},
+	}
+	// Distinct non-empty values so a swapped key/secret assignment fails.
+	config := plan
+	config.Settings = &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+		Region:               types.StringValue("us-east-1"),
+		AccessKeyWO:          types.StringValue("AKIANEWKEY"),
+		AccessKeySecretWO:    types.StringValue("newsecretvalue"),
+		CredentialsWOVersion: types.Int64Value(2),
+	}}
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Settings)
+	require.NotNil(t, patch.Settings.Bedrock)
+	require.NotNil(t, patch.Settings.Bedrock.AccessKey)
+	require.NotNil(t, patch.Settings.Bedrock.AccessKeySecret)
+	require.Equal(t, "AKIANEWKEY", *patch.Settings.Bedrock.AccessKey)
+	require.Equal(t, "newsecretvalue", *patch.Settings.Bedrock.AccessKeySecret)
 }
 
 func TestAIProviderUpdatePreservesBedrockCredentialsWhenVersionRemoved(t *testing.T) {
