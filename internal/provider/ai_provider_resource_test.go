@@ -195,6 +195,69 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 `,
 			wantError: `credentials_wo_version`,
 		},
+		"api key rejected for copilot": {
+			body: `resource "coderd_experimental_ai_provider" "test" {
+  type               = "copilot"
+  name               = "copilot-test"
+  base_url           = "https://api.githubcopilot.com"
+  api_key_wo         = "sk-test"
+  api_key_wo_version = 1
+}
+`,
+			wantError: "must not be configured when `type` is `copilot`",
+		},
+		"settings.bedrock rejected for openai": {
+			body: `resource "coderd_experimental_ai_provider" "test" {
+  type     = "openai"
+  name     = "openai-test"
+  base_url = "https://api.openai.com"
+
+  settings = {
+    bedrock = {
+      region = "us-east-1"
+    }
+  }
+}
+`,
+			wantError: "only valid when `type` is `anthropic` or `bedrock`",
+		},
+		"invalid base url": {
+			body: `resource "coderd_experimental_ai_provider" "test" {
+  type     = "openai"
+  name     = "openai-test"
+  base_url = "not-a-url"
+}
+`,
+			wantError: `Invalid Base URL`,
+		},
+		"api key rejected for anthropic with bedrock settings": {
+			body: `resource "coderd_experimental_ai_provider" "test" {
+  type               = "anthropic"
+  name               = "anthropic-test"
+  base_url           = "https://api.anthropic.com"
+  api_key_wo         = "sk-test"
+  api_key_wo_version = 1
+
+  settings = {
+    bedrock = {
+      region = "us-east-1"
+    }
+  }
+}
+`,
+			wantError: "settings.bedrock",
+		},
+		"empty settings rejected for non-bedrock": {
+			body: `resource "coderd_experimental_ai_provider" "test" {
+  type     = "openai"
+  name     = "openai-test"
+  base_url = "https://api.openai.com"
+
+  settings = {}
+}
+`,
+			wantError: `Invalid Settings`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -394,9 +457,13 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 			SmallFastModel: types.StringValue("anthropic.claude-3-5-haiku-20241022-v1:0"),
 		}},
 	}
+	// Copy the nested Bedrock value so mutating config doesn't alias plan's
+	// pointer; plan keeps its unknown region while config supplies a null one.
 	config := plan
 	config.DisplayName = types.StringNull()
-	config.Settings.Bedrock.Region = types.StringNull()
+	configBedrock := *plan.Settings.Bedrock
+	configBedrock.Region = types.StringNull()
+	config.Settings = &AIProviderSettingsModel{Bedrock: &configBedrock}
 
 	var diags diag.Diagnostics
 	req := plan.createRequest(config, &diags)
@@ -510,4 +577,114 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 	require.Len(t, *patch.APIKeys, 1)
 	require.Nil(t, (*patch.APIKeys)[0].ID)
 	require.Equal(t, "sk-rotated", *(*patch.APIKeys)[0].APIKey)
+
+	// Version removed (planned null): the stored key is preserved, not cleared.
+	removed := state
+	removed.APIKeyWOVersion = types.Int64Null()
+	diags = diag.Diagnostics{}
+	patch = removed.updateRequest(state, removed, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.Nil(t, patch.APIKeys)
+
+	// Version bumped without a configured key is rejected rather than silently
+	// clearing the server's keys.
+	bumpedNoKey := state
+	bumpedNoKey.APIKeyWOVersion = types.Int64Value(2)
+	diags = diag.Diagnostics{}
+	patch = bumpedNoKey.updateRequest(state, bumpedNoKey, &diags)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags.Errors()[0].Summary(), "Missing API Key")
+	require.Nil(t, patch.APIKeys)
+}
+
+func TestAIProviderUpdateRejectsBedrockCredentialBumpWithoutCredentials(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:    types.StringValue(string(codersdk.AIProviderTypeBedrock)),
+		Enabled: types.BoolValue(true),
+		BaseURL: types.StringValue("https://bedrock-runtime.us-east-1.amazonaws.com"),
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringValue("us-east-1"),
+			CredentialsWOVersion: types.Int64Value(1),
+		}},
+	}
+	// config bumps the credential version but omits the write-only credentials.
+	plan := AIProviderResourceModel{
+		Type:    state.Type,
+		Enabled: state.Enabled,
+		BaseURL: state.BaseURL,
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringValue("us-east-1"),
+			CredentialsWOVersion: types.Int64Value(2),
+		}},
+	}
+	config := plan
+
+	var diags diag.Diagnostics
+	_ = plan.updateRequest(state, config, &diags)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags.Errors()[0].Summary(), "Missing Bedrock Credentials")
+}
+
+func TestAIProviderUpdatePreservesBedrockCredentialsWhenVersionRemoved(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:    types.StringValue(string(codersdk.AIProviderTypeBedrock)),
+		Enabled: types.BoolValue(true),
+		BaseURL: types.StringValue("https://bedrock-runtime.us-east-1.amazonaws.com"),
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringValue("us-east-1"),
+			CredentialsWOVersion: types.Int64Value(1),
+		}},
+	}
+	// The operator removes credentials_wo_version with credentials absent. This
+	// must mean "stop managing / preserve", not "demand credentials forever".
+	plan := AIProviderResourceModel{
+		Type:    state.Type,
+		Enabled: state.Enabled,
+		BaseURL: state.BaseURL,
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringValue("us-east-1"),
+			CredentialsWOVersion: types.Int64Null(),
+		}},
+	}
+	config := plan
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Settings)
+	require.NotNil(t, patch.Settings.Bedrock)
+	// Credentials are preserved server-side: no credential pointers are sent.
+	require.Nil(t, patch.Settings.Bedrock.AccessKey)
+	require.Nil(t, patch.Settings.Bedrock.AccessKeySecret)
+
+	plan.validateEffectiveUpdateState(state, config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+}
+
+func TestParseBedrockRegionFromBaseURL(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		baseURL string
+		want    string
+	}{
+		"canonical":         {"https://bedrock-runtime.us-east-1.amazonaws.com", "us-east-1"},
+		"trailing slash":    {"https://bedrock-runtime.eu-west-1.amazonaws.com/", "eu-west-1"},
+		"mixed case host":   {"https://Bedrock-Runtime.US-WEST-2.amazonaws.com", "us-west-2"},
+		"surrounding space": {"  https://bedrock-runtime.ap-south-1.amazonaws.com  ", "ap-south-1"},
+		"trailing path":     {"https://bedrock-runtime.us-east-1.amazonaws.com/foo", ""},
+		"query string":      {"https://bedrock-runtime.us-east-1.amazonaws.com?x=1", ""},
+		"port":              {"https://bedrock-runtime.us-east-1.amazonaws.com:443", ""},
+		"non-bedrock host":  {"https://api.openai.com", ""},
+		"empty":             {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, parseBedrockRegionFromBaseURL(tc.baseURL))
+		})
+	}
 }

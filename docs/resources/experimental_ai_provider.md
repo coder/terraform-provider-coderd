@@ -65,7 +65,7 @@ resource "coderd_experimental_ai_provider" "openai" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`. Bump `api_key_wo_version` to rotate it.
+- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Bump `api_key_wo_version` to rotate it.
 - `api_key_wo_version` (Number) Version for the write-only API key. Required when `api_key_wo` is set; bump it whenever `api_key_wo` changes to rotate the stored key.
 - `display_name` (String) Display name shown in Coder. If omitted, Coder returns the provider name.
 - `enabled` (Boolean) Whether this AI provider is enabled. Defaults to true.
@@ -91,7 +91,7 @@ Optional:
 Optional:
 
 - `access_key_secret_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) AWS secret access key for Bedrock.
-- `access_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) AWS access key ID for Bedrock. See [Coder's Amazon Bedrock provider docs](https://coder.com/docs/@v2.34.3/ai-coder/ai-gateway/providers#amazon-bedrock).
+- `access_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) AWS access key ID for Bedrock. See [Coder's Amazon Bedrock provider docs](https://coder.com/docs/ai-coder/ai-gateway/providers#amazon-bedrock).
 - `credentials_wo_version` (Number) Version for Bedrock write-only credentials. Bump this value to send, rotate, or clear credentials.
 - `model` (String) Primary Bedrock model identifier.
 - `region` (String) AWS region for Bedrock. If omitted, derived from the canonical Bedrock `base_url` attribute.

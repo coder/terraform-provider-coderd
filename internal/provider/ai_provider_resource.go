@@ -133,7 +133,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Required:            true,
 			},
 			"api_key_wo": schema.StringAttribute{
-				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`. Bump `api_key_wo_version` to rotate it.",
+				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Bump `api_key_wo_version` to rotate it.",
 				Optional:            true,
 				Sensitive:           true,
 				WriteOnly:           true,
@@ -162,9 +162,6 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								MarkdownDescription: "AWS region for Bedrock. If omitted, derived from the canonical Bedrock `base_url` attribute.",
 								Optional:            true,
 								Computed:            true,
-								PlanModifiers: []planmodifier.String{
-									stringplanmodifier.UseStateForUnknown(),
-								},
 							},
 							"model": schema.StringAttribute{
 								MarkdownDescription: "Primary Bedrock model identifier.",
@@ -183,7 +180,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								},
 							},
 							"access_key_wo": schema.StringAttribute{
-								MarkdownDescription: "AWS access key ID for Bedrock. See [Coder's Amazon Bedrock provider docs](https://coder.com/docs/@v2.34.3/ai-coder/ai-gateway/providers#amazon-bedrock).",
+								MarkdownDescription: "AWS access key ID for Bedrock. See [Coder's Amazon Bedrock provider docs](https://coder.com/docs/ai-coder/ai-gateway/providers#amazon-bedrock).",
 								Optional:            true,
 								Sensitive:           true,
 								WriteOnly:           true,
@@ -281,14 +278,24 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 	}
 	providerType := codersdk.AIProviderType(data.Type.ValueString())
 
-	if !data.APIKeyWO.IsNull() && !data.APIKeyWO.IsUnknown() && (providerType == codersdk.AIProviderTypeBedrock || providerType == codersdk.AIProviderTypeCopilot) {
-		resp.Diagnostics.AddAttributeError(path.Root("api_key_wo"), "Invalid Attribute Combination", fmt.Sprintf("`api_key_wo` must not be configured when `type` is `%s`.", providerType))
+	if !data.APIKeyWO.IsNull() && !data.APIKeyWO.IsUnknown() {
+		switch {
+		case providerType == codersdk.AIProviderTypeBedrock || providerType == codersdk.AIProviderTypeCopilot:
+			resp.Diagnostics.AddAttributeError(path.Root("api_key_wo"), "Invalid Attribute Combination", fmt.Sprintf("`api_key_wo` must not be configured when `type` is `%s`.", providerType))
+		case data.bedrock() != nil:
+			// The server rejects api_keys whenever settings.bedrock is set.
+			resp.Diagnostics.AddAttributeError(path.Root("api_key_wo"), "Invalid Attribute Combination", "`api_key_wo` must not be configured when `settings.bedrock` is set; Bedrock-backed providers authenticate via `settings.bedrock`.")
+		}
 	}
 
 	bedrock := data.bedrock()
 	if bedrock == nil {
-		if providerType == codersdk.AIProviderTypeBedrock {
+		switch {
+		case providerType == codersdk.AIProviderTypeBedrock:
 			resp.Diagnostics.AddAttributeError(path.Root("settings"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires `settings.bedrock` with at least `region` or write-only AWS credentials.")
+		case data.Settings != nil:
+			// An empty settings = {} produces a null-vs-empty diff; reject it.
+			resp.Diagnostics.AddAttributeError(path.Root("settings"), "Invalid Settings", "`settings` must include a `bedrock` block or be omitted.")
 		}
 		return
 	}
@@ -484,15 +491,15 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 		patch.Settings = &settings
 	}
 
-	// Only touch keys when the version changes. The whole key set is one
-	// key: send the new plaintext to rotate, or an empty list to clear.
-	if !m.APIKeyWOVersion.Equal(state.APIKeyWOVersion) {
-		muts := []codersdk.AIProviderKeyMutation{}
-		if !config.APIKeyWO.IsNull() && !config.APIKeyWO.IsUnknown() {
+	// Rotate the API key only when its version changes to a concrete value. A
+	// null version preserves the stored key rather than clearing it.
+	if !m.APIKeyWOVersion.IsNull() && !m.APIKeyWOVersion.Equal(state.APIKeyWOVersion) {
+		if config.APIKeyWO.IsNull() || config.APIKeyWO.IsUnknown() {
+			diags.AddAttributeError(path.Root("api_key_wo"), "Missing API Key", "`api_key_wo` must be configured when `api_key_wo_version` changes.")
+		} else {
 			v := config.APIKeyWO.ValueString()
-			muts = append(muts, codersdk.AIProviderKeyMutation{APIKey: &v})
+			patch.APIKeys = &[]codersdk.AIProviderKeyMutation{{APIKey: &v}}
 		}
-		patch.APIKeys = &muts
 	}
 	return patch
 }
@@ -646,9 +653,15 @@ func bedrockCredentialsConfigured(b *AIProviderBedrockSettingsModel) bool {
 		!b.AccessKeySecretWO.IsNull() && !b.AccessKeySecretWO.IsUnknown()
 }
 
-func credentialsVersionChanged(a, b *AIProviderBedrockSettingsModel) bool {
-	if a == nil || b == nil {
-		return a != nil && b == nil && !a.CredentialsWOVersion.IsNull()
+// credentialsVersionChanged reports whether the planned credential version
+// requires resending credentials. A null planned version preserves stored
+// credentials rather than rotating them.
+func credentialsVersionChanged(plan, state *AIProviderBedrockSettingsModel) bool {
+	if plan == nil || plan.CredentialsWOVersion.IsNull() {
+		return false
 	}
-	return !a.CredentialsWOVersion.Equal(b.CredentialsWOVersion)
+	if state == nil {
+		return true
+	}
+	return !plan.CredentialsWOVersion.Equal(state.CredentialsWOVersion)
 }
