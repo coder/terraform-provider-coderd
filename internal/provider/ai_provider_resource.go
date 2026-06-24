@@ -388,6 +388,10 @@ func (r *AIProviderResource) Update(ctx context.Context, req resource.UpdateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	plan.validateEffectiveUpdateState(state, config, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if patch.IsEmpty() {
 		// Nothing tracked changed; refresh from the server. The Coder
 		// API rejects empty patches, so there is nothing to send.
@@ -491,6 +495,40 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 		patch.APIKeys = &muts
 	}
 	return patch
+}
+
+func (m AIProviderResourceModel) validateEffectiveUpdateState(state, config AIProviderResourceModel, diags *diag.Diagnostics) {
+	if codersdk.AIProviderType(m.Type.ValueString()) != codersdk.AIProviderTypeBedrock {
+		return
+	}
+
+	bedrock := m.bedrock()
+	if bedrock == nil {
+		diags.AddAttributeError(path.Root("settings"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires `settings.bedrock`; it cannot be removed from an existing Bedrock provider.")
+		return
+	}
+
+	if !credentialsVersionChanged(bedrock, state.bedrock()) {
+		return
+	}
+	cfgBedrock := config.bedrock()
+	if cfgBedrock == nil {
+		return
+	}
+	settings := codersdk.AIProviderBedrockSettings{
+		Region: bedrockRegion(m.BaseURL.ValueString(), cfgBedrock.Region, bedrock.Region),
+	}
+	if !cfgBedrock.AccessKeyWO.IsNull() && !cfgBedrock.AccessKeyWO.IsUnknown() {
+		accessKey := cfgBedrock.AccessKeyWO.ValueString()
+		settings.AccessKey = &accessKey
+	}
+	if !cfgBedrock.AccessKeySecretWO.IsNull() && !cfgBedrock.AccessKeySecretWO.IsUnknown() {
+		accessKeySecret := cfgBedrock.AccessKeySecretWO.ValueString()
+		settings.AccessKeySecret = &accessKeySecret
+	}
+	if !settings.IsConfigured() {
+		diags.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires Bedrock settings sufficient for the Coder API: set `region` or write-only AWS credentials.")
+	}
 }
 
 func (m AIProviderResourceModel) sdkSettings(config AIProviderResourceModel, includeCredentials bool, diags *diag.Diagnostics) codersdk.AIProviderSettings {

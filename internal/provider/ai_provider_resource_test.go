@@ -408,6 +408,77 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 	require.Nil(t, req.Settings.Bedrock.AccessKeySecret)
 }
 
+func TestAIProviderUpdateRejectsDroppingBedrockSettings(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:        types.StringValue(string(codersdk.AIProviderTypeBedrock)),
+		DisplayName: types.StringValue("AWS Bedrock"),
+		Enabled:     types.BoolValue(true),
+		BaseURL:     types.StringValue("https://bedrock-runtime.us-east-1.amazonaws.com"),
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region: types.StringValue("us-east-1"),
+		}},
+	}
+	plan := state
+	plan.Settings = nil
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, plan, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Settings)
+	require.Nil(t, patch.Settings.Bedrock)
+
+	plan.validateEffectiveUpdateState(state, plan, &diags)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags.Errors()[0].Summary(), "Missing Bedrock Settings")
+}
+
+func TestAIProviderUpdateRejectsClearingOnlyBedrockCredentials(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:    types.StringValue(string(codersdk.AIProviderTypeBedrock)),
+		Enabled: types.BoolValue(true),
+		BaseURL: types.StringValue("https://example.com"),
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringNull(),
+			CredentialsWOVersion: types.Int64Value(1),
+		}},
+	}
+	plan := AIProviderResourceModel{
+		Type:    state.Type,
+		Enabled: state.Enabled,
+		BaseURL: state.BaseURL,
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringNull(),
+			CredentialsWOVersion: types.Int64Value(2),
+		}},
+	}
+	config := AIProviderResourceModel{
+		Type:    plan.Type,
+		Enabled: plan.Enabled,
+		BaseURL: plan.BaseURL,
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:               types.StringNull(),
+			AccessKeyWO:          types.StringValue(""),
+			AccessKeySecretWO:    types.StringValue(""),
+			CredentialsWOVersion: types.Int64Value(2),
+		}},
+	}
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Settings)
+	require.NotNil(t, patch.Settings.Bedrock)
+	require.False(t, patch.Settings.Bedrock.IsConfigured())
+
+	plan.validateEffectiveUpdateState(state, config, &diags)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags.Errors()[0].Summary(), "Missing Bedrock Settings")
+}
+
 func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 	t.Parallel()
 
