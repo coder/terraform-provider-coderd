@@ -11,7 +11,7 @@ The provider currently supports resources and data sources for:
 
 ## Requirements
 
-- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.5
 - [Go](https://golang.org/doc/install) >= 1.21
 - [Coder](https://github.com/coder/coder) >= 2.10.1
 
