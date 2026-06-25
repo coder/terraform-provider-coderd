@@ -15,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -38,7 +37,11 @@ func NewAgentsModelResource() resource.Resource {
 }
 
 type AgentsModelResource struct {
-	client *codersdk.ExperimentalClient
+	data *CoderdProviderData
+}
+
+func (r *AgentsModelResource) experimentalClient() *codersdk.ExperimentalClient {
+	return codersdk.NewExperimentalClient(r.data.Client)
 }
 
 type AgentsModelResourceModel struct {
@@ -138,9 +141,6 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				MarkdownDescription: "Whether this is the default model for new chats. Coder manages the single default server-side, so set `is_default = true` on one model and omit it on others.",
 				Optional:            true,
 				Computed:            true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"context_limit": schema.Int64Attribute{
 				MarkdownDescription: "Maximum context window for this model. Must be greater than zero.",
@@ -193,7 +193,7 @@ func (r *AgentsModelResource) Configure(ctx context.Context, req resource.Config
 		)
 		return
 	}
-	r.client = codersdk.NewExperimentalClient(data.Client)
+	r.data = data
 }
 
 func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -208,7 +208,7 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	tflog.Info(ctx, "creating Agents model")
-	modelConfig, err := r.client.CreateChatModelConfig(ctx, createReq)
+	modelConfig, err := r.experimentalClient().CreateChatModelConfig(ctx, createReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", err))
 		return
@@ -229,9 +229,9 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	modelConfigID := state.ID.ValueUUID()
-	configs, err := r.client.ListChatModelConfigs(ctx)
+	configs, err := r.experimentalClient().ListChatModelConfigs(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list Agents models, got error: %s", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read Agents model, got error: %s", err))
 		return
 	}
 
@@ -263,7 +263,7 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	tflog.Info(ctx, "updating Agents model", map[string]any{"id": state.ID.ValueString()})
-	modelConfig, err := r.client.UpdateChatModelConfig(ctx, state.ID.ValueUUID(), updateReq)
+	modelConfig, err := r.experimentalClient().UpdateChatModelConfig(ctx, state.ID.ValueUUID(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update Agents model, got error: %s", err))
 		return
@@ -284,7 +284,7 @@ func (r *AgentsModelResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	tflog.Info(ctx, "deleting Agents model", map[string]any{"id": state.ID.ValueString()})
-	if err := r.client.DeleteChatModelConfig(ctx, state.ID.ValueUUID()); err != nil && !isNotFound(err) {
+	if err := r.experimentalClient().DeleteChatModelConfig(ctx, state.ID.ValueUUID()); err != nil && !isNotFound(err) {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete Agents model, got error: %s", err))
 		return
 	}
@@ -327,8 +327,8 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 	if !m.Enabled.Equal(state.Enabled) {
 		req.Enabled = ptr.Ref(m.Enabled.ValueBool())
 	}
-	if !m.IsDefault.Equal(state.IsDefault) {
-		req.IsDefault = ptr.Ref(m.IsDefault.ValueBool())
+	if !m.IsDefault.IsNull() && !m.IsDefault.IsUnknown() && !m.IsDefault.Equal(state.IsDefault) {
+		req.IsDefault = m.IsDefault.ValueBoolPointer()
 	}
 	if !m.ContextLimit.Equal(state.ContextLimit) {
 		req.ContextLimit = ptr.Ref(m.ContextLimit.ValueInt64())

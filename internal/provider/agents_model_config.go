@@ -174,6 +174,14 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 	// Invalid JSON is left for the custom type's ValidateAttribute to report.
 	canonical, err := agentsModelConfigCanonicalJSON(req.ConfigValue.ValueString())
 	if err != nil {
+		// Report valid JSON that can't decode into the SDK config (e.g. an array or primitive).
+		if json.Valid([]byte(req.ConfigValue.ValueString())) {
+			resp.Diagnostics.AddAttributeError(
+				req.Path,
+				"Invalid model_config",
+				"model_config must be a JSON object compatible with Coder's chat model config schema.",
+			)
+		}
 		return
 	}
 	if canonical == "{}" {

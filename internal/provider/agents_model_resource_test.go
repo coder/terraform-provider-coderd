@@ -18,9 +18,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
@@ -84,6 +86,14 @@ func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
 	patch := plan.updateRequest(state, &diags)
 	require.False(t, diags.HasError(), diags.Errors())
 	require.Equal(t, &codersdk.ChatModelCallConfig{}, patch.ModelConfig, "clearing sends an empty object")
+	// Unchanged fields are omitted from the patch.
+	require.Nil(t, patch.AIProviderID)
+	require.Empty(t, patch.Model)
+	require.Empty(t, patch.DisplayName)
+	require.Nil(t, patch.Enabled)
+	require.Nil(t, patch.IsDefault)
+	require.Nil(t, patch.ContextLimit)
+	require.Nil(t, patch.CompressionThreshold)
 }
 
 func TestAgentsModelStateFromModelConfig(t *testing.T) {
@@ -299,6 +309,79 @@ func TestAgentsModelConfigNotEmptyValidator(t *testing.T) {
 		t.Parallel()
 		require.False(t, validate(t, types.StringValue(`{`)).HasError())
 	})
+
+	t.Run("non-object json is rejected", func(t *testing.T) {
+		t.Parallel()
+		require.True(t, validate(t, types.StringValue(`[1,2]`)).HasError())
+	})
+}
+
+func TestAgentsModelResourceValidateConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := `provider "coderd" {
+  url   = "http://127.0.0.1"
+  token = "test-token"
+}
+
+resource "coderd_agents_model" "sonnet" {
+  ai_provider_id = "` + uuid.NewString() + `"
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+  is_default     = false
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg,
+				ExpectError: regexp.MustCompile(`Invalid is_default`),
+			},
+		},
+	})
+}
+
+func TestAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {
+	t.Parallel()
+
+	// PlanOnly reaches provider Configure(), which fetches the current user
+	// and entitlements, so use a mock server instead of an unreachable URL.
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	cfg := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+
+variable "ai_provider_id" {
+  type = string
+}
+
+resource "coderd_agents_model" "sonnet" {
+  ai_provider_id = var.ai_provider_id
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// ai_provider_id is unknown during the validate walk even though
+				// ConfigVariables supplies a concrete plan value.
+				Config: cfg,
+				ConfigVariables: config.Variables{
+					"ai_provider_id": config.StringVariable(uuid.NewString()),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
 }
 
 func TestAccAgentsModelResource(t *testing.T) {
@@ -328,6 +411,9 @@ func TestAccAgentsModelResource(t *testing.T) {
 	cfg2.MaxOutputTokens = 4096
 	cfg2.Temperature = "0.2"
 
+	// Captured from the applied state so the import step can compare model_config semantically.
+	var priorModelConfig string
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -346,13 +432,21 @@ func TestAccAgentsModelResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "context_limit", "200000"),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "compression_threshold", "70"),
 					testCheckAgentsModelConfig(8192, 0.7),
+					resource.TestCheckResourceAttrWith("coderd_agents_model.sonnet", "model_config", func(value string) error {
+						priorModelConfig = value
+						return nil
+					}),
 				),
 			},
 			{
-				ResourceName:            "coderd_agents_model.sonnet",
-				ImportState:             true,
-				ImportStateVerify:       true,
+				ResourceName:      "coderd_agents_model.sonnet",
+				ImportState:       true,
+				ImportStateVerify: true,
+				// Coder serializes model_config fields in struct order while jsonencode sorts them
+				// alphabetically, so ImportStateVerify's byte comparison can't match it. Compare it
+				// semantically via ImportStateCheck instead.
 				ImportStateVerifyIgnore: []string{"model_config"},
+				ImportStateCheck:        importStateCheckModelConfigEquivalent(&priorModelConfig),
 			},
 			{
 				Config: cfg2.String(t),
@@ -599,7 +693,7 @@ func createAccAgentsModelAIProviderOfType(ctx context.Context, t *testing.T, cli
 
 func createAccAgentsModelAIProvider(ctx context.Context, t *testing.T, client *codersdk.Client) codersdk.AIProvider {
 	t.Helper()
-	provider, err := client.CreateAIProvider(ctx, codersdk.CreateAIProviderRequest{
+	return createAccAgentsModelAIProviderOfType(ctx, t, client, codersdk.CreateAIProviderRequest{
 		Type:        codersdk.AIProviderTypeAnthropic,
 		Name:        "anthropic-agents-model-acc",
 		DisplayName: "Anthropic Agents Model Acceptance",
@@ -607,11 +701,6 @@ func createAccAgentsModelAIProvider(ctx context.Context, t *testing.T, client *c
 		BaseURL:     "https://api.anthropic.com",
 		APIKeys:     []string{"sk-ant-api03-test-primary"},
 	})
-	require.NoError(t, err, "create AI provider for Agents model acceptance test")
-	t.Cleanup(func() {
-		_ = client.DeleteAIProvider(context.Background(), provider.ID.String())
-	})
-	return provider
 }
 
 func decodeAgentsModelConfigForTest(t *testing.T, raw string) *codersdk.ChatModelCallConfig {
@@ -619,6 +708,34 @@ func decodeAgentsModelConfigForTest(t *testing.T, raw string) *codersdk.ChatMode
 	var config codersdk.ChatModelCallConfig
 	require.NoError(t, json.Unmarshal([]byte(raw), &config))
 	return &config
+}
+
+// importStateCheckModelConfigEquivalent verifies the imported model_config is
+// semantically equal to want by canonicalizing both through the SDK type, since
+// ImportStateVerify only compares bytes and Coder's field ordering differs from
+// jsonencode's.
+func importStateCheckModelConfigEquivalent(want *string) resource.ImportStateCheckFunc {
+	return func(states []*terraform.InstanceState) error {
+		wantCanonical, err := agentsModelConfigCanonicalJSON(*want)
+		if err != nil {
+			return fmt.Errorf("canonicalize expected model_config: %w", err)
+		}
+		for _, s := range states {
+			got, ok := s.Attributes["model_config"]
+			if !ok {
+				continue
+			}
+			gotCanonical, err := agentsModelConfigCanonicalJSON(got)
+			if err != nil {
+				return fmt.Errorf("canonicalize imported model_config: %w", err)
+			}
+			if gotCanonical != wantCanonical {
+				return fmt.Errorf("imported model_config %q not equivalent to %q", got, *want)
+			}
+			return nil
+		}
+		return fmt.Errorf("imported state has no resource with model_config")
+	}
 }
 
 func testCheckAgentsModelConfig(maxOutputTokens int64, temperature float64) resource.TestCheckFunc {
