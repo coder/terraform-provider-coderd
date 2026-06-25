@@ -76,7 +76,7 @@ resource "coderd_agents_model" "sonnet" {
 - `display_name` (String) Display name shown in Coder.
 - `enabled` (Boolean) Whether this model configuration is enabled. Defaults to true.
 - `is_default` (Boolean) Whether this is the default model for new chats. Coder manages the single default server-side, so set `is_default = true` on one model and omit it on others.
-- `model_config` (String) Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, `cost`, and `provider_options`. Omit the attribute entirely to use Coder's defaults.
+- `model_config` (String) Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, `cost`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.
 
 ### Read-Only
 
