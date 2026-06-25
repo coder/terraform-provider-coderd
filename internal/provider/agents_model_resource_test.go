@@ -96,6 +96,68 @@ func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
 	require.Nil(t, patch.CompressionThreshold)
 }
 
+// An unknown is_default (omitted in config) must never be sent: the server owns
+// default election, and types.BoolUnknown().ValueBoolPointer() returns &false,
+// which would silently demote the model.
+func TestAgentsModelRequestIsDefaultUnknown(t *testing.T) {
+	t.Parallel()
+
+	createPlan := AgentsModelResourceModel{
+		AIProviderID:         UUIDValue(uuid.New()),
+		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
+		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
+		Enabled:              types.BoolValue(true),
+		IsDefault:            types.BoolUnknown(),
+		ContextLimit:         types.Int64Value(200000),
+		CompressionThreshold: types.Int64Value(70),
+		ModelConfig:          newAgentsModelConfigNull(),
+	}
+	var createDiags diag.Diagnostics
+	createReq := createPlan.createRequest(&createDiags)
+	require.False(t, createDiags.HasError(), createDiags.Errors())
+	require.Nil(t, createReq.IsDefault, "unknown is_default must not be sent on create")
+
+	state := createPlan
+	state.IsDefault = types.BoolValue(true)
+	updatePlan := state
+	updatePlan.IsDefault = types.BoolUnknown()
+	updatePlan.DisplayName = types.StringValue("Renamed")
+
+	var updateDiags diag.Diagnostics
+	patch := updatePlan.updateRequest(state, &updateDiags)
+	require.False(t, updateDiags.HasError(), updateDiags.Errors())
+	require.Equal(t, "Renamed", patch.DisplayName, "the changed field is still sent")
+	require.Nil(t, patch.IsDefault, "unknown is_default must not be sent on update")
+}
+
+// A changed field appears in the update patch. ModelConfig is covered above;
+// this locks the Enabled and IsDefault transitions.
+func TestAgentsModelUpdateRequestChangedFields(t *testing.T) {
+	t.Parallel()
+
+	state := AgentsModelResourceModel{
+		AIProviderID:         UUIDValue(uuid.New()),
+		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
+		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
+		Enabled:              types.BoolValue(true),
+		IsDefault:            types.BoolValue(false),
+		ContextLimit:         types.Int64Value(200000),
+		CompressionThreshold: types.Int64Value(70),
+		ModelConfig:          newAgentsModelConfigNull(),
+	}
+	plan := state
+	plan.Enabled = types.BoolValue(false)
+	plan.IsDefault = types.BoolValue(true)
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Enabled)
+	require.False(t, *patch.Enabled, "a changed Enabled is sent")
+	require.NotNil(t, patch.IsDefault)
+	require.True(t, *patch.IsDefault, "a changed IsDefault is sent")
+}
+
 func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	t.Parallel()
 
