@@ -527,11 +527,8 @@ func TestAccAgentsModelResource(t *testing.T) {
 	})
 }
 
-// TestAccAgentsModelResourceModelConfigNoDrift proves end-to-end that the custom
-// model_config type prevents a perpetual diff when Coder re-serializes the value.
-// Cost values are written with trailing zeros ("3.00"); Coder stores them via
-// shopspring/decimal and returns them as "3". A plain string (or jsontypes.Normalized)
-// attribute would show a diff on every plan; the custom type must not.
+// TestAccAgentsModelResourceModelConfigNoDrift proves the custom type prevents a
+// perpetual diff when Coder re-serializes the value (e.g. "3.00" comes back "3").
 func TestAccAgentsModelResourceModelConfigNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -583,13 +580,8 @@ resource "coderd_agents_model" "sonnet" {
 	})
 }
 
-// TestAccAgentsModelResourceEmptyModelConfig locks in the empty-config guard.
-// Coder collapses an all-zero model_config (including an explicit "{}") to null
-// on read, so a configured "{}" would disagree with the null Coder returns and
-// trip Terraform's post-apply consistency check. agentsModelConfigNotEmptyValidator
-// rejects it at plan time with an actionable message instead, so the user never
-// reaches that confusing core error. Omitting model_config is the supported way
-// to fall back to Coder's defaults.
+// TestAccAgentsModelResourceEmptyModelConfig locks in the empty-config guard: an
+// empty "{}" is rejected at plan time rather than tripping a post-apply error.
 func TestAccAgentsModelResourceEmptyModelConfig(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {

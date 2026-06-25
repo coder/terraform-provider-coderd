@@ -19,9 +19,6 @@ The server owns default election: set `is_default = true` on at most one model a
 ## Example Usage
 
 ```terraform
-// Provider populated from environment variables.
-provider "coderd" {}
-
 variable "anthropic_api_key" {
   type      = string
   sensitive = true

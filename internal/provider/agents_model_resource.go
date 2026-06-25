@@ -158,11 +158,8 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 					int64validator.Between(0, 100),
 				},
 			},
-			// A JSON string rather than typed attributes: the underlying
-			// ChatModelCallConfig is large and still evolving, and its
-			// provider_options is a tagged union Terraform's type system can't
-			// express. JSON tracks the experimental API via a dependency bump
-			// instead of schema churn (cf. AWS Bedrock additional_model_request_fields).
+			// JSON, not typed attributes: ChatModelCallConfig is large, evolving,
+			// and its provider_options is a tagged union Terraform can't express.
 			"model_config": schema.StringAttribute{
 				MarkdownDescription: "Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, `cost`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
 				CustomType:          agentsModelConfigType{},

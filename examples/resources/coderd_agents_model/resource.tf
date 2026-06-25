@@ -1,6 +1,3 @@
-// Provider populated from environment variables.
-provider "coderd" {}
-
 variable "anthropic_api_key" {
   type      = string
   sensitive = true

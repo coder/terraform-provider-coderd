@@ -9,16 +9,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 )
 
-// useStateForUnknownUnlessChanged returns a string plan modifier for a Computed
-// value that is derived server-side from another attribute (triggerAttr). Like
-// the builtin stringplanmodifier.UseStateForUnknown it copies the prior state
-// value into an unknown plan, but only while triggerAttr is unchanged. When
-// triggerAttr changes the derived value may change too, so the planned value is
-// left unknown for the server to recompute. Plain UseStateForUnknown would pin
-// the stale value and cause "Provider produced inconsistent result after apply"
-// once the source attribute changes.
-//
-// triggerAttr is a root-level attribute name (passed to path.Root).
+// useStateForUnknownUnlessChanged copies prior state into an unknown Computed value,
+// but only while triggerAttr (a root attribute name) is unchanged; otherwise it leaves
+// the value unknown for the server to recompute.
 func useStateForUnknownUnlessChanged(triggerAttr string) planmodifier.String {
 	return useStateForUnknownUnlessChangedModifier{triggerAttr: triggerAttr}
 }
