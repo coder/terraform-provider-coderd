@@ -101,6 +101,8 @@ jobs:
         env:
           TF_ACC: "1"
           CODER_ENTERPRISE_LICENSE: ${{ secrets.CODER_ENTERPRISE_LICENSE }}
+          # Reaper pulls from Docker Hub (flaky); tests use t.Cleanup and CI is ephemeral.
+          TESTCONTAINERS_RYUK_DISABLED: "true"
         timeout-minutes: 10
 
   lint:
