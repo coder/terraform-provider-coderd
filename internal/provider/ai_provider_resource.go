@@ -196,7 +196,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								},
 							},
 							"role_arn": schema.StringAttribute{
-								MarkdownDescription: "ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the write-only credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Enables cross-account Bedrock by pointing each provider at a role in the target account. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.",
+								MarkdownDescription: "ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the static credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.",
 								Optional:            true,
 							},
 							"access_key_wo": schema.StringAttribute{

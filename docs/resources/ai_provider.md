@@ -34,8 +34,8 @@ resource "coderd_ai_provider" "bedrock" {
       model            = "anthropic.claude-3-5-sonnet-20241022-v2:0"
       small_fast_model = "anthropic.claude-3-5-haiku-20241022-v1:0"
 
-      // Optional: assume an IAM role via STS before calling Bedrock. Point each
-      // provider at a role in the target account for cross-account Bedrock billing.
+      // Optional: assume an IAM role via STS before calling Bedrock. The base
+      // identity signs the AssumeRole call; the temporary credentials sign requests.
       // role_arn = "arn:aws:iam::123456789012:role/bedrock-access"
 
       // Omit these to use the AWS SDK default credential chain from the Coder server
@@ -102,7 +102,7 @@ Optional:
 - `credentials_wo_version` (Number) Version for Bedrock write-only credentials. Bump this value to send, rotate, or clear credentials.
 - `model` (String) Primary Bedrock model identifier.
 - `region` (String) AWS region for Bedrock. If omitted, derived from the canonical Bedrock `base_url` attribute.
-- `role_arn` (String) ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the write-only credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Enables cross-account Bedrock by pointing each provider at a role in the target account. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.
+- `role_arn` (String) ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the static credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.
 - `small_fast_model` (String) Small/fast Bedrock model identifier used for background tasks.
 
 ## Import

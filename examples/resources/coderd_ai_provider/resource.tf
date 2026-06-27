@@ -10,8 +10,8 @@ resource "coderd_ai_provider" "bedrock" {
       model            = "anthropic.claude-3-5-sonnet-20241022-v2:0"
       small_fast_model = "anthropic.claude-3-5-haiku-20241022-v1:0"
 
-      // Optional: assume an IAM role via STS before calling Bedrock. Point each
-      // provider at a role in the target account for cross-account Bedrock billing.
+      // Optional: assume an IAM role via STS before calling Bedrock. The base
+      // identity signs the AssumeRole call; the temporary credentials sign requests.
       // role_arn = "arn:aws:iam::123456789012:role/bedrock-access"
 
       // Omit these to use the AWS SDK default credential chain from the Coder server
