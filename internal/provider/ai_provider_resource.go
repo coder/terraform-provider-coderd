@@ -332,24 +332,16 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 	if providerType != codersdk.AIProviderTypeAnthropic && providerType != codersdk.AIProviderTypeBedrock {
 		resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("bedrock"), "Invalid Attribute Combination", "`settings.bedrock` is only valid when `type` is `anthropic` or `bedrock`.")
 	}
-	accessSet := !bedrock.AccessKeyWO.IsNull() && !bedrock.AccessKeyWO.IsUnknown()
-	secretSet := !bedrock.AccessKeySecretWO.IsNull() && !bedrock.AccessKeySecretWO.IsUnknown()
 	if providerType == codersdk.AIProviderTypeBedrock {
 		if !baseURLKnown || bedrock.Region.IsUnknown() || bedrock.AccessKeyWO.IsUnknown() || bedrock.AccessKeySecretWO.IsUnknown() {
 			return
 		}
 		sdkSettings := codersdk.AIProviderBedrockSettings{
-			Region:         bedrockRegion(baseURL, bedrock.Region, bedrock.Region),
-			Model:          bedrock.Model.ValueString(),
-			SmallFastModel: bedrock.SmallFastModel.ValueString(),
-		}
-		if accessSet {
-			accessKey := bedrock.AccessKeyWO.ValueString()
-			sdkSettings.AccessKey = &accessKey
-		}
-		if secretSet {
-			accessKeySecret := bedrock.AccessKeySecretWO.ValueString()
-			sdkSettings.AccessKeySecret = &accessKeySecret
+			Region:          bedrockRegion(baseURL, bedrock.Region, bedrock.Region),
+			Model:           bedrock.Model.ValueString(),
+			SmallFastModel:  bedrock.SmallFastModel.ValueString(),
+			AccessKey:       stringPtrOrNil(bedrock.AccessKeyWO),
+			AccessKeySecret: stringPtrOrNil(bedrock.AccessKeySecretWO),
 		}
 		if !sdkSettings.IsConfigured() {
 			resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires Bedrock settings sufficient for the Coder API: set `region` or write-only AWS credentials.")
@@ -526,8 +518,7 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 		if config.APIKeyWO.IsNull() || config.APIKeyWO.IsUnknown() {
 			diags.AddAttributeError(path.Root("api_key_wo"), "Missing API Key", "`api_key_wo` must be configured when `api_key_wo_version` changes.")
 		} else {
-			v := config.APIKeyWO.ValueString()
-			patch.APIKeys = &[]codersdk.AIProviderKeyMutation{{APIKey: &v}}
+			patch.APIKeys = &[]codersdk.AIProviderKeyMutation{{APIKey: stringPtrOrNil(config.APIKeyWO)}}
 		}
 	}
 	return patch
@@ -552,15 +543,9 @@ func (m AIProviderResourceModel) validateEffectiveUpdateState(state, config AIPr
 		return
 	}
 	settings := codersdk.AIProviderBedrockSettings{
-		Region: bedrockRegion(m.BaseURL.ValueString(), cfgBedrock.Region, bedrock.Region),
-	}
-	if !cfgBedrock.AccessKeyWO.IsNull() && !cfgBedrock.AccessKeyWO.IsUnknown() {
-		accessKey := cfgBedrock.AccessKeyWO.ValueString()
-		settings.AccessKey = &accessKey
-	}
-	if !cfgBedrock.AccessKeySecretWO.IsNull() && !cfgBedrock.AccessKeySecretWO.IsUnknown() {
-		accessKeySecret := cfgBedrock.AccessKeySecretWO.ValueString()
-		settings.AccessKeySecret = &accessKeySecret
+		Region:          bedrockRegion(m.BaseURL.ValueString(), cfgBedrock.Region, bedrock.Region),
+		AccessKey:       stringPtrOrNil(cfgBedrock.AccessKeyWO),
+		AccessKeySecret: stringPtrOrNil(cfgBedrock.AccessKeySecretWO),
 	}
 	if !settings.IsConfigured() {
 		diags.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires Bedrock settings sufficient for the Coder API: set `region` or write-only AWS credentials.")
@@ -587,29 +572,26 @@ func (m AIProviderResourceModel) sdkSettings(config AIProviderResourceModel, inc
 			diags.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Credentials", "Bedrock credential version changed, so both `access_key_wo` and `access_key_secret_wo` must be configured. Use empty strings for both to clear stored credentials.")
 			return codersdk.AIProviderSettings{}
 		}
-		accessKey := cfgBedrock.AccessKeyWO.ValueString()
-		accessKeySecret := cfgBedrock.AccessKeySecretWO.ValueString()
-		settings.AccessKey = &accessKey
-		settings.AccessKeySecret = &accessKeySecret
+		settings.AccessKey = stringPtrOrNil(cfgBedrock.AccessKeyWO)
+		settings.AccessKeySecret = stringPtrOrNil(cfgBedrock.AccessKeySecretWO)
 	}
 	return codersdk.AIProviderSettings{Bedrock: &settings}
 }
 
 func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider) AIProviderResourceModel {
 	out := AIProviderResourceModel{
-		ID:          UUIDValue(provider.ID),
-		Type:        types.StringValue(string(provider.Type)),
-		Name:        types.StringValue(provider.Name),
-		DisplayName: types.StringValue(provider.DisplayName),
-		Enabled:     types.BoolValue(provider.Enabled),
-		BaseURL:     types.StringValue(provider.BaseURL),
-		CreatedAt:   types.Int64Value(provider.CreatedAt.Unix()),
-		UpdatedAt:   types.Int64Value(provider.UpdatedAt.Unix()),
-		// Write-only and version values are never returned by the API;
-		// preserve the configured/state values.
+		ID:           UUIDValue(provider.ID),
+		Type:         types.StringValue(string(provider.Type)),
+		Name:         types.StringValue(provider.Name),
+		DisplayName:  types.StringValue(provider.DisplayName),
+		Enabled:      types.BoolValue(provider.Enabled),
+		BaseURL:      types.StringValue(provider.BaseURL),
+		CreatedAt:    types.Int64Value(provider.CreatedAt.Unix()),
+		UpdatedAt:    types.Int64Value(provider.UpdatedAt.Unix()),
+		APIKeyMasked: types.StringNull(),
+		// Write-only value is not returned; version is Terraform-only.
 		APIKeyWO:        types.StringNull(),
 		APIKeyWOVersion: m.APIKeyWOVersion,
-		APIKeyMasked:    types.StringNull(),
 	}
 	// This resource manages a single key and replaces all keys on rotation, so
 	// len(APIKeys) is always 0 or 1; index 0 is the key we manage.

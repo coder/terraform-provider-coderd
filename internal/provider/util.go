@@ -135,6 +135,15 @@ func stringValueOrNull(s string) types.String {
 	return types.StringValue(s)
 }
 
+// stringPtrOrNil returns nil for null or unknown strings.
+// ValueStringPointer returns &"" for unknown, which can accidentally send a value.
+func stringPtrOrNil(v types.String) *string {
+	if v.IsNull() || v.IsUnknown() {
+		return nil
+	}
+	return v.ValueStringPointer()
+}
+
 // corsPtr returns a pointer to a CORSBehavior if the value is known and not empty,
 // otherwise returns nil (which will use the server default).
 func corsPtr(v types.String) *codersdk.CORSBehavior {
