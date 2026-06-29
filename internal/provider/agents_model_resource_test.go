@@ -705,9 +705,13 @@ resource "coderd_agents_model" "sonnet" {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Create bound to the anthropic provider.
 				Config: cfg(anthropic.ID.String(), 200000),
-				Check:  resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "provider_type", "anthropic"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "provider_type", "anthropic"),
 			},
 			{
 				// Changing only context_limit (ai_provider_id unchanged) must keep
