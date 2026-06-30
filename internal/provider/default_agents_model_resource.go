@@ -10,9 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -59,7 +57,7 @@ func (r *DefaultAgentsModelResource) ModifyPlan(ctx context.Context, req resourc
 
 func (r *DefaultAgentsModelResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.\n\n" +
+		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"Selects which `coderd_agents_model` is the deployment-wide default chat model for Coder Agents.\n\n" +
 			"Coder enforces a single default model globally: marking a model as default automatically demotes the " +
 			"previous default in the same operation. Because the default is a global singleton, only one " +
@@ -72,9 +70,6 @@ func (r *DefaultAgentsModelResource) Schema(ctx context.Context, req resource.Sc
 				MarkdownDescription: "Constant identifier for the singleton default Agents model pointer. Always `default`.",
 				Computed:            true,
 				Default:             stringdefault.StaticString(defaultAgentsModelID),
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 			"model_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the `coderd_agents_model` to mark as the deployment-wide default. Usually this is `coderd_agents_model.<name>.id`.",
@@ -139,7 +134,8 @@ func (r *DefaultAgentsModelResource) Read(ctx context.Context, req resource.Read
 
 	// Coder keeps a default model whenever any model exists, so reaching here
 	// means there are no models at all. Treat the pointer as deleted.
-	resp.Diagnostics.AddWarning("Client Warning", "No default Agents model found. Marking as deleted.")
+	resp.Diagnostics.AddWarning("Client Warning",
+		fmt.Sprintf("No default Agents model found among %d model config(s). Marking as deleted.", len(configs)))
 	resp.State.RemoveResource(ctx)
 }
 
@@ -169,9 +165,9 @@ func (r *DefaultAgentsModelResource) Delete(ctx context.Context, req resource.De
 }
 
 func (r *DefaultAgentsModelResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by the coderd_agents_model UUID to mark as default. Read then
-	// reconciles model_id to whichever model Coder currently reports as default,
-	// so the value self-corrects if the supplied ID is stale.
+	// The import ID seeds model_id, but Read immediately overwrites it with
+	// whichever model Coder currently reports as default, so any value (even a
+	// stale or arbitrary UUID) self-corrects. Import does not promote a model.
 	resource.ImportStatePassthroughID(ctx, path.Root("model_id"), req, resp)
 }
 

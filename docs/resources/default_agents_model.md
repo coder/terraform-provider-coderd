@@ -3,7 +3,7 @@
 page_title: "coderd_default_agents_model Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
-  ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
+  ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
   Selects which coderd_agents_model is the deployment-wide default chat model for Coder Agents.
   Coder enforces a single default model globally: marking a model as default automatically demotes the previous default in the same operation. Because the default is a global singleton, only one coderd_default_agents_model resource should exist per deployment.
   Destroying this resource does not clear the default server-side. Coder always keeps exactly one model marked as default and force-promotes a replacement when the current default is removed, so deleting this resource only stops Terraform from managing which model is default.
@@ -11,7 +11,7 @@ description: |-
 
 # coderd_default_agents_model (Resource)
 
-~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
+~> This resource is experimental. Changes are expected, and it is not recommended for production use.
 
 Selects which `coderd_agents_model` is the deployment-wide default chat model for Coder Agents.
 

@@ -10,6 +10,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/stretchr/testify/require"
@@ -21,9 +22,52 @@ func TestDefaultAgentsModelStateFromModelConfig(t *testing.T) {
 	id := uuid.New()
 	state := stateFromDefaultModelConfig(codersdk.ChatModelConfig{ID: id, IsDefault: true})
 	require.Equal(t, defaultAgentsModelID, state.ID.ValueString())
-	require.Equal(t, "default", state.ID.ValueString())
 	require.Equal(t, id, state.ModelID.ValueUUID())
 	require.Equal(t, id.String(), state.ModelID.ValueString())
+}
+
+// TestDefaultAgentsModelResourceValidationDefersUnknownConfig proves the
+// validate walk succeeds when the Required model_id is unknown (sourced from a
+// no-default variable), the spot the #305 family of bugs surfaced. UUIDType
+// defers on unknown today; this guards against a future ValidateConfig or
+// validator that forgets the unknown guard.
+func TestDefaultAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {
+	t.Parallel()
+
+	// PlanOnly reaches provider Configure(), which fetches the current user
+	// and entitlements, so use a mock server instead of an unreachable URL.
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	cfg := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+
+variable "model_id" {
+  type = string
+}
+
+resource "coderd_default_agents_model" "default" {
+  model_id = var.model_id
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// model_id is unknown during the validate walk even though
+				// ConfigVariables supplies a concrete plan value.
+				Config: cfg,
+				ConfigVariables: config.Variables{
+					"model_id": config.StringVariable(uuid.NewString()),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
 }
 
 // TestAccDefaultAgentsModelResource exercises the full Terraform-managed
