@@ -124,7 +124,11 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	aiProviderID := uuid.New()
 	createdAt := time.Unix(1700000000, 0)
 	updatedAt := time.Unix(1700000600, 0)
-	remote := decodeAgentsModelConfigForTest(t, `{"max_output_tokens":8192,"cost":{"input_price_per_million_tokens":"3"}}`)
+	// max_output_tokens is MaxInt64 on purpose: it is not exactly representable
+	// as a float64, so if the key-sorting step ever decoded numbers into float64
+	// (instead of json.Number) it would corrupt this to ...808 and fail the
+	// exact-bytes assertion below. This is the numeric-no-regression guard.
+	remote := decodeAgentsModelConfigForTest(t, `{"max_output_tokens":9223372036854775807,"cost":{"input_price_per_million_tokens":"3"}}`)
 
 	var diags diag.Diagnostics
 	state := stateFromModelConfig(codersdk.ChatModelConfig{
@@ -152,9 +156,15 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	require.Equal(t, createdAt.Unix(), state.CreatedAt.ValueInt64())
 	require.Equal(t, updatedAt.Unix(), state.UpdatedAt.ValueInt64())
 
-	expected, err := json.Marshal(remote)
-	require.NoError(t, err)
-	require.JSONEq(t, string(expected), state.ModelConfig.ValueString(), "state mirrors the config Coder returns")
+	// State must store model_config with alphabetically-sorted keys (cost before
+	// max_output_tokens, recursively) so it byte-matches the user's jsonencode
+	// config; the SDK struct order would emit max_output_tokens first. Without
+	// the byte match, every post-import plan spuriously flips updated_at to
+	// "known after apply".
+	require.Equal(t,
+		`{"cost":{"input_price_per_million_tokens":"3"},"max_output_tokens":9223372036854775807}`,
+		state.ModelConfig.ValueString(),
+		"state stores model_config with sorted keys and exact number tokens to match jsonencode byte-for-byte")
 }
 
 func TestAgentsModelConfigSemanticEquals(t *testing.T) {
@@ -557,26 +567,18 @@ resource "coderd_agents_model" "sonnet" {
 	})
 }
 
-// TestAccAgentsModelResourceImportNoDrift reproduces the import-path perpetual
-// model_config diff that agentsModelConfigUseStateIfSemanticallyEqual fixes.
+// TestAccAgentsModelResourceImportNoDrift proves that importing a model and
+// re-planning the identical config is a clean, empty plan.
 //
 // The model is created out-of-band (so import, not a prior apply, is what seeds
-// state) and then imported. Read stores Coder's struct-order model_config JSON,
-// whereas the HCL config's jsonencode emits keys alphabetically. The plugin
-// framework only runs StringSemanticEquals against state during refresh/apply,
-// never against the config on the plan path, so without the plan modifier the
-// struct-order state perpetually diffs against the alphabetical config. top_p/
-// top_k are chosen because their struct order (top_p, top_k) differs from
-// jsonencode's alphabetical order (top_k, top_p), so a missing modifier yields a
-// real diff rather than a coincidental byte match.
-//
-// The assertion targets model_config specifically via ExpectKnownValue: with the
-// modifier, model_config plans as a known value equal to the imported state JSON
-// (no change); without it, model_config would plan as the alphabetical config
-// string and the exact-match check fails. This is deliberately scoped to
-// model_config rather than ExpectEmptyPlan so it does not depend on updated_at,
-// which correctly plans "known after apply" on externally seeded state (pinning
-// it would break real updates — see the updated_at schema comment).
+// state) and then imported. Read stores model_config as alphabetically-sorted
+// JSON (agentsModelConfigToState), which byte-matches the HCL config's jsonencode
+// output. top_p/top_k are chosen because the SDK struct order (top_p, top_k)
+// differs from jsonencode's alphabetical order (top_k, top_p): if state were
+// stored in struct order, the byte mismatch would trip the framework's raw-byte
+// plan guard (PlannedState.Raw.Equal(PriorState.Raw)) and flip the computed
+// updated_at to "known after apply" on every plan — a perpetual, non-convergent
+// diff. Sorting keys in state removes the mismatch, so the re-plan is empty.
 func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -586,8 +588,7 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	client := integration.StartCoder(ctx, t, "agents_model_import_acc", integration.UseLicense)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
-	// Create the model out-of-band so state is first populated by import (Read),
-	// which serializes model_config in Coder's struct field order.
+	// Create the model out-of-band so state is first populated by import (Read).
 	exp := codersdk.NewExperimentalClient(client)
 	created, err := exp.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
 		AIProviderID: &aiProvider.ID,
@@ -601,11 +602,6 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	require.NoError(t, err, "create chat model config out-of-band")
 	// WithoutCancel: t.Context() is already cancelled by the time cleanup runs.
 	t.Cleanup(func() { _ = exp.DeleteChatModelConfig(context.WithoutCancel(t.Context()), created.ID) })
-
-	// The provider stores model_config as Coder's struct-order JSON after import;
-	// the plan modifier must keep that exact value (not the alphabetical config).
-	wantModelConfig, err := agentsModelConfigCanonicalJSON(`{"top_p":0.9,"top_k":40}`)
-	require.NoError(t, err)
 
 	cfg := fmt.Sprintf(`
 provider "coderd" {
@@ -631,7 +627,7 @@ resource "coderd_agents_model" "sonnet" {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				// Import seeds state with Coder's struct-order model_config JSON.
+				// Import seeds state with the sorted model_config JSON.
 				Config:             cfg,
 				ResourceName:       "coderd_agents_model.sonnet",
 				ImportState:        true,
@@ -639,24 +635,12 @@ resource "coderd_agents_model" "sonnet" {
 				ImportStatePersist: true,
 			},
 			{
-				// Re-plan against the same config: model_config must stay a known
-				// value equal to the imported struct-order JSON. The PreApply check
-				// runs at plan time and fails if model_config drifts (PlanOnly can't
-				// be combined with ConfigPlanChecks, so this is a normal apply step;
-				// updated_at's correct "known after apply" is simply ignored here).
-				Config: cfg,
-				// updated_at correctly re-plans as "known after apply" on the next
-				// refresh, so the post-apply plan is legitimately non-empty.
-				ExpectNonEmptyPlan: true,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectKnownValue(
-							"coderd_agents_model.sonnet",
-							tfjsonpath.New("model_config"),
-							knownvalue.StringExact(wantModelConfig),
-						),
-					},
-				},
+				// Re-plan against the same config must be a clean no-op: the sorted
+				// model_config in state byte-matches the jsonencode config, so it
+				// does not drift and updated_at is not flipped to "known after
+				// apply". PlanOnly fails if the plan is non-empty.
+				Config:   cfg,
+				PlanOnly: true,
 			},
 		},
 	})

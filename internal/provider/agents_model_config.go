@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -125,6 +126,28 @@ func agentsModelConfigCanonicalJSON(raw string) (string, error) {
 		return "", err
 	}
 	encoded, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// agentsModelConfigSortedJSON re-encodes a JSON document with object keys sorted
+// alphabetically (recursively) and compact spacing, matching Terraform's
+// jsonencode output. Numbers are preserved verbatim via json.Number, so the only
+// change is key order. Coder stores model_config in the SDK struct's field order,
+// which is not alphabetical; without this the byte string in state never matches
+// the user's jsonencode config, and the framework's raw-byte plan guard
+// (server_planresourcechange.go: PlannedState.Raw.Equal(PriorState.Raw)) then
+// marks the computed updated_at attribute unknown on every plan after import.
+func agentsModelConfigSortedJSON(raw []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}

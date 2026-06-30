@@ -405,5 +405,13 @@ func agentsModelConfigToState(remote *codersdk.ChatModelCallConfig, diags *diag.
 		diags.AddError("Model Config Error", fmt.Sprintf("Unable to encode returned model_config: %s", err))
 		return newAgentsModelConfigNull()
 	}
-	return newAgentsModelConfigValue(string(encoded))
+	// Sort keys alphabetically so the stored value matches the user's jsonencode
+	// config byte-for-byte; otherwise every post-import plan spuriously marks
+	// updated_at unknown (see agentsModelConfigSortedJSON).
+	sorted, err := agentsModelConfigSortedJSON(encoded)
+	if err != nil {
+		diags.AddError("Model Config Error", fmt.Sprintf("Unable to normalize returned model_config: %s", err))
+		return newAgentsModelConfigNull()
+	}
+	return newAgentsModelConfigValue(sorted)
 }
