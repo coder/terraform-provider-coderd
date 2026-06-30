@@ -268,7 +268,11 @@ func TestIntegration(t *testing.T) {
 				}
 				require.Len(t, configs, len(want))
 
+				var defaults []string
 				for _, m := range configs {
+					if m.IsDefault {
+						defaults = append(defaults, m.Model)
+					}
 					w, ok := want[m.Model]
 					require.True(t, ok, "unexpected model %s", m.Model)
 					assert.Equal(t, w.provider, m.Provider)
@@ -282,6 +286,9 @@ func TestIntegration(t *testing.T) {
 						t.Errorf("model_config for %s mismatch (-want +got):\n%s", m.Model, diff)
 					}
 				}
+				// coderd_default_agents_model.default points at claude_sonnet, which
+				// demotes the auto-promoted claude_opus, so Sonnet is the sole default.
+				assert.Equal(t, []string{"claude-sonnet-4-6"}, defaults)
 			},
 		},
 	} {
