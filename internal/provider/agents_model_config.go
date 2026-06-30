@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/attr/xattr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -128,6 +129,45 @@ func agentsModelConfigCanonicalJSON(raw string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// agentsModelConfigUseStateIfSemanticallyEqual keeps the prior state value when
+// the configured model_config canonicalizes to the same JSON. The plugin
+// framework only runs StringSemanticEquals against state during refresh/apply,
+// never against the (jsonencode-sorted) config during plan, so without this a
+// key-order-only difference between state and config yields a perpetual no-op
+// diff. This surfaces after `terraform import` (Read stores Coder's struct-order
+// JSON, which the alphabetical jsonencode config never matches byte-for-byte).
+type agentsModelConfigUseStateIfSemanticallyEqual struct{}
+
+var _ planmodifier.String = agentsModelConfigUseStateIfSemanticallyEqual{}
+
+func (agentsModelConfigUseStateIfSemanticallyEqual) Description(_ context.Context) string {
+	return "Keeps the prior model_config when the configured value is semantically equal."
+}
+
+func (m agentsModelConfigUseStateIfSemanticallyEqual) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (agentsModelConfigUseStateIfSemanticallyEqual) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.StateValue.IsNull() || req.StateValue.IsUnknown() {
+		return
+	}
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	stateCanon, err := agentsModelConfigCanonicalJSON(req.StateValue.ValueString())
+	if err != nil {
+		return
+	}
+	configCanon, err := agentsModelConfigCanonicalJSON(req.ConfigValue.ValueString())
+	if err != nil {
+		return
+	}
+	if stateCanon == configCanon {
+		resp.PlanValue = req.StateValue
+	}
 }
 
 // agentsModelConfigNotEmptyValidator rejects an empty model_config (e.g. jsonencode({})):

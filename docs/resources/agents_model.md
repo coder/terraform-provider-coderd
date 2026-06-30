@@ -4,17 +4,14 @@ page_title: "coderd_agents_model Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
   ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
-  Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see coderd_ai_provider) along with context, compression, default election, and optional JSON tuning settings.
-  The server owns default election: set is_default = true on at most one model and omit it on the others rather than forcing it to false.
+  Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see coderd_ai_provider) along with context, compression, and optional JSON tuning settings.
 ---
 
 # coderd_agents_model (Resource)
 
 ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
 
-Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, default election, and optional JSON tuning settings.
-
-The server owns default election: set `is_default = true` on at most one model and omit it on the others rather than forcing it to false.
+Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings.
 
 ## Example Usage
 
@@ -38,7 +35,6 @@ resource "coderd_agents_model" "sonnet" {
   model          = "claude-3-5-sonnet-20241022"
   display_name   = "Claude 3.5 Sonnet"
   enabled        = true
-  is_default     = true
   context_limit  = 200000
 
   model_config = jsonencode({
@@ -72,7 +68,6 @@ resource "coderd_agents_model" "sonnet" {
 - `compression_threshold` (Number) Percentage of the context window at which Coder should compact chat context. Defaults to 70 and must be between 0 and 100.
 - `display_name` (String) Display name shown in Coder.
 - `enabled` (Boolean) Whether this model configuration is enabled. Defaults to true.
-- `is_default` (Boolean) Whether this is the default model for new chats. Coder manages the single default server-side, so set `is_default = true` on one model and omit it on others.
 - `model_config` (String) Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, `cost`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.
 
 ### Read-Only

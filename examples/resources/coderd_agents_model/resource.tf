@@ -17,7 +17,6 @@ resource "coderd_agents_model" "sonnet" {
   model          = "claude-3-5-sonnet-20241022"
   display_name   = "Claude 3.5 Sonnet"
   enabled        = true
-  is_default     = true
   context_limit  = 200000
 
   model_config = jsonencode({

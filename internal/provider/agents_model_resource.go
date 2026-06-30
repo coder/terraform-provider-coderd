@@ -3,7 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -25,11 +28,10 @@ import (
 )
 
 var (
-	_ resource.Resource                   = &AgentsModelResource{}
-	_ resource.ResourceWithConfigure      = &AgentsModelResource{}
-	_ resource.ResourceWithImportState    = &AgentsModelResource{}
-	_ resource.ResourceWithModifyPlan     = &AgentsModelResource{}
-	_ resource.ResourceWithValidateConfig = &AgentsModelResource{}
+	_ resource.Resource                = &AgentsModelResource{}
+	_ resource.ResourceWithConfigure   = &AgentsModelResource{}
+	_ resource.ResourceWithImportState = &AgentsModelResource{}
+	_ resource.ResourceWithModifyPlan  = &AgentsModelResource{}
 )
 
 func NewAgentsModelResource() resource.Resource {
@@ -51,7 +53,6 @@ type AgentsModelResourceModel struct {
 	Model                types.String           `tfsdk:"model"`
 	DisplayName          types.String           `tfsdk:"display_name"`
 	Enabled              types.Bool             `tfsdk:"enabled"`
-	IsDefault            types.Bool             `tfsdk:"is_default"`
 	ContextLimit         types.Int64            `tfsdk:"context_limit"`
 	CompressionThreshold types.Int64            `tfsdk:"compression_threshold"`
 	ModelConfig          agentsModelConfigValue `tfsdk:"model_config"`
@@ -70,26 +71,10 @@ func (r *AgentsModelResource) ModifyPlan(ctx context.Context, req resource.Modif
 	)
 }
 
-func (r *AgentsModelResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data AgentsModelResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if !data.IsDefault.IsNull() && !data.IsDefault.IsUnknown() && !data.IsDefault.ValueBool() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("is_default"),
-			"Invalid is_default",
-			"Coder elects the default model server-side. Set is_default = true on one model and omit it on others.",
-		)
-	}
-}
-
 func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.\n\n" +
-			"Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, default election, and optional JSON tuning settings.\n\n" +
-			"The server owns default election: set `is_default = true` on at most one model and omit it on the others rather than forcing it to false.",
+			"Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Agents model configuration ID.",
@@ -137,11 +122,6 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
-			"is_default": schema.BoolAttribute{
-				MarkdownDescription: "Whether this is the default model for new chats. Coder manages the single default server-side, so set `is_default = true` on one model and omit it on others.",
-				Optional:            true,
-				Computed:            true,
-			},
 			"context_limit": schema.Int64Attribute{
 				MarkdownDescription: "Maximum context window for this model. Must be greater than zero.",
 				Required:            true,
@@ -167,6 +147,9 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				Validators: []validator.String{
 					agentsModelConfigNotEmptyValidator{},
 				},
+				PlanModifiers: []planmodifier.String{
+					agentsModelConfigUseStateIfSemanticallyEqual{},
+				},
 			},
 			"created_at": schema.Int64Attribute{
 				MarkdownDescription: "Creation timestamp as Unix seconds.",
@@ -178,6 +161,12 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 			"updated_at": schema.Int64Attribute{
 				MarkdownDescription: "Last update timestamp as Unix seconds.",
 				Computed:            true,
+				// Deliberately NO UseStateForUnknown: unlike created_at, updated_at is
+				// mutable. The server sets it to NOW() on every update, so pinning the
+				// prior value makes a real update fail with "inconsistent result after
+				// apply" whenever the update crosses a one-second boundary (the planned
+				// timestamp != the server's fresh timestamp). The cosmetic post-refresh
+				// "known after apply" on imported state is the correct tradeoff.
 			},
 		},
 	}
@@ -210,7 +199,7 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	tflog.Info(ctx, "creating Agents model")
-	modelConfig, err := r.experimentalClient().CreateChatModelConfig(ctx, createReq)
+	modelConfig, err := r.createChatModelConfigWithRetry(ctx, createReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", err))
 		return
@@ -221,6 +210,32 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// createChatModelConfigWithRetry retries CreateChatModelConfig on the 409
+// default-election race (the only unique constraint is the single-default one,
+// so a 409 can only be that race). Required until Linear CODAGT-736 is fixed
+// server-side; remove this and call CreateChatModelConfig directly once it is.
+func (r *AgentsModelResource) createChatModelConfigWithRetry(ctx context.Context, req codersdk.CreateChatModelConfigRequest) (codersdk.ChatModelConfig, error) {
+	const maxAttempts = 10
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		config, err := r.experimentalClient().CreateChatModelConfig(ctx, req)
+		if err == nil {
+			return config, nil
+		}
+		var sdkErr *codersdk.Error
+		if !errors.As(err, &sdkErr) || sdkErr.StatusCode() != http.StatusConflict {
+			return codersdk.ChatModelConfig{}, err
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return codersdk.ChatModelConfig{}, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+		}
+	}
+	return codersdk.ChatModelConfig{}, lastErr
 }
 
 func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -307,10 +322,6 @@ func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersd
 		CompressionThreshold: ptr.Ref(int32(m.CompressionThreshold.ValueInt64())),
 		ModelConfig:          agentsModelDecodeConfig(m.ModelConfig, diags),
 	}
-	// Omitted is_default is unknown (no static default); leave it nil so Coder elects the default.
-	if !m.IsDefault.IsUnknown() {
-		req.IsDefault = m.IsDefault.ValueBoolPointer()
-	}
 	return req
 }
 
@@ -328,9 +339,6 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 	}
 	if !m.Enabled.Equal(state.Enabled) {
 		req.Enabled = ptr.Ref(m.Enabled.ValueBool())
-	}
-	if !m.IsDefault.IsNull() && !m.IsDefault.IsUnknown() && !m.IsDefault.Equal(state.IsDefault) {
-		req.IsDefault = m.IsDefault.ValueBoolPointer()
 	}
 	if !m.ContextLimit.Equal(state.ContextLimit) {
 		req.ContextLimit = ptr.Ref(m.ContextLimit.ValueInt64())
@@ -356,7 +364,6 @@ func stateFromModelConfig(config codersdk.ChatModelConfig, diags *diag.Diagnosti
 		Model:                types.StringValue(config.Model),
 		DisplayName:          types.StringValue(config.DisplayName),
 		Enabled:              types.BoolValue(config.Enabled),
-		IsDefault:            types.BoolValue(config.IsDefault),
 		ContextLimit:         types.Int64Value(config.ContextLimit),
 		CompressionThreshold: types.Int64Value(int64(config.CompressionThreshold)),
 		ModelConfig:          agentsModelConfigToState(config.ModelConfig, diags),

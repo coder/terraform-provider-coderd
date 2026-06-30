@@ -11,11 +11,13 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/config"
@@ -36,7 +38,6 @@ func TestAgentsModelCreateRequest(t *testing.T) {
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
 		Enabled:              types.BoolValue(true),
-		IsDefault:            types.BoolValue(true),
 		ContextLimit:         types.Int64Value(200000),
 		CompressionThreshold: types.Int64Value(70),
 		ModelConfig:          newAgentsModelConfigValue(`{"max_output_tokens":8192,"temperature":0.7,"cost":{"input_price_per_million_tokens":"3"}}`),
@@ -52,8 +53,6 @@ func TestAgentsModelCreateRequest(t *testing.T) {
 	require.Equal(t, "Claude 3.5 Sonnet", req.DisplayName)
 	require.NotNil(t, req.Enabled)
 	require.True(t, *req.Enabled)
-	require.NotNil(t, req.IsDefault)
-	require.True(t, *req.IsDefault)
 	require.NotNil(t, req.ContextLimit)
 	require.EqualValues(t, 200000, *req.ContextLimit)
 	require.NotNil(t, req.CompressionThreshold)
@@ -74,7 +73,6 @@ func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
 		Enabled:              types.BoolValue(true),
-		IsDefault:            types.BoolValue(true),
 		ContextLimit:         types.Int64Value(200000),
 		CompressionThreshold: types.Int64Value(70),
 		ModelConfig:          newAgentsModelConfigValue(`{"max_output_tokens":8192}`),
@@ -91,47 +89,12 @@ func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
 	require.Empty(t, patch.Model)
 	require.Empty(t, patch.DisplayName)
 	require.Nil(t, patch.Enabled)
-	require.Nil(t, patch.IsDefault)
 	require.Nil(t, patch.ContextLimit)
 	require.Nil(t, patch.CompressionThreshold)
 }
 
-// An unknown is_default (omitted in config) must never be sent: the server owns
-// default election, and types.BoolUnknown().ValueBoolPointer() returns &false,
-// which would silently demote the model.
-func TestAgentsModelRequestIsDefaultUnknown(t *testing.T) {
-	t.Parallel()
-
-	createPlan := AgentsModelResourceModel{
-		AIProviderID:         UUIDValue(uuid.New()),
-		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
-		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
-		Enabled:              types.BoolValue(true),
-		IsDefault:            types.BoolUnknown(),
-		ContextLimit:         types.Int64Value(200000),
-		CompressionThreshold: types.Int64Value(70),
-		ModelConfig:          newAgentsModelConfigNull(),
-	}
-	var createDiags diag.Diagnostics
-	createReq := createPlan.createRequest(&createDiags)
-	require.False(t, createDiags.HasError(), createDiags.Errors())
-	require.Nil(t, createReq.IsDefault, "unknown is_default must not be sent on create")
-
-	state := createPlan
-	state.IsDefault = types.BoolValue(true)
-	updatePlan := state
-	updatePlan.IsDefault = types.BoolUnknown()
-	updatePlan.DisplayName = types.StringValue("Renamed")
-
-	var updateDiags diag.Diagnostics
-	patch := updatePlan.updateRequest(state, &updateDiags)
-	require.False(t, updateDiags.HasError(), updateDiags.Errors())
-	require.Equal(t, "Renamed", patch.DisplayName, "the changed field is still sent")
-	require.Nil(t, patch.IsDefault, "unknown is_default must not be sent on update")
-}
-
 // A changed field appears in the update patch. ModelConfig is covered above;
-// this locks the Enabled and IsDefault transitions.
+// this locks the Enabled transition.
 func TestAgentsModelUpdateRequestChangedFields(t *testing.T) {
 	t.Parallel()
 
@@ -140,22 +103,18 @@ func TestAgentsModelUpdateRequestChangedFields(t *testing.T) {
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
 		Enabled:              types.BoolValue(true),
-		IsDefault:            types.BoolValue(false),
 		ContextLimit:         types.Int64Value(200000),
 		CompressionThreshold: types.Int64Value(70),
 		ModelConfig:          newAgentsModelConfigNull(),
 	}
 	plan := state
 	plan.Enabled = types.BoolValue(false)
-	plan.IsDefault = types.BoolValue(true)
 
 	var diags diag.Diagnostics
 	patch := plan.updateRequest(state, &diags)
 	require.False(t, diags.HasError(), diags.Errors())
 	require.NotNil(t, patch.Enabled)
 	require.False(t, *patch.Enabled, "a changed Enabled is sent")
-	require.NotNil(t, patch.IsDefault)
-	require.True(t, *patch.IsDefault, "a changed IsDefault is sent")
 }
 
 func TestAgentsModelStateFromModelConfig(t *testing.T) {
@@ -175,7 +134,6 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 		Model:                "claude-3-5-sonnet-20241022",
 		DisplayName:          "Claude 3.5 Sonnet",
 		Enabled:              true,
-		IsDefault:            true,
 		ContextLimit:         200000,
 		CompressionThreshold: 70,
 		ModelConfig:          remote,
@@ -189,7 +147,6 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	require.Equal(t, "claude-3-5-sonnet-20241022", state.Model.ValueString())
 	require.Equal(t, "Claude 3.5 Sonnet", state.DisplayName.ValueString())
 	require.True(t, state.Enabled.ValueBool())
-	require.True(t, state.IsDefault.ValueBool())
 	require.EqualValues(t, 200000, state.ContextLimit.ValueInt64())
 	require.EqualValues(t, 70, state.CompressionThreshold.ValueInt64())
 	require.Equal(t, createdAt.Unix(), state.CreatedAt.ValueInt64())
@@ -301,6 +258,54 @@ func TestAgentsModelConfigCanonicalJSON(t *testing.T) {
 	})
 }
 
+// TestAgentsModelConfigUseStateIfSemanticallyEqual covers the plan modifier that
+// fixes the perpetual import-path diff: the plugin framework never runs
+// StringSemanticEquals on the config->plan path, so a key-order-only difference
+// between Coder's struct-order state JSON and the alphabetical jsonencode config
+// would otherwise re-plan forever. The modifier pins the plan to state only when
+// the two canonicalize equal.
+func TestAgentsModelConfigUseStateIfSemanticallyEqual(t *testing.T) {
+	t.Parallel()
+
+	mod := agentsModelConfigUseStateIfSemanticallyEqual{}
+	planAfter := func(state, config, plan types.String) types.String {
+		resp := planmodifier.StringResponse{PlanValue: plan}
+		mod.PlanModifyString(t.Context(), planmodifier.StringRequest{
+			StateValue:  state,
+			ConfigValue: config,
+			PlanValue:   plan,
+		}, &resp)
+		return resp.PlanValue
+	}
+
+	t.Run("key-order-only difference pins state", func(t *testing.T) {
+		t.Parallel()
+		// state is Coder's struct order; config is what jsonencode emits (sorted).
+		state := types.StringValue(`{"max_output_tokens":8192,"temperature":0.7}`)
+		config := types.StringValue(`{"temperature":0.7,"max_output_tokens":8192}`)
+		require.Equal(t, state, planAfter(state, config, config))
+	})
+
+	t.Run("real value change is left alone", func(t *testing.T) {
+		t.Parallel()
+		state := types.StringValue(`{"temperature":0.7}`)
+		config := types.StringValue(`{"temperature":0.2}`)
+		require.Equal(t, config, planAfter(state, config, config))
+	})
+
+	t.Run("null state is left alone", func(t *testing.T) {
+		t.Parallel()
+		config := types.StringValue(`{"temperature":0.7}`)
+		require.Equal(t, config, planAfter(types.StringNull(), config, config))
+	})
+
+	t.Run("unknown config is left alone", func(t *testing.T) {
+		t.Parallel()
+		state := types.StringValue(`{"temperature":0.7}`)
+		require.Equal(t, types.StringUnknown(), planAfter(state, types.StringUnknown(), types.StringUnknown()))
+	})
+}
+
 func TestAgentsModelDecodeConfig(t *testing.T) {
 	t.Parallel()
 
@@ -375,33 +380,6 @@ func TestAgentsModelConfigNotEmptyValidator(t *testing.T) {
 	t.Run("non-object json is rejected", func(t *testing.T) {
 		t.Parallel()
 		require.True(t, validate(t, types.StringValue(`[1,2]`)).HasError())
-	})
-}
-
-func TestAgentsModelResourceValidateConfig(t *testing.T) {
-	t.Parallel()
-
-	cfg := `provider "coderd" {
-  url   = "http://127.0.0.1"
-  token = "test-token"
-}
-
-resource "coderd_agents_model" "sonnet" {
-  ai_provider_id = "` + uuid.NewString() + `"
-  model          = "claude-3-5-sonnet-20241022"
-  context_limit  = 200000
-  is_default     = false
-}
-`
-	resource.Test(t, resource.TestCase{
-		IsUnitTest:               true,
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config:      cfg,
-				ExpectError: regexp.MustCompile(`Invalid is_default`),
-			},
-		},
 	})
 }
 
@@ -490,7 +468,6 @@ func TestAccAgentsModelResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "model", cfg1.Model),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "display_name", cfg1.DisplayName),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "enabled", "true"),
-					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "is_default", "true"),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "context_limit", "200000"),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "compression_threshold", "70"),
 					testCheckAgentsModelConfig(8192, 0.7),
@@ -580,6 +557,111 @@ resource "coderd_agents_model" "sonnet" {
 	})
 }
 
+// TestAccAgentsModelResourceImportNoDrift reproduces the import-path perpetual
+// model_config diff that agentsModelConfigUseStateIfSemanticallyEqual fixes.
+//
+// The model is created out-of-band (so import, not a prior apply, is what seeds
+// state) and then imported. Read stores Coder's struct-order model_config JSON,
+// whereas the HCL config's jsonencode emits keys alphabetically. The plugin
+// framework only runs StringSemanticEquals against state during refresh/apply,
+// never against the config on the plan path, so without the plan modifier the
+// struct-order state perpetually diffs against the alphabetical config. top_p/
+// top_k are chosen because their struct order (top_p, top_k) differs from
+// jsonencode's alphabetical order (top_k, top_p), so a missing modifier yields a
+// real diff rather than a coincidental byte match.
+//
+// The assertion targets model_config specifically via ExpectKnownValue: with the
+// modifier, model_config plans as a known value equal to the imported state JSON
+// (no change); without it, model_config would plan as the alphabetical config
+// string and the exact-match check fails. This is deliberately scoped to
+// model_config rather than ExpectEmptyPlan so it does not depend on updated_at,
+// which correctly plans "known after apply" on externally seeded state (pinning
+// it would break real updates — see the updated_at schema comment).
+func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "agents_model_import_acc", integration.UseLicense)
+	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
+
+	// Create the model out-of-band so state is first populated by import (Read),
+	// which serializes model_config in Coder's struct field order.
+	exp := codersdk.NewExperimentalClient(client)
+	created, err := exp.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
+		AIProviderID: &aiProvider.ID,
+		Model:        "claude-3-5-sonnet-20241022",
+		ContextLimit: ptr.Ref(int64(200000)),
+		ModelConfig: &codersdk.ChatModelCallConfig{
+			TopP: ptr.Ref(0.9),
+			TopK: ptr.Ref(int64(40)),
+		},
+	})
+	require.NoError(t, err, "create chat model config out-of-band")
+	// WithoutCancel: t.Context() is already cancelled by the time cleanup runs.
+	t.Cleanup(func() { _ = exp.DeleteChatModelConfig(context.WithoutCancel(t.Context()), created.ID) })
+
+	// The provider stores model_config as Coder's struct-order JSON after import;
+	// the plan modifier must keep that exact value (not the alphabetical config).
+	wantModelConfig, err := agentsModelConfigCanonicalJSON(`{"top_p":0.9,"top_k":40}`)
+	require.NoError(t, err)
+
+	cfg := fmt.Sprintf(`
+provider "coderd" {
+  url   = %q
+  token = %q
+}
+
+resource "coderd_agents_model" "sonnet" {
+  ai_provider_id = %q
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+
+  model_config = jsonencode({
+    top_p = 0.9
+    top_k = 40
+  })
+}
+`, client.URL.String(), client.SessionToken(), aiProvider.ID.String())
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Import seeds state with Coder's struct-order model_config JSON.
+				Config:             cfg,
+				ResourceName:       "coderd_agents_model.sonnet",
+				ImportState:        true,
+				ImportStateId:      created.ID.String(),
+				ImportStatePersist: true,
+			},
+			{
+				// Re-plan against the same config: model_config must stay a known
+				// value equal to the imported struct-order JSON. The PreApply check
+				// runs at plan time and fails if model_config drifts (PlanOnly can't
+				// be combined with ConfigPlanChecks, so this is a normal apply step;
+				// updated_at's correct "known after apply" is simply ignored here).
+				Config: cfg,
+				// updated_at correctly re-plans as "known after apply" on the next
+				// refresh, so the post-apply plan is legitimately non-empty.
+				ExpectNonEmptyPlan: true,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue(
+							"coderd_agents_model.sonnet",
+							tfjsonpath.New("model_config"),
+							knownvalue.StringExact(wantModelConfig),
+						),
+					},
+				},
+			},
+		},
+	})
+}
+
 // TestAccAgentsModelResourceEmptyModelConfig locks in the empty-config guard: an
 // empty "{}" is rejected at plan time rather than tripping a post-apply error.
 func TestAccAgentsModelResourceEmptyModelConfig(t *testing.T) {
@@ -644,7 +726,6 @@ resource "coderd_agents_model" "sonnet" {
   model                  = "{{.Model}}"
   display_name           = "{{.DisplayName}}"
   enabled                = true
-  is_default             = true
   context_limit          = {{.ContextLimit}}
   compression_threshold  = {{.CompressionThreshold}}
 

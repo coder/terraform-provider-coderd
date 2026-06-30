@@ -31,7 +31,6 @@ resource "coderd_agents_model" "claude_opus" {
   ai_provider_id        = coderd_ai_provider.anthropic.id
   model                 = "claude-opus-4-8"
   display_name          = "Claude Opus 4.8"
-  is_default            = true
   context_limit         = 1000000
   compression_threshold = 42
 
@@ -53,7 +52,6 @@ resource "coderd_agents_model" "claude_opus" {
 }
 
 resource "coderd_agents_model" "claude_sonnet" {
-  depends_on            = [coderd_agents_model.claude_opus]
   ai_provider_id        = coderd_ai_provider.anthropic.id
   model                 = "claude-sonnet-4-6"
   display_name          = "Claude Sonnet 4.6"
@@ -79,7 +77,6 @@ resource "coderd_agents_model" "claude_sonnet" {
 }
 
 resource "coderd_agents_model" "gpt_xhigh" {
-  depends_on            = [coderd_agents_model.claude_opus]
   ai_provider_id        = coderd_ai_provider.openai.id
   model                 = "gpt-5.5"
   display_name          = "GPT-5.5"
@@ -106,7 +103,6 @@ resource "coderd_agents_model" "gpt_xhigh" {
 }
 
 resource "coderd_agents_model" "gpt_mini" {
-  depends_on            = [coderd_agents_model.claude_opus]
   ai_provider_id        = coderd_ai_provider.openai.id
   model                 = "gpt-5.4-mini"
   display_name          = "GPT-5.4 Mini"
