@@ -156,11 +156,6 @@ func (r *DefaultAgentsModelResource) Update(ctx context.Context, req resource.Up
 }
 
 func (r *DefaultAgentsModelResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	// No-op. Coder always keeps exactly one model marked as default and
-	// force-promotes a replacement when the current default is removed, so there
-	// is nothing to clear server-side. Removing this resource only stops
-	// Terraform from managing which model is default; the framework drops it from
-	// state automatically.
 	tflog.Info(ctx, "deleting coderd_default_agents_model is a no-op; Coder retains its current default model")
 }
 

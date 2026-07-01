@@ -26,11 +26,8 @@ func TestDefaultAgentsModelStateFromModelConfig(t *testing.T) {
 	require.Equal(t, id.String(), state.ModelID.ValueString())
 }
 
-// TestDefaultAgentsModelResourceValidationDefersUnknownConfig proves the
-// validate walk succeeds when the Required model_id is unknown (sourced from a
-// no-default variable), the spot the #305 family of bugs surfaced. UUIDType
-// defers on unknown today; this guards against a future ValidateConfig or
-// validator that forgets the unknown guard.
+// TestDefaultAgentsModelResourceValidationDefersUnknownConfig checks validation
+// passes when model_id is unknown, like when it comes from an unset variable.
 func TestDefaultAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {
 	t.Parallel()
 
@@ -70,10 +67,6 @@ resource "coderd_default_agents_model" "default" {
 	})
 }
 
-// TestAccDefaultAgentsModelResource exercises the full Terraform-managed
-// lifecycle: selecting a default, re-pointing it to a sibling model (which Coder
-// atomically demotes the previous default for), a steady-state no-drift re-plan,
-// and import.
 func TestAccDefaultAgentsModelResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
