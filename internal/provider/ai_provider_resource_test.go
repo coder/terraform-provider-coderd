@@ -466,6 +466,7 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 			Region:         types.StringUnknown(),
 			Model:          types.StringValue("anthropic.claude-3-5-sonnet-20241022-v2:0"),
 			SmallFastModel: types.StringValue("anthropic.claude-3-5-haiku-20241022-v1:0"),
+			RoleARN:        types.StringValue("arn:aws:iam::123456789012:role/bedrock-access"),
 		}},
 	}
 	// Copy the nested Bedrock value so mutating config doesn't alias plan's
@@ -482,6 +483,7 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 	require.Empty(t, req.APIKeys)
 	require.NotNil(t, req.Settings.Bedrock)
 	require.Equal(t, "us-east-1", req.Settings.Bedrock.Region)
+	require.Equal(t, "arn:aws:iam::123456789012:role/bedrock-access", req.Settings.Bedrock.RoleARN)
 	require.Nil(t, req.Settings.Bedrock.AccessKey)
 	require.Nil(t, req.Settings.Bedrock.AccessKeySecret)
 }

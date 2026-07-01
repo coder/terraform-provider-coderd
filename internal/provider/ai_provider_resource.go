@@ -64,6 +64,7 @@ type AIProviderBedrockSettingsModel struct {
 	Region               types.String `tfsdk:"region"`
 	Model                types.String `tfsdk:"model"`
 	SmallFastModel       types.String `tfsdk:"small_fast_model"`
+	RoleARN              types.String `tfsdk:"role_arn"`
 	AccessKeyWO          types.String `tfsdk:"access_key_wo"`
 	AccessKeySecretWO    types.String `tfsdk:"access_key_secret_wo"`
 	CredentialsWOVersion types.Int64  `tfsdk:"credentials_wo_version"`
@@ -193,6 +194,10 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								PlanModifiers: []planmodifier.String{
 									stringplanmodifier.UseStateForUnknown(),
 								},
+							},
+							"role_arn": schema.StringAttribute{
+								MarkdownDescription: "ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the static credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.",
+								Optional:            true,
 							},
 							"access_key_wo": schema.StringAttribute{
 								MarkdownDescription: "AWS access key ID for Bedrock. See [Coder's Amazon Bedrock provider docs](https://coder.com/docs/ai-coder/ai-gateway/providers#amazon-bedrock).",
@@ -333,13 +338,14 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 		resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("bedrock"), "Invalid Attribute Combination", "`settings.bedrock` is only valid when `type` is `anthropic` or `bedrock`.")
 	}
 	if providerType == codersdk.AIProviderTypeBedrock {
-		if !baseURLKnown || bedrock.Region.IsUnknown() || bedrock.AccessKeyWO.IsUnknown() || bedrock.AccessKeySecretWO.IsUnknown() {
+		if !baseURLKnown || bedrock.Region.IsUnknown() || bedrock.RoleARN.IsUnknown() || bedrock.AccessKeyWO.IsUnknown() || bedrock.AccessKeySecretWO.IsUnknown() {
 			return
 		}
 		sdkSettings := codersdk.AIProviderBedrockSettings{
 			Region:          bedrockRegion(baseURL, bedrock.Region, bedrock.Region),
 			Model:           bedrock.Model.ValueString(),
 			SmallFastModel:  bedrock.SmallFastModel.ValueString(),
+			RoleARN:         bedrock.RoleARN.ValueString(),
 			AccessKey:       stringPtrOrNil(bedrock.AccessKeyWO),
 			AccessKeySecret: stringPtrOrNil(bedrock.AccessKeySecretWO),
 		}
@@ -544,6 +550,7 @@ func (m AIProviderResourceModel) validateEffectiveUpdateState(state, config AIPr
 	}
 	settings := codersdk.AIProviderBedrockSettings{
 		Region:          bedrockRegion(m.BaseURL.ValueString(), cfgBedrock.Region, bedrock.Region),
+		RoleARN:         cfgBedrock.RoleARN.ValueString(),
 		AccessKey:       stringPtrOrNil(cfgBedrock.AccessKeyWO),
 		AccessKeySecret: stringPtrOrNil(cfgBedrock.AccessKeySecretWO),
 	}
@@ -566,6 +573,7 @@ func (m AIProviderResourceModel) sdkSettings(config AIProviderResourceModel, inc
 		Region:         bedrockRegion(m.BaseURL.ValueString(), cfgRegion, bedrock.Region),
 		Model:          bedrock.Model.ValueString(),
 		SmallFastModel: bedrock.SmallFastModel.ValueString(),
+		RoleARN:        bedrock.RoleARN.ValueString(),
 	}
 	if includeCredentials {
 		if cfgBedrock == nil || cfgBedrock.AccessKeyWO.IsNull() || cfgBedrock.AccessKeyWO.IsUnknown() || cfgBedrock.AccessKeySecretWO.IsNull() || cfgBedrock.AccessKeySecretWO.IsUnknown() {
@@ -603,6 +611,7 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 			Region:            types.StringValue(provider.Settings.Bedrock.Region),
 			Model:             types.StringValue(provider.Settings.Bedrock.Model),
 			SmallFastModel:    types.StringValue(provider.Settings.Bedrock.SmallFastModel),
+			RoleARN:           stringValueOrNull(provider.Settings.Bedrock.RoleARN),
 			AccessKeyWO:       types.StringNull(),
 			AccessKeySecretWO: types.StringNull(),
 		}}
