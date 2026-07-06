@@ -679,6 +679,172 @@ func TestAccTemplateResource(t *testing.T) {
 	})
 }
 
+// TestAccTemplateResourceOptionalVersions covers PLAT-288: `versions` is
+// optional, so `coderd_template` can manage a template's settings without
+// owning its version lifecycle. A template still can't be *created* without
+// at least one version (Coderd has no concept of a versionless template), so
+// that case is expected to keep failing with a clear error.
+func TestAccTemplateResourceOptionalVersions(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_optional_versions_acc")
+
+	exTemplate := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplate)
+	require.NoError(t, err)
+
+	t.Run("CreateWithoutVersionsErrors", func(t *testing.T) {
+		cfg := testAccTemplateResourceConfig{
+			URL:          client.URL.String(),
+			Token:        client.SessionToken(),
+			Name:         ptr.Ref("no-versions-template"),
+			VersionsNull: true,
+			ACL:          testAccTemplateACLConfig{null: true},
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg.String(t),
+					// Terraform's CLI diagnostic renderer word-wraps long error
+					// text with real newlines, so `.` must match them too.
+					ExpectError: regexp.MustCompile("(?s)At least one template version.*is required when.*creating"),
+				},
+			},
+		})
+	})
+
+	t.Run("SettingsOnlyManagementAfterDroppingVersions", func(t *testing.T) {
+		firstUser, err := client.User(ctx, codersdk.Me)
+		require.NoError(t, err)
+		orgID := firstUser.OrganizationIDs[0]
+
+		cfgManaged := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("settings-only-template"),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					Directory: &exTemplate,
+					Active:    ptr.Ref(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{null: true},
+		}
+
+		cfgUnmanaged := cfgManaged
+		cfgUnmanaged.Versions = nil
+		cfgUnmanaged.VersionsNull = true
+
+		cfgUnmanagedWithNewDescription := cfgUnmanaged
+		cfgUnmanagedWithNewDescription.Description = ptr.Ref("now managed by an external pipeline")
+
+		// Captured from state in the first step's Check, then used both to
+		// simulate the pipeline's out-of-band push (PreConfig runs before a
+		// step's plan/apply and has no access to *terraform.State, so the ID
+		// has to be threaded through this way) and to verify against the
+		// Coderd API directly in the last step.
+		var templateID uuid.UUID
+		var pipelineVersionID uuid.UUID
+		captureTemplateID := func(s *terraform.State) error {
+			rs, ok := s.RootModule().Resources["coderd_template.test"]
+			if !ok {
+				return fmt.Errorf("coderd_template.test not found in state")
+			}
+			id, err := uuid.Parse(rs.Primary.ID)
+			if err != nil {
+				return fmt.Errorf("failed to parse template id %q: %w", rs.Primary.ID, err)
+			}
+			templateID = id
+			return nil
+		}
+
+		// Simulates the customer's own CI pipeline calling `coder templates
+		// push --activate` outside of Terraform, after Terraform has stopped
+		// tracking any version for this template.
+		pushAndActivateExternalVersion := func() {
+			version := TemplateVersion{
+				Directory:          types.StringValue(exTemplate),
+				TerraformVariables: emptyVariableSet(),
+				ProvisionerTags:    emptyVariableSet(),
+			}
+			versionResp, logs, err := newVersion(ctx, client, newVersionRequest{
+				Version:        &version,
+				OrganizationID: orgID,
+				TemplateID:     &templateID,
+			})
+			require.NoError(t, err, "%v", logs)
+			require.NoError(t, markActive(ctx, client, templateID, versionResp.ID))
+			pipelineVersionID = versionResp.ID
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				// Terraform creates the template and its first version, as usual.
+				{
+					Config: cfgManaged.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
+						resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+						captureTemplateID,
+					),
+				},
+				// The team switches to a custom pipeline for pushing versions;
+				// Terraform is told to stop tracking versions entirely.
+				{
+					Config: cfgUnmanaged.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_template.test", "versions"),
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				// The pipeline pushes and activates a new version, entirely
+				// outside Terraform. Terraform's config is unchanged, so the
+				// next plan/apply should be a no-op: it isn't tracking any
+				// version, so there's nothing to reconcile or fight over.
+				{
+					PreConfig: pushAndActivateExternalVersion,
+					Config:    cfgUnmanaged.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_template.test", "versions"),
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+					),
+				},
+				// Terraform updates a setting. Only the setting should change:
+				// the pipeline's active version must survive untouched.
+				{
+					Config: cfgUnmanagedWithNewDescription.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_template.test", "description", "now managed by an external pipeline"),
+						resource.TestCheckNoResourceAttr("coderd_template.test", "versions"),
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+						func(*terraform.State) error {
+							tmpl, err := client.Template(ctx, templateID)
+							if err != nil {
+								return err
+							}
+							if tmpl.ActiveVersionID != pipelineVersionID {
+								return fmt.Errorf("expected pipeline-pushed version %s to remain active, got %s", pipelineVersionID, tmpl.ActiveVersionID)
+							}
+							return nil
+						},
+					),
+				},
+			},
+		})
+	})
+}
+
 func TestAccTemplateResourceEnterprise(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -1295,8 +1461,12 @@ type testAccTemplateResourceConfig struct {
 	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
 
-	Versions []testAccTemplateVersionConfig
-	ACL      testAccTemplateACLConfig
+	// VersionsNull renders `versions = null` instead of a list, regardless of
+	// the contents of Versions. Used to test that Terraform can manage a
+	// template's settings without owning its version lifecycle.
+	VersionsNull bool
+	Versions     []testAccTemplateVersionConfig
+	ACL          testAccTemplateACLConfig
 }
 
 type testAccTemplateACLConfig struct {
@@ -1374,6 +1544,48 @@ func (c testAccAutostopRequirementConfig) String(t *testing.T) string {
 	return buf.String()
 }
 
+// versionsString renders the `versions` attribute. When VersionsNull is set,
+// it renders `null` regardless of the contents of Versions, so tests can
+// exercise settings-only management of a template (see PLAT-288).
+func (c testAccTemplateResourceConfig) versionsString(t *testing.T) string {
+	t.Helper()
+	if c.VersionsNull {
+		return "null"
+	}
+	tpl := `[
+	{{- range . }}
+	{
+		name      = {{orNull .Name}}
+		directory = {{orNull .Directory}}
+		active    = {{orNull .Active}}
+
+		tf_vars = [
+			{{- range .TerraformVariables }}
+			{
+				name  = {{orNull .Key}}
+				value = {{orNull .Value}}
+			},
+			{{- end}}
+		]
+	},
+	{{- end}}
+	]
+	`
+
+	funcMap := template.FuncMap{
+		"orNull": PrintOrNull,
+	}
+
+	buf := strings.Builder{}
+	tmpl, err := template.New("versions").Funcs(funcMap).Parse(tpl)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&buf, c.Versions)
+	require.NoError(t, err)
+
+	return buf.String()
+}
+
 func (c testAccTemplateResourceConfig) String(t *testing.T) string {
 	t.Helper()
 	tpl := `
@@ -1406,24 +1618,7 @@ resource "coderd_template" "test" {
 
 	acl = ` + c.ACL.String(t) + `
 
-	versions = [
-	{{- range .Versions }}
-	{
-		name      = {{orNull .Name}}
-		directory = {{orNull .Directory}}
-		active    = {{orNull .Active}}
-
-		tf_vars = [
-			{{- range .TerraformVariables }}
-			{
-				name  = {{orNull .Key}}
-				value = {{orNull .Value}}
-			},
-			{{- end}}
-		]
-	},
-	{{- end}}
-	]
+	versions = ` + c.versionsString(t) + `
 }
 `
 

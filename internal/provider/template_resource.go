@@ -17,7 +17,6 @@ import (
 	"github.com/coder/retry"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
-	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -467,9 +466,9 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				},
 			},
 			"versions": schema.ListNestedAttribute{
-				Required: true,
+				MarkdownDescription: "The template versions to manage. If null, Terraform will not create, update, or read template versions, and will only manage the template's other settings. At least one version (with `active = true`) is required when creating a new template, since Coder templates cannot exist without a version.",
+				Optional:            true,
 				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
 					NewVersionsValidator(),
 				},
 				NestedObject: schema.NestedAttributeObject{
@@ -551,6 +550,25 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if len(data.Versions) == 0 {
+		resp.Diagnostics.AddError("Client Error",
+			"At least one template version (with `active = true`) is required when "+
+				"creating a new `coderd_template` resource, since Coder templates cannot "+
+				"exist without a version.\nTo manage an existing template without "+
+				"Terraform-managed versions, use `terraform import` instead.")
+		return
+	}
+	if hasActiveVersion, diag := hasOneActiveVersion(data.Versions); diag.HasError() {
+		resp.Diagnostics.Append(diag...)
+		return
+	} else if !hasActiveVersion {
+		resp.Diagnostics.AddError("Client Error",
+			"At least one template version must be active when creating a "+
+				"`coderd_template` resource.\n(Subsequent resource updates can be made "+
+				"without an active template in the list).")
 		return
 	}
 
@@ -1030,6 +1048,14 @@ func (d *versionsPlanModifier) MarkdownDescription(context.Context) string {
 
 // PlanModifyObject implements planmodifier.List.
 func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	// `versions` is optional: if it's null or unknown, Terraform is not
+	// managing template versions at all, so there's nothing to reconcile.
+	// Returning here (without touching resp.PlanValue) leaves the planned
+	// value as-is, preserving null instead of coercing it into an empty list.
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
 	var planVersions Versions
 	resp.Diagnostics.Append(req.PlanValue.ElementsAs(ctx, &planVersions, false)...)
 	if resp.Diagnostics.HasError() {
@@ -1062,16 +1088,14 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		resp.Diagnostics.Append(diag...)
 		return
 	}
-	// If this is the first read, init the private state value
+	// If this is the first read, init the private state value.
+	// Note: this is also true for a resource that was `terraform import`ed
+	// with `versions` omitted from config (Create never ran for it), so we
+	// can't use "no prior private state" as a proxy for "this is being
+	// created" here — that check now lives in Create() itself, where it's
+	// unambiguous.
 	if lvBytes == nil {
 		lv = make(LastVersionsByHash)
-		// If there's no prior private state, this might be resource creation,
-		// in which case one version must be active.
-		if !hasActiveVersion {
-			resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
-				" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
-			return
-		}
 	} else {
 		err := json.Unmarshal(lvBytes, &lv)
 		if err != nil {

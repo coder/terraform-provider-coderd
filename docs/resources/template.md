@@ -61,7 +61,6 @@ resource "coderd_template" "ubuntu-main" {
 ### Required
 
 - `name` (String) The name of the template.
-- `versions` (Attributes List) (see [below for nested schema](#nestedatt--versions))
 
 ### Optional
 
@@ -85,10 +84,47 @@ resource "coderd_template" "ubuntu-main" {
 - `time_til_dormant_autodelete_ms` (Number) (Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.
 - `time_til_dormant_ms` (Number) (Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.
 - `use_classic_parameter_flow` (Boolean) If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.
+- `versions` (Attributes List) The template versions to manage. If null, Terraform will not create, update, or read template versions, and will only manage the template's other settings. At least one version (with `active = true`) is required when creating a new template, since Coder templates cannot exist without a version. (see [below for nested schema](#nestedatt--versions))
 
 ### Read-Only
 
 - `id` (String) The ID of the template.
+
+<a id="nestedatt--acl"></a>
+### Nested Schema for `acl`
+
+Required:
+
+- `groups` (Attributes Set) (see [below for nested schema](#nestedatt--acl--groups))
+- `users` (Attributes Set) (see [below for nested schema](#nestedatt--acl--users))
+
+<a id="nestedatt--acl--groups"></a>
+### Nested Schema for `acl.groups`
+
+Required:
+
+- `id` (String)
+- `role` (String)
+
+
+<a id="nestedatt--acl--users"></a>
+### Nested Schema for `acl.users`
+
+Required:
+
+- `id` (String)
+- `role` (String)
+
+
+
+<a id="nestedatt--auto_stop_requirement"></a>
+### Nested Schema for `auto_stop_requirement`
+
+Optional:
+
+- `days_of_week` (Set of String) List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.
+- `weeks` (Number) Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.
+
 
 <a id="nestedatt--versions"></a>
 ### Nested Schema for `versions`
@@ -127,43 +163,6 @@ Required:
 - `name` (String)
 - `value` (String)
 
-
-
-<a id="nestedatt--acl"></a>
-### Nested Schema for `acl`
-
-Required:
-
-- `groups` (Attributes Set) (see [below for nested schema](#nestedatt--acl--groups))
-- `users` (Attributes Set) (see [below for nested schema](#nestedatt--acl--users))
-
-<a id="nestedatt--acl--groups"></a>
-### Nested Schema for `acl.groups`
-
-Required:
-
-- `id` (String)
-- `role` (String)
-
-
-<a id="nestedatt--acl--users"></a>
-### Nested Schema for `acl.users`
-
-Required:
-
-- `id` (String)
-- `role` (String)
-
-
-
-<a id="nestedatt--auto_stop_requirement"></a>
-### Nested Schema for `auto_stop_requirement`
-
-Optional:
-
-- `days_of_week` (Set of String) List of days of the week on which restarts are required. Restarts happen within the user's quiet hours (in their configured timezone). If no days are specified, restarts are not required.
-- `weeks` (Number) Weeks is the number of weeks between required restarts. Weeks are synced across all workspaces (and Coder deployments) using modulo math on a hardcoded epoch week of January 2nd, 2023 (the first Monday of 2023). Values of 0 or 1 indicate weekly restarts. Values of 2 indicate fortnightly restarts, etc.
-
 ## Import
 
 Import is supported using the following syntax:
@@ -176,8 +175,12 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 $ terraform import coderd_template.example coder/dogfood
 ```
 Once imported, you'll need to manually declare in your config:
-- The `versions` list, in order to specify the source directories for new versions of the template.
 - (Enterprise) The `acl` attribute, in order to specify the users and groups that have access to the template.
+- The `versions` list, if you want Terraform to manage the template's versions. If
+  you omit `versions` (or leave it `null`), Terraform will only manage the
+  template's other settings (ACL, dormancy, TTLs, etc.) and will not create,
+  update, or read any template versions — this is useful when versions are pushed
+  by an external pipeline (e.g. via `coder templates push`).
 
 Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
 
