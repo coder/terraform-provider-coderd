@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	cdr.dev/slog/v3 v3.1.0
-	github.com/coder/coder/v2 v2.34.0-rc.0.0.20260624160327-8bf6f4301614
+	github.com/coder/coder/v2 v2.34.5
 	github.com/coder/retry v1.5.1
 	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.15
@@ -54,7 +54,6 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/armon/go-radix v1.0.1-0.20221118154546-54df44f2176c // indirect
-	github.com/aws/aws-sdk-go-v2 v1.42.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
