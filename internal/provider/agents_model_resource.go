@@ -205,11 +205,24 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	state := stateFromModelConfig(modelConfig, &resp.Diagnostics)
+	providerType := r.lookupProviderType(ctx, modelConfig, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state := stateFromModelConfig(modelConfig, providerType, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config codersdk.ChatModelConfig, diags *diag.Diagnostics) string {
+	provider, err := r.data.Client.AIProvider(ctx, config.AIProviderID.String())
+	if err != nil {
+		diags.AddError("Client Error", fmt.Sprintf("Unable to read AI provider %s to derive provider_type, got error: %s", config.AIProviderID, err))
+		return ""
+	}
+	return string(provider.Type)
 }
 
 // createChatModelConfigWithRetry retries CreateChatModelConfig on the 409
@@ -254,7 +267,11 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 
 	for _, config := range configs {
 		if config.ID == modelConfigID {
-			refreshed := stateFromModelConfig(config, &resp.Diagnostics)
+			providerType := r.lookupProviderType(ctx, config, &resp.Diagnostics)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			refreshed := stateFromModelConfig(config, providerType, &resp.Diagnostics)
 			if resp.Diagnostics.HasError() {
 				return
 			}
@@ -286,7 +303,11 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	updated := stateFromModelConfig(modelConfig, &resp.Diagnostics)
+	providerType := r.lookupProviderType(ctx, modelConfig, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	updated := stateFromModelConfig(modelConfig, providerType, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -357,10 +378,11 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 	return req
 }
 
-func stateFromModelConfig(config codersdk.ChatModelConfig, diags *diag.Diagnostics) AgentsModelResourceModel {
-	out := AgentsModelResourceModel{
+func stateFromModelConfig(config codersdk.ChatModelConfig, providerType string, diags *diag.Diagnostics) AgentsModelResourceModel {
+	return AgentsModelResourceModel{
 		ID:                   UUIDValue(config.ID),
-		ProviderType:         types.StringValue(config.Provider),
+		AIProviderID:         UUIDValue(config.AIProviderID),
+		ProviderType:         types.StringValue(providerType),
 		Model:                types.StringValue(config.Model),
 		DisplayName:          types.StringValue(config.DisplayName),
 		Enabled:              types.BoolValue(config.Enabled),
@@ -370,12 +392,6 @@ func stateFromModelConfig(config codersdk.ChatModelConfig, diags *diag.Diagnosti
 		CreatedAt:            types.Int64Value(config.CreatedAt.Unix()),
 		UpdatedAt:            types.Int64Value(config.UpdatedAt.Unix()),
 	}
-	if config.AIProviderID != nil {
-		out.AIProviderID = UUIDValue(*config.AIProviderID)
-	} else {
-		out.AIProviderID = NewUUIDNull()
-	}
-	return out
 }
 
 // agentsModelDecodeConfig decodes the model_config JSON string into the SDK

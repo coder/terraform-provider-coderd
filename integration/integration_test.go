@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -208,6 +209,11 @@ func TestIntegration(t *testing.T) {
 				configs, err := exp.ListChatModelConfigs(ctx)
 				require.NoError(t, err)
 
+				providerTypeByID := make(map[uuid.UUID]string, len(providers))
+				for _, p := range providers {
+					providerTypeByID[p.ID] = string(p.Type)
+				}
+
 				// model -> {provider type, expected model_config JSON} (mirrors main.tf).
 				want := map[string]struct{ provider, config string }{
 					"claude-opus-4-8": {"anthropic", `{
@@ -275,7 +281,7 @@ func TestIntegration(t *testing.T) {
 					}
 					w, ok := want[m.Model]
 					require.True(t, ok, "unexpected model %s", m.Model)
-					assert.Equal(t, w.provider, m.Provider)
+					assert.Equal(t, w.provider, providerTypeByID[m.AIProviderID])
 					require.NotNil(t, m.ModelConfig)
 					got, err := json.Marshal(m.ModelConfig)
 					require.NoError(t, err)
