@@ -17,6 +17,7 @@ import (
 	"github.com/coder/retry"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -469,6 +470,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				MarkdownDescription: "The template versions to manage. If null, Terraform will not create, update, or read template versions, and will only manage the template's other settings. At least one version (with `active = true`) is required when creating a new template, since Coder templates cannot exist without a version.",
 				Optional:            true,
 				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
 					NewVersionsValidator(),
 				},
 				NestedObject: schema.NestedAttributeObject{
@@ -561,16 +563,8 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 				"Terraform-managed versions, use `terraform import` instead.")
 		return
 	}
-	if hasActiveVersion, diag := hasOneActiveVersion(data.Versions); diag.HasError() {
-		resp.Diagnostics.Append(diag...)
-		return
-	} else if !hasActiveVersion {
-		resp.Diagnostics.AddError("Client Error",
-			"At least one template version must be active when creating a "+
-				"`coderd_template` resource.\n(Subsequent resource updates can be made "+
-				"without an active template in the list).")
-		return
-	}
+	// The active-version requirement is enforced at plan-time by
+	// versionsPlanModifier.PlanModifyList, so it doesn't need to be repeated here.
 
 	if data.OrganizationID.IsUnknown() {
 		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
@@ -1073,6 +1067,16 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		return
 	}
 
+	// req.State.Raw.IsNull() is true only when there's no prior state at all,
+	// i.e. this is a genuine Create (unlike checking private state for nil,
+	// this stays false for a resource that was `terraform import`ed with
+	// `versions` omitted, since import populates state before this runs).
+	if req.State.Raw.IsNull() && !hasActiveVersion {
+		resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
+			" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
+		return
+	}
+
 	for i := range planVersions {
 		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
 		if err != nil {
@@ -1089,11 +1093,6 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		return
 	}
 	// If this is the first read, init the private state value.
-	// Note: this is also true for a resource that was `terraform import`ed
-	// with `versions` omitted from config (Create never ran for it), so we
-	// can't use "no prior private state" as a proxy for "this is being
-	// created" here — that check now lives in Create() itself, where it's
-	// unambiguous.
 	if lvBytes == nil {
 		lv = make(LastVersionsByHash)
 	} else {

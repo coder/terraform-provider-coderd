@@ -457,7 +457,11 @@ func TestAccTemplateResource(t *testing.T) {
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
-					Config:      cfg1.String(t),
+					Config: cfg1.String(t),
+					// PlanOnly asserts this is caught by the versions plan
+					// modifier during `terraform plan`, not deferred to
+					// `terraform apply`
+					PlanOnly:    true,
 					ExpectError: regexp.MustCompile("At least one template version must be active when creating"),
 				},
 			},
@@ -715,6 +719,82 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 					// Terraform's CLI diagnostic renderer word-wraps long error
 					// text with real newlines, so `.` must match them too.
 					ExpectError: regexp.MustCompile("(?s)At least one template version.*is required when.*creating"),
+				},
+			},
+		})
+	})
+
+	t.Run("ImportThenPlanWithoutActiveVersionDoesNotError", func(t *testing.T) {
+		firstUser, err := client.User(ctx, codersdk.Me)
+		require.NoError(t, err)
+		orgID := firstUser.OrganizationIDs[0]
+
+		// Create the template directly via the API rather than through
+		// Terraform: a resource.Test call destroys everything it created
+		// once it returns, which would delete the template before the
+		// import step below ever got to see it.
+		version, _, err := newVersion(ctx, client, newVersionRequest{
+			OrganizationID: orgID,
+			Version: &TemplateVersion{
+				Directory:          types.StringValue(exTemplate),
+				TerraformVariables: emptyVariableSet(),
+				ProvisionerTags:    emptyVariableSet(),
+			},
+		})
+		require.NoError(t, err)
+		tpl, err := client.CreateTemplate(ctx, orgID, codersdk.CreateTemplateRequest{
+			Name:      "import-no-active-template",
+			VersionID: version.ID,
+		})
+		require.NoError(t, err)
+
+		cfgManaged := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref(tpl.Name),
+			Versions: []testAccTemplateVersionConfig{
+				{
+					Directory: &exTemplate,
+					Active:    ptr.Ref(true),
+				},
+			},
+			ACL: testAccTemplateACLConfig{null: true},
+		}
+
+		// Describes the same template post-import, without marking any
+		// version active. The template already has an active version on
+		// the server; this config is just adopting it, not creating it.
+		cfgReimported := cfgManaged
+		cfgReimported.Versions = slices.Clone(cfgReimported.Versions)
+		cfgReimported.Versions[0].Active = ptr.Ref(false)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				// Import into brand new state. `Create` never runs for this
+				// resource instance, so there's no private-state record of
+				// any tracked version -- exactly the scenario that broke the
+				// old private-state-is-nil creation heuristic.
+				{
+					Config:             cfgManaged.String(t),
+					ResourceName:       "coderd_template.test",
+					ImportState:        true,
+					ImportStateId:      tpl.ID.String(),
+					ImportStatePersist: true,
+				},
+				// The first plan after import must not demand an active
+				// version just because there's no tracked private state:
+				// req.State.Raw.IsNull() (unlike the old private-state-is-nil
+				// heuristic it replaced) correctly recognizes this isn't a
+				// Create, since prior state already exists from the import.
+				// A non-empty plan is expected, since Terraform is now
+				// tracking this version for the first time.
+				{
+					Config:             cfgReimported.String(t),
+					PlanOnly:           true,
+					ExpectNonEmptyPlan: true,
 				},
 			},
 		})
