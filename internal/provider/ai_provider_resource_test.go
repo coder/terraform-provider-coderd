@@ -776,13 +776,6 @@ func TestParseBedrockRegionFromBaseURL(t *testing.T) {
 	}
 }
 
-// TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull is the
-// regression test for the dogfood incident: a legacy row whose stored bedrock
-// settings blob is empty comes back with "" for the optional strings, and the
-// config that adopts it omits them (so they plan as null). stateFromProvider
-// must map those "" back to null, otherwise the applied state disagrees with
-// the plan and Terraform fails with "Provider produced inconsistent result
-// after apply ... .settings: inconsistent values for sensitive attribute".
 func TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull(t *testing.T) {
 	t.Parallel()
 
@@ -801,7 +794,7 @@ func TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull(t *testing.T) 
 	require.NotNil(t, state.Settings.Bedrock)
 	b := state.Settings.Bedrock
 	require.Equal(t, "us-east-2", b.Region.ValueString())
-	require.True(t, b.Model.IsNull(), "empty model must map to null, got %q", b.Model.ValueString())
-	require.True(t, b.SmallFastModel.IsNull(), "empty small_fast_model must map to null")
-	require.True(t, b.RoleARN.IsNull(), "empty role_arn must map to null")
+	require.True(t, b.Model.IsNull())
+	require.True(t, b.SmallFastModel.IsNull())
+	require.True(t, b.RoleARN.IsNull())
 }
