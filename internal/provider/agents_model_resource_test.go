@@ -46,7 +46,6 @@ func TestAgentsModelCreateRequest(t *testing.T) {
 	var diags diag.Diagnostics
 	req := plan.createRequest(&diags)
 	require.False(t, diags.HasError(), diags.Errors())
-	require.Empty(t, req.Provider, "provider is derived server-side")
 	require.NotNil(t, req.AIProviderID)
 	require.Equal(t, aiProviderID, *req.AIProviderID)
 	require.Equal(t, "claude-3-5-sonnet-20241022", req.Model)
@@ -133,8 +132,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	var diags diag.Diagnostics
 	state := stateFromModelConfig(codersdk.ChatModelConfig{
 		ID:                   modelConfigID,
-		Provider:             "anthropic",
-		AIProviderID:         &aiProviderID,
+		AIProviderID:         aiProviderID,
 		Model:                "claude-3-5-sonnet-20241022",
 		DisplayName:          "Claude 3.5 Sonnet",
 		Enabled:              true,
@@ -143,7 +141,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 		ModelConfig:          remote,
 		CreatedAt:            createdAt,
 		UpdatedAt:            updatedAt,
-	}, &diags)
+	}, "anthropic", &diags)
 	require.False(t, diags.HasError(), diags.Errors())
 	require.Equal(t, modelConfigID, state.ID.ValueUUID())
 	require.Equal(t, aiProviderID, state.AIProviderID.ValueUUID())
