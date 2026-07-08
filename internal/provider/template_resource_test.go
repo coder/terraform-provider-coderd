@@ -58,27 +58,27 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
 		cfg2.Name = ptr.Ref("example-template-new")
-		cfg2.Versions[0].Directory = &exTemplateTwo
-		cfg2.Versions[0].Name = ptr.Ref("new")
+		(*cfg2.Versions)[0].Directory = &exTemplateTwo
+		(*cfg2.Versions)[0].Name = ptr.Ref("new")
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions = append(cfg3.Versions, testAccTemplateVersionConfig{
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		cfg3.Versions = ptr.Ref(append(*cfg3.Versions, testAccTemplateVersionConfig{
 			Name:      ptr.Ref("legacy-template"),
 			Directory: &exTemplateOne,
 			Active:    ptr.Ref(false),
@@ -88,19 +88,19 @@ func TestAccTemplateResource(t *testing.T) {
 					Value: ptr.Ref("world"),
 				},
 			},
-		})
+		}))
 
 		cfg4 := cfg3
-		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Active = ptr.Ref(false)
-		cfg4.Versions[1].Active = ptr.Ref(true)
+		cfg4.Versions = ptr.Ref(slices.Clone(*cfg4.Versions))
+		(*cfg4.Versions)[0].Active = ptr.Ref(false)
+		(*cfg4.Versions)[1].Active = ptr.Ref(true)
 
 		cfg5 := cfg4
-		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[0], cfg5.Versions[1] = cfg5.Versions[1], cfg5.Versions[0]
+		cfg5.Versions = ptr.Ref(slices.Clone(*cfg5.Versions))
+		(*cfg5.Versions)[0], (*cfg5.Versions)[1] = (*cfg5.Versions)[1], (*cfg5.Versions)[0]
 
 		cfg6 := cfg4
-		cfg6.Versions = slices.Clone(cfg6.Versions[1:])
+		cfg6.Versions = ptr.Ref(slices.Clone((*cfg6.Versions)[1:]))
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -143,7 +143,7 @@ func TestAccTemplateResource(t *testing.T) {
 				{
 					Config: cfg1.String(t),
 					PreConfig: func() {
-						file := fmt.Sprintf("%s/terraform.tfvars", *cfg1.Versions[0].Directory)
+						file := fmt.Sprintf("%s/terraform.tfvars", *(*cfg1.Versions)[0].Directory)
 						newFile := []byte("name = \"world2\"")
 						err := os.WriteFile(file, newFile, 0644)
 						require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestAccTemplateResource(t *testing.T) {
 				{
 					Config: cfg1.String(t),
 					PreConfig: func() {
-						file := fmt.Sprintf("%s/terraform.tfvars", *cfg1.Versions[0].Directory)
+						file := fmt.Sprintf("%s/terraform.tfvars", *(*cfg1.Versions)[0].Directory)
 						newFile := []byte("name = \"world\"")
 						err := os.WriteFile(file, newFile, 0644)
 						require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template2"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
@@ -280,33 +280,33 @@ func TestAccTemplateResource(t *testing.T) {
 					},
 					Active: ptr.Ref(false),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[1].Name = ptr.Ref("new-name")
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[1].Name = ptr.Ref("new-name")
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Name = ptr.Ref("new-name-one")
-		cfg3.Versions[1].Name = ptr.Ref("new-name-two")
-		cfg3.Versions[0], cfg3.Versions[1] = cfg3.Versions[1], cfg3.Versions[0]
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Name = ptr.Ref("new-name-one")
+		(*cfg3.Versions)[1].Name = ptr.Ref("new-name-two")
+		(*cfg3.Versions)[0], (*cfg3.Versions)[1] = (*cfg3.Versions)[1], (*cfg3.Versions)[0]
 
 		cfg4 := cfg1
-		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Directory = &exTemplateOne
+		cfg4.Versions = ptr.Ref(slices.Clone(*cfg4.Versions))
+		(*cfg4.Versions)[0].Directory = &exTemplateOne
 
 		cfg5 := cfg4
-		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[1].Directory = &exTemplateOne
+		cfg5.Versions = ptr.Ref(slices.Clone(*cfg5.Versions))
+		(*cfg5.Versions)[1].Directory = &exTemplateOne
 
 		cfg6 := cfg5
-		cfg6.Versions = slices.Clone(cfg6.Versions)
-		cfg6.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+		cfg6.Versions = ptr.Ref(slices.Clone(*cfg6.Versions))
+		(*cfg6.Versions)[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
 				Key:   ptr.Ref("name"),
 				Value: ptr.Ref("world2"),
@@ -386,7 +386,7 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template3"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
@@ -398,15 +398,15 @@ func TestAccTemplateResource(t *testing.T) {
 					},
 					Active: ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
 				Key:   ptr.Ref("name"),
 				Value: ptr.Ref("world2"),
@@ -439,13 +439,13 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(false),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
@@ -473,36 +473,36 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].Active = ptr.Ref(false)
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = ptr.Ref(false)
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Directory = &exTemplateTwo
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Directory = &exTemplateTwo
 
 		cfg2b := cfg1
-		cfg2b.Versions = slices.Clone(cfg2b.Versions)
-		cfg2b.Versions = append(cfg2b.Versions, testAccTemplateVersionConfig{
+		cfg2b.Versions = ptr.Ref(slices.Clone(*cfg2b.Versions))
+		cfg2b.Versions = ptr.Ref(append(*cfg2b.Versions, testAccTemplateVersionConfig{
 			Directory: &exTemplateTwo,
 			Active:    ptr.Ref(false),
-		})
+		}))
 
 		cfg3b := cfg2b
-		cfg3b.Versions = slices.Clone(cfg3b.Versions)
-		cfg3b.Versions[1].Active = ptr.Ref(true)
+		cfg3b.Versions = ptr.Ref(slices.Clone(*cfg3b.Versions))
+		(*cfg3b.Versions)[1].Active = ptr.Ref(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -541,29 +541,29 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].Active = ptr.Ref(false)
-		cfg2.Versions = append(cfg2.Versions, testAccTemplateVersionConfig{
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = ptr.Ref(false)
+		cfg2.Versions = ptr.Ref(append(*cfg2.Versions, testAccTemplateVersionConfig{
 			Directory: &exTemplateTwo,
 			Active:    ptr.Ref(false),
-		})
+		}))
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[1].Active = ptr.Ref(true)
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[1].Active = ptr.Ref(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -597,26 +597,26 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].Active = ptr.Ref(false)
-		cfg2.Versions[0].Directory = &exTemplateTwo
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = ptr.Ref(false)
+		(*cfg2.Versions)[0].Directory = &exTemplateTwo
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Active = ptr.Ref(true)
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Active = ptr.Ref(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -659,12 +659,12 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL:               testAccTemplateACLConfig{null: true},
 			MaxPortShareLevel: ptr.Ref("invalid"),
 		}
@@ -702,11 +702,10 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 
 	t.Run("CreateWithoutVersionsErrors", func(t *testing.T) {
 		cfg := testAccTemplateResourceConfig{
-			URL:          client.URL.String(),
-			Token:        client.SessionToken(),
-			Name:         ptr.Ref("no-versions-template"),
-			VersionsNull: true,
-			ACL:          testAccTemplateACLConfig{null: true},
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("no-versions-template"),
+			ACL:   testAccTemplateACLConfig{null: true},
 		}
 
 		resource.Test(t, resource.TestCase{
@@ -752,12 +751,12 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref(tpl.Name),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplate,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{null: true},
 		}
 
@@ -765,8 +764,8 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 		// version active. The template already has an active version on
 		// the server; this config is just adopting it, not creating it.
 		cfgReimported := cfgManaged
-		cfgReimported.Versions = slices.Clone(cfgReimported.Versions)
-		cfgReimported.Versions[0].Active = ptr.Ref(false)
+		cfgReimported.Versions = ptr.Ref(slices.Clone(*cfgReimported.Versions))
+		(*cfgReimported.Versions)[0].Active = ptr.Ref(false)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -809,18 +808,17 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("settings-only-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplate,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{null: true},
 		}
 
 		cfgUnmanaged := cfgManaged
 		cfgUnmanaged.Versions = nil
-		cfgUnmanaged.VersionsNull = true
 
 		cfgUnmanagedWithNewDescription := cfgUnmanaged
 		cfgUnmanagedWithNewDescription.Description = ptr.Ref("now managed by an external pipeline")
@@ -869,7 +867,6 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 			IsUnitTest:               true,
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
-				// Terraform creates the template and its first version, as usual.
 				{
 					Config: cfgManaged.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
@@ -950,13 +947,13 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				GroupACL: []testAccTemplateKeyValueConfig{
 					{
@@ -1084,12 +1081,12 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 		}
 
 		cfgOwner := baseCfg
@@ -1147,12 +1144,12 @@ func TestAccTemplateResourceBackCompat(t *testing.T) {
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
 		Name:  ptr.Ref("example-template"),
-		Versions: []testAccTemplateVersionConfig{
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
 			{
 				Directory: &exTemplateOne,
 				Active:    ptr.Ref(true),
 			},
-		},
+		}),
 		ACL: testAccTemplateACLConfig{
 			null: true,
 		},
@@ -1192,13 +1189,13 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
 		Name:  ptr.Ref("example-template"),
-		Versions: []testAccTemplateVersionConfig{
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
 				Directory: &exTemplateOne,
 				Active:    ptr.Ref(true),
 			},
-		},
+		}),
 		AllowUserAutostart: ptr.Ref(false),
 	}
 
@@ -1541,12 +1538,11 @@ type testAccTemplateResourceConfig struct {
 	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
 
-	// VersionsNull renders `versions = null` instead of a list, regardless of
-	// the contents of Versions. Used to test that Terraform can manage a
-	// template's settings without owning its version lifecycle.
-	VersionsNull bool
-	Versions     []testAccTemplateVersionConfig
-	ACL          testAccTemplateACLConfig
+	// Versions is a pointer so that a nil value renders `versions = null`
+	// (matching AutostartRequirement above), letting tests exercise
+	// settings-only management of a template (see PLAT-288).
+	Versions *[]testAccTemplateVersionConfig
+	ACL      testAccTemplateACLConfig
 }
 
 type testAccTemplateACLConfig struct {
@@ -1624,12 +1620,9 @@ func (c testAccAutostopRequirementConfig) String(t *testing.T) string {
 	return buf.String()
 }
 
-// versionsString renders the `versions` attribute. When VersionsNull is set,
-// it renders `null` regardless of the contents of Versions, so tests can
-// exercise settings-only management of a template (see PLAT-288).
 func (c testAccTemplateResourceConfig) versionsString(t *testing.T) string {
 	t.Helper()
-	if c.VersionsNull {
+	if c.Versions == nil {
 		return "null"
 	}
 	tpl := `[
@@ -1660,7 +1653,7 @@ func (c testAccTemplateResourceConfig) versionsString(t *testing.T) string {
 	tmpl, err := template.New("versions").Funcs(funcMap).Parse(tpl)
 	require.NoError(t, err)
 
-	err = tmpl.Execute(&buf, c.Versions)
+	err = tmpl.Execute(&buf, *c.Versions)
 	require.NoError(t, err)
 
 	return buf.String()

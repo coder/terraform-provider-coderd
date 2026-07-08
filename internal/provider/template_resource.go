@@ -555,16 +555,9 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	if len(data.Versions) == 0 {
-		resp.Diagnostics.AddError("Client Error",
-			"At least one template version (with `active = true`) is required when "+
-				"creating a new `coderd_template` resource, since Coder templates cannot "+
-				"exist without a version.\nTo manage an existing template without "+
-				"Terraform-managed versions, use `terraform import` instead.")
-		return
-	}
-	// The active-version requirement is enforced at plan-time by
-	// versionsPlanModifier.PlanModifyList, so it doesn't need to be repeated here.
+	// The "at least one version is required when creating" requirement is
+	// enforced at plan-time by versionsPlanModifier.PlanModifyList, so it
+	// doesn't need to be repeated here.
 
 	if data.OrganizationID.IsUnknown() {
 		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
@@ -1047,6 +1040,13 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 	// Returning here (without touching resp.PlanValue) leaves the planned
 	// value as-is, preserving null instead of coercing it into an empty list.
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		if req.ConfigValue.IsNull() && req.State.Raw.IsNull() {
+			resp.Diagnostics.AddError("Client Error",
+				"At least one template version (with `active = true`) is required when "+
+					"creating a new `coderd_template` resource, since Coder templates cannot "+
+					"exist without a version.\nTo manage an existing template without "+
+					"Terraform-managed versions, use `terraform import` instead.")
+		}
 		return
 	}
 
