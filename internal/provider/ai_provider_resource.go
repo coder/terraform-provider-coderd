@@ -178,6 +178,12 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								PlanModifiers: []planmodifier.String{
 									bedrockRegionPlanModifier{},
 								},
+								Validators: []validator.String{
+									// Coder drops empty strings on the wire (omitempty), so a
+									// configured "" reads back as null and breaks the apply. Omit
+									// the attribute instead of setting it empty.
+									stringvalidator.LengthAtLeast(1),
+								},
 							},
 							"model": schema.StringAttribute{
 								MarkdownDescription: "Primary Bedrock model identifier.",
@@ -185,6 +191,9 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								Computed:            true,
 								PlanModifiers: []planmodifier.String{
 									stringplanmodifier.UseStateForUnknown(),
+								},
+								Validators: []validator.String{
+									stringvalidator.LengthAtLeast(1),
 								},
 							},
 							"small_fast_model": schema.StringAttribute{
@@ -194,10 +203,16 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								PlanModifiers: []planmodifier.String{
 									stringplanmodifier.UseStateForUnknown(),
 								},
+								Validators: []validator.String{
+									stringvalidator.LengthAtLeast(1),
+								},
 							},
 							"role_arn": schema.StringAttribute{
 								MarkdownDescription: "ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the static credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.",
 								Optional:            true,
+								Validators: []validator.String{
+									stringvalidator.LengthAtLeast(1),
+								},
 							},
 							"access_key_wo": schema.StringAttribute{
 								MarkdownDescription: "AWS access key ID for Bedrock. See [Coder's Amazon Bedrock provider docs](https://coder.com/docs/ai-coder/ai-gateway/providers#amazon-bedrock).",
@@ -608,9 +623,9 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 	}
 	if provider.Settings.Bedrock != nil {
 		out.Settings = &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
-			Region:            types.StringValue(provider.Settings.Bedrock.Region),
-			Model:             types.StringValue(provider.Settings.Bedrock.Model),
-			SmallFastModel:    types.StringValue(provider.Settings.Bedrock.SmallFastModel),
+			Region:            stringValueOrNull(provider.Settings.Bedrock.Region),
+			Model:             stringValueOrNull(provider.Settings.Bedrock.Model),
+			SmallFastModel:    stringValueOrNull(provider.Settings.Bedrock.SmallFastModel),
 			RoleARN:           stringValueOrNull(provider.Settings.Bedrock.RoleARN),
 			AccessKeyWO:       types.StringNull(),
 			AccessKeySecretWO: types.StringNull(),
