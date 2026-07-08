@@ -10,6 +10,7 @@ import (
 	aibridgeutils "github.com/coder/coder/v2/aibridge/utils"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/config"
@@ -268,6 +269,36 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 }
 `,
 			wantError: `Invalid Settings`,
+		},
+		"empty bedrock model rejected": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "bedrock"
+  name     = "bedrock-test"
+  base_url = "https://bedrock.us-east-1.amazonaws.com"
+
+  settings = {
+    bedrock = {
+      model = ""
+    }
+  }
+}
+`,
+			wantError: `at least 1`,
+		},
+		"empty bedrock role_arn rejected": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "bedrock"
+  name     = "bedrock-test"
+  base_url = "https://bedrock.us-east-1.amazonaws.com"
+
+  settings = {
+    bedrock = {
+      role_arn = ""
+    }
+  }
+}
+`,
+			wantError: `at least 1`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -743,4 +774,34 @@ func TestParseBedrockRegionFromBaseURL(t *testing.T) {
 			require.Equal(t, tc.want, parseBedrockRegionFromBaseURL(tc.baseURL))
 		})
 	}
+}
+
+// TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull is the
+// regression test for the dogfood incident: a legacy row whose stored bedrock
+// settings blob is empty comes back with "" for the optional strings, and the
+// config that adopts it omits them (so they plan as null). stateFromProvider
+// must map those "" back to null, otherwise the applied state disagrees with
+// the plan and Terraform fails with "Provider produced inconsistent result
+// after apply ... .settings: inconsistent values for sensitive attribute".
+func TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{}.stateFromProvider(codersdk.AIProvider{
+		ID:      uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		Type:    codersdk.AIProviderTypeBedrock,
+		Name:    "agents-bedrock",
+		BaseURL: "https://bedrock.us-east-2.amazonaws.com",
+		Settings: codersdk.AIProviderSettings{Bedrock: &codersdk.AIProviderBedrockSettings{
+			Region: "us-east-2",
+			// Model, SmallFastModel, RoleARN left empty, as a legacy row returns.
+		}},
+	})
+
+	require.NotNil(t, state.Settings)
+	require.NotNil(t, state.Settings.Bedrock)
+	b := state.Settings.Bedrock
+	require.Equal(t, "us-east-2", b.Region.ValueString())
+	require.True(t, b.Model.IsNull(), "empty model must map to null, got %q", b.Model.ValueString())
+	require.True(t, b.SmallFastModel.IsNull(), "empty small_fast_model must map to null")
+	require.True(t, b.RoleARN.IsNull(), "empty role_arn must map to null")
 }
