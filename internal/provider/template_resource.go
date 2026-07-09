@@ -467,7 +467,8 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				},
 			},
 			"versions": schema.ListNestedAttribute{
-				Required: true,
+				MarkdownDescription: "The template versions to manage. If null, Terraform will not create, update, or read template versions, and will only manage the template's other settings. At least one version (with `active = true`) is required when creating a new template, since Coder templates cannot exist without a version.",
+				Optional:            true,
 				Validators: []validator.List{
 					listvalidator.SizeAtLeast(1),
 					NewVersionsValidator(),
@@ -553,6 +554,10 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// The "at least one version is required when creating" requirement is
+	// enforced at plan-time by versionsPlanModifier.PlanModifyList, so it
+	// doesn't need to be repeated here.
 
 	if data.OrganizationID.IsUnknown() {
 		data.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
@@ -1030,6 +1035,21 @@ func (d *versionsPlanModifier) MarkdownDescription(context.Context) string {
 
 // PlanModifyObject implements planmodifier.List.
 func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	// `versions` is optional: if it's null or unknown, Terraform is not
+	// managing template versions at all, so there's nothing to reconcile.
+	// Returning here (without touching resp.PlanValue) leaves the planned
+	// value as-is, preserving null instead of coercing it into an empty list.
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		if req.ConfigValue.IsNull() && req.State.Raw.IsNull() {
+			resp.Diagnostics.AddError("Client Error",
+				"At least one template version (with `active = true`) is required when "+
+					"creating a new `coderd_template` resource, since Coder templates cannot "+
+					"exist without a version.\nTo manage an existing template without "+
+					"Terraform-managed versions, use `terraform import` instead.")
+		}
+		return
+	}
+
 	var planVersions Versions
 	resp.Diagnostics.Append(req.PlanValue.ElementsAs(ctx, &planVersions, false)...)
 	if resp.Diagnostics.HasError() {
@@ -1044,6 +1064,16 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 	hasActiveVersion, diag := hasOneActiveVersion(configVersions)
 	if diag.HasError() {
 		resp.Diagnostics.Append(diag...)
+		return
+	}
+
+	// req.State.Raw.IsNull() is true only when there's no prior state at all,
+	// i.e. this is a genuine Create (unlike checking private state for nil,
+	// this stays false for a resource that was `terraform import`ed with
+	// `versions` omitted, since import populates state before this runs).
+	if req.State.Raw.IsNull() && !hasActiveVersion {
+		resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
+			" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
 		return
 	}
 
@@ -1062,16 +1092,9 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 		resp.Diagnostics.Append(diag...)
 		return
 	}
-	// If this is the first read, init the private state value
+	// If this is the first read, init the private state value.
 	if lvBytes == nil {
 		lv = make(LastVersionsByHash)
-		// If there's no prior private state, this might be resource creation,
-		// in which case one version must be active.
-		if !hasActiveVersion {
-			resp.Diagnostics.AddError("Client Error", "At least one template version must be active when creating a"+
-				" `coderd_template` resource.\n(Subsequent resource updates can be made without an active template in the list).")
-			return
-		}
 	} else {
 		err := json.Unmarshal(lvBytes, &lv)
 		if err != nil {
