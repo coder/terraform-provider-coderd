@@ -105,6 +105,10 @@ Optional:
 - `role_arn` (String) ARN of an AWS IAM role to assume via STS before calling Bedrock. The base identity (the AWS SDK default credential chain or the static credentials) signs the AssumeRole call, and the temporary credentials sign Bedrock requests. Omit to call Bedrock with the base identity directly. Requires Coder v2.35.0 or later.
 - `small_fast_model` (String) Small/fast Bedrock model identifier used for background tasks.
 
+Read-Only:
+
+- `external_id` (String) STS external ID the server generates and sends on the AssumeRole call when `role_arn` is set. Reference it in the assumed role's trust policy `sts:ExternalId` condition. Null until `role_arn` is first configured; stable afterwards. Requires Coder v2.36.0 or later.
+
 ## Import
 
 Import is supported using the following syntax:

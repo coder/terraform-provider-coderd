@@ -65,6 +65,7 @@ type AIProviderBedrockSettingsModel struct {
 	Model                types.String `tfsdk:"model"`
 	SmallFastModel       types.String `tfsdk:"small_fast_model"`
 	RoleARN              types.String `tfsdk:"role_arn"`
+	ExternalID           types.String `tfsdk:"external_id"`
 	AccessKeyWO          types.String `tfsdk:"access_key_wo"`
 	AccessKeySecretWO    types.String `tfsdk:"access_key_secret_wo"`
 	CredentialsWOVersion types.Int64  `tfsdk:"credentials_wo_version"`
@@ -212,6 +213,13 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								Optional:            true,
 								Validators: []validator.String{
 									stringvalidator.LengthAtLeast(1),
+								},
+							},
+							"external_id": schema.StringAttribute{
+								MarkdownDescription: "STS external ID the server generates and sends on the AssumeRole call when `role_arn` is set. Reference it in the assumed role's trust policy `sts:ExternalId` condition. Null until `role_arn` is first configured; stable afterwards. Requires Coder v2.36.0 or later.",
+								Computed:            true,
+								PlanModifiers: []planmodifier.String{
+									bedrockExternalIDPlanModifier{},
 								},
 							},
 							"access_key_wo": schema.StringAttribute{
@@ -627,6 +635,7 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 			Model:             stringValueOrNull(provider.Settings.Bedrock.Model),
 			SmallFastModel:    stringValueOrNull(provider.Settings.Bedrock.SmallFastModel),
 			RoleARN:           stringValueOrNull(provider.Settings.Bedrock.RoleARN),
+			ExternalID:        stringValueOrNull(provider.Settings.Bedrock.ExternalID),
 			AccessKeyWO:       types.StringNull(),
 			AccessKeySecretWO: types.StringNull(),
 		}}
@@ -705,6 +714,42 @@ func (bedrockRegionPlanModifier) PlanModifyString(ctx context.Context, req planm
 	if !req.StateValue.IsNull() {
 		resp.PlanValue = req.StateValue
 	}
+}
+
+// bedrockExternalIDPlanModifier plans the server-generated STS external ID:
+// created when role_arn is first set, then kept even if role_arn is cleared.
+type bedrockExternalIDPlanModifier struct{}
+
+func (bedrockExternalIDPlanModifier) Description(_ context.Context) string {
+	return "Preserves the server-generated external ID; plans a new one only when role_arn is first set."
+}
+
+func (m bedrockExternalIDPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (bedrockExternalIDPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	// Once stored, the ID never changes.
+	if !req.StateValue.IsNull() {
+		resp.PlanValue = req.StateValue
+		return
+	}
+
+	var roleARN types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("settings").AtName("bedrock").AtName("role_arn"), &roleARN)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Unknown or newly set role_arn: stays unknown, the server decides on apply.
+	if roleARN.IsUnknown() {
+		return
+	}
+	if !roleARN.IsNull() && roleARN.ValueString() != "" {
+		return
+	}
+	// No role and none stored: no ID.
+	resp.PlanValue = types.StringNull()
 }
 
 func validateAIProviderBaseURL(addError func(path.Path, string, string), attrPath path.Path, raw string) {

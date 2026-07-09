@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"regexp"
 	"testing"
@@ -12,7 +13,12 @@ import (
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
@@ -498,6 +504,7 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 			Model:          types.StringValue("anthropic.claude-3-5-sonnet-20241022-v2:0"),
 			SmallFastModel: types.StringValue("anthropic.claude-3-5-haiku-20241022-v1:0"),
 			RoleARN:        types.StringValue("arn:aws:iam::123456789012:role/bedrock-access"),
+			ExternalID:     types.StringValue("stored-external-id"),
 		}},
 	}
 	// Copy the nested Bedrock value so mutating config doesn't alias plan's
@@ -515,6 +522,7 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 	require.NotNil(t, req.Settings.Bedrock)
 	require.Equal(t, "us-east-1", req.Settings.Bedrock.Region)
 	require.Equal(t, "arn:aws:iam::123456789012:role/bedrock-access", req.Settings.Bedrock.RoleARN)
+	require.Empty(t, req.Settings.Bedrock.ExternalID, "external_id is server-generated and must not be sent")
 	require.Nil(t, req.Settings.Bedrock.AccessKey)
 	require.Nil(t, req.Settings.Bedrock.AccessKeySecret)
 }
@@ -691,6 +699,7 @@ func TestAIProviderUpdateRotatesBedrockCredentials(t *testing.T) {
 		BaseURL: state.BaseURL,
 		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
 			Region:               types.StringValue("us-east-1"),
+			ExternalID:           types.StringValue("stored-external-id"),
 			CredentialsWOVersion: types.Int64Value(2),
 		}},
 	}
@@ -712,6 +721,7 @@ func TestAIProviderUpdateRotatesBedrockCredentials(t *testing.T) {
 	require.NotNil(t, patch.Settings.Bedrock.AccessKeySecret)
 	require.Equal(t, "AKIANEWKEY", *patch.Settings.Bedrock.AccessKey)
 	require.Equal(t, "newsecretvalue", *patch.Settings.Bedrock.AccessKeySecret)
+	require.Empty(t, patch.Settings.Bedrock.ExternalID, "external_id is server-generated and must not be sent")
 }
 
 func TestAIProviderUpdatePreservesBedrockCredentialsWhenVersionRemoved(t *testing.T) {
@@ -750,6 +760,70 @@ func TestAIProviderUpdatePreservesBedrockCredentialsWhenVersionRemoved(t *testin
 
 	plan.validateEffectiveUpdateState(state, config, &diags)
 	require.False(t, diags.HasError(), diags.Errors())
+}
+
+// aiProviderPlanWithRoleARN builds a plan with only settings.bedrock.role_arn set.
+func aiProviderPlanWithRoleARN(t *testing.T, roleARN tftypes.Value) tfsdk.Plan {
+	t.Helper()
+	ctx := context.Background()
+	schemaResp := &fwresource.SchemaResponse{}
+	(&AIProviderResource{}).Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.Empty(t, schemaResp.Diagnostics)
+
+	objType, ok := schemaResp.Schema.Type().TerraformType(ctx).(tftypes.Object)
+	require.True(t, ok)
+	settingsType, ok := objType.AttributeTypes["settings"].(tftypes.Object)
+	require.True(t, ok)
+	bedrockType, ok := settingsType.AttributeTypes["bedrock"].(tftypes.Object)
+	require.True(t, ok)
+
+	bedrockVals := map[string]tftypes.Value{}
+	for name, attrType := range bedrockType.AttributeTypes {
+		bedrockVals[name] = tftypes.NewValue(attrType, nil)
+	}
+	bedrockVals["role_arn"] = roleARN
+	rootVals := map[string]tftypes.Value{}
+	for name, attrType := range objType.AttributeTypes {
+		rootVals[name] = tftypes.NewValue(attrType, nil)
+	}
+	rootVals["settings"] = tftypes.NewValue(settingsType, map[string]tftypes.Value{
+		"bedrock": tftypes.NewValue(bedrockType, bedrockVals),
+	})
+	return tfsdk.Plan{Schema: schemaResp.Schema, Raw: tftypes.NewValue(objType, rootVals)}
+}
+
+func TestBedrockExternalIDPlanModifier(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		state    types.String
+		roleARN  tftypes.Value
+		planSeed types.String
+		want     types.String
+	}{
+		"preserves stored value":                             {types.StringValue("stored-external-id"), tftypes.NewValue(tftypes.String, "arn:aws:iam::123456789012:role/other"), types.StringUnknown(), types.StringValue("stored-external-id")},
+		"preserved after role_arn clear":                     {types.StringValue("stored-external-id"), tftypes.NewValue(tftypes.String, nil), types.StringUnknown(), types.StringValue("stored-external-id")},
+		"unknown when role_arn set":                          {types.StringNull(), tftypes.NewValue(tftypes.String, "arn:aws:iam::123456789012:role/bedrock"), types.StringUnknown(), types.StringUnknown()},
+		"unknown when role_arn unknown":                      {types.StringNull(), tftypes.NewValue(tftypes.String, tftypes.UnknownValue), types.StringUnknown(), types.StringUnknown()},
+		"null when role_arn null":                            {types.StringNull(), tftypes.NewValue(tftypes.String, nil), types.StringUnknown(), types.StringNull()},
+		"null when role_arn empty":                           {types.StringNull(), tftypes.NewValue(tftypes.String, ""), types.StringUnknown(), types.StringNull()},
+		"stable null on no-op plan (no external_id support)": {types.StringNull(), tftypes.NewValue(tftypes.String, "arn:aws:iam::123456789012:role/bedrock"), types.StringNull(), types.StringNull()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			req := planmodifier.StringRequest{
+				Path:        path.Root("settings").AtName("bedrock").AtName("external_id"),
+				Plan:        aiProviderPlanWithRoleARN(t, tc.roleARN),
+				ConfigValue: types.StringNull(),
+				StateValue:  tc.state,
+				PlanValue:   tc.planSeed,
+			}
+			resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
+			bedrockExternalIDPlanModifier{}.PlanModifyString(context.Background(), req, resp)
+			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics.Errors())
+			require.Equal(t, tc.want, resp.PlanValue)
+		})
+	}
 }
 
 func TestParseBedrockRegionFromBaseURL(t *testing.T) {
