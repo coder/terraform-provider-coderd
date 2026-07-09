@@ -714,7 +714,8 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
-					Config: cfg.String(t),
+					Config:   cfg.String(t),
+					PlanOnly: true,
 					// Terraform's CLI diagnostic renderer word-wraps long error
 					// text with real newlines, so `.` must match them too.
 					ExpectError: regexp.MustCompile("(?s)At least one template version.*is required when.*creating"),
