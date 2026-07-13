@@ -872,3 +872,69 @@ func TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull(t *testing.T) 
 	require.True(t, b.SmallFastModel.IsNull())
 	require.True(t, b.RoleARN.IsNull())
 }
+
+func TestAIProviderCheckBedrockRoleARNDropped(t *testing.T) {
+	t.Parallel()
+
+	const roleARN = "arn:aws:iam::123456789012:role/bedrock-access"
+	configWithRoleARN := AIProviderResourceModel{
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			RoleARN: types.StringValue(roleARN),
+		}},
+	}
+
+	for name, tc := range map[string]struct {
+		config    AIProviderResourceModel
+		response  codersdk.AIProvider
+		wantError bool
+	}{
+		"role_arn stripped by old server": {
+			config: configWithRoleARN,
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{Region: "us-east-1"},
+			}},
+			wantError: true,
+		},
+		"bedrock settings dropped entirely": {
+			config:    configWithRoleARN,
+			response:  codersdk.AIProvider{},
+			wantError: true,
+		},
+		"role_arn persisted": {
+			config: configWithRoleARN,
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{RoleARN: roleARN},
+			}},
+			wantError: false,
+		},
+		"role_arn not configured (access-key auth)": {
+			config: AIProviderResourceModel{
+				Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+					RoleARN: types.StringNull(),
+				}},
+			},
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{Region: "us-east-1"},
+			}},
+			wantError: false,
+		},
+		"no bedrock settings": {
+			config:    AIProviderResourceModel{},
+			response:  codersdk.AIProvider{},
+			wantError: false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var diags diag.Diagnostics
+			checkBedrockRoleARNDropped(tc.config, tc.response, &diags)
+			if tc.wantError {
+				require.True(t, diags.HasError(), "expected a diagnostic")
+				require.Contains(t, diags.Errors()[0].Summary(), "Bedrock role_arn not supported by this Coder deployment")
+			} else {
+				require.False(t, diags.HasError(), diags.Errors())
+			}
+		})
+	}
+}

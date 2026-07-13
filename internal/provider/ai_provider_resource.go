@@ -401,6 +401,10 @@ func (r *AIProviderResource) Create(ctx context.Context, req resource.CreateRequ
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create AI provider, got error: %s", err))
 		return
 	}
+	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	state := plan.stateFromProvider(provider)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -470,6 +474,10 @@ func (r *AIProviderResource) Update(ctx context.Context, req resource.UpdateRequ
 	provider, err := r.data.Client.UpdateAIProvider(ctx, state.ID.ValueString(), patch)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update AI provider, got error: %s", err))
+		return
+	}
+	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 	updated := plan.stateFromProvider(provider)
@@ -646,6 +654,25 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 		}
 	}
 	return out
+}
+
+// A Coder server older than v2.35.0 drops the unknown role_arn JSON key
+// (omitempty), so a configured value round-trips to null and surfaces as a
+// cryptic "inconsistent values for sensitive attribute" error (#387). Fail
+// loudly instead.
+func checkBedrockRoleARNDropped(config AIProviderResourceModel, provider codersdk.AIProvider, diags *diag.Diagnostics) {
+	b := config.bedrock()
+	if b == nil || b.RoleARN.IsNull() || b.RoleARN.IsUnknown() || b.RoleARN.ValueString() == "" {
+		return
+	}
+	if provider.Settings.Bedrock != nil && provider.Settings.Bedrock.RoleARN != "" {
+		return
+	}
+	diags.AddAttributeError(
+		path.Root("settings").AtName("bedrock").AtName("role_arn"),
+		"Bedrock role_arn not supported by this Coder deployment",
+		"The Coder server accepted the request but did not persist `role_arn`, which means it predates Bedrock STS assume-role support. Upgrade to Coder v2.35.0 or later, or remove `role_arn`.",
+	)
 }
 
 func (m AIProviderResourceModel) bedrock() *AIProviderBedrockSettingsModel {
