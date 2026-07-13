@@ -394,27 +394,35 @@ func TestAgentsModelConfigNotEmptyValidator(t *testing.T) {
 func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 	t.Parallel()
 
-	v := agentsModelConfigNoDroppedKeysValidator{}
-	validate := func(config types.String) diag.Diagnostics {
-		resp := &validator.StringResponse{}
-		v.ValidateString(t.Context(), validator.StringRequest{
-			Path:        path.Root("model_config"),
-			ConfigValue: config,
-		}, resp)
-		return resp.Diagnostics
+	tests := []struct {
+		name    string
+		config  types.String
+		wantErr string
+	}{
+		{name: "recognized config", config: types.StringValue(`{"max_output_tokens":8192,"temperature":0.7}`)},
+		{name: "unknown nested field", config: types.StringValue(`{"provider_options":{"anthropic":{"bogus_setting":"x"}}}`), wantErr: "bogus_setting"},
+		{name: "null", config: types.StringNull()},
+		{name: "unknown", config: types.StringUnknown()},
+		// Invalid and non-object JSON are other validators' problem.
+		{name: "invalid json", config: types.StringValue(`{`)},
+		{name: "non-object json", config: types.StringValue(`[1,2]`)},
 	}
-
-	require.False(t, validate(types.StringValue(`{"max_output_tokens":8192,"temperature":0.7}`)).HasError())
-
-	diags := validate(types.StringValue(`{"provider_options":{"anthropic":{"bogus_setting":"x"}}}`))
-	require.True(t, diags.HasError())
-	require.Contains(t, diags[0].Detail(), "bogus_setting")
-
-	require.False(t, validate(types.StringNull()).HasError())
-	require.False(t, validate(types.StringUnknown()).HasError())
-	// Invalid and non-object JSON are other validators' problem.
-	require.False(t, validate(types.StringValue(`{`)).HasError())
-	require.False(t, validate(types.StringValue(`[1,2]`)).HasError())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp := &validator.StringResponse{}
+			agentsModelConfigNoDroppedKeysValidator{}.ValidateString(t.Context(), validator.StringRequest{
+				Path:        path.Root("model_config"),
+				ConfigValue: tt.config,
+			}, resp)
+			if tt.wantErr == "" {
+				require.False(t, resp.Diagnostics.HasError())
+				return
+			}
+			require.True(t, resp.Diagnostics.HasError())
+			require.Contains(t, resp.Diagnostics[0].Detail(), tt.wantErr)
+		})
+	}
 }
 
 func TestAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {
