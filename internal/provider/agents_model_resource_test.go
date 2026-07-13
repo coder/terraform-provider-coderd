@@ -431,6 +431,22 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 		require.Empty(t, dropped)
 	})
 
+	t.Run("legacy pricing key shadowed by cost is reported", func(t *testing.T) {
+		t.Parallel()
+		// The SDK keeps the nested cost value and discards the legacy one, so the
+		// legacy override is silently lost even though its path survives.
+		dropped, err := agentsModelConfigDroppedKeys(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"999"}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"input_price_per_million_tokens"}, dropped)
+	})
+
+	t.Run("legacy pricing key alone is not dropped", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"input_price_per_million_tokens":"3"}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
 	t.Run("fully unknown object reports only the parent path", func(t *testing.T) {
 		t.Parallel()
 		dropped, err := agentsModelConfigDroppedKeys(`{"bogus_block":{"nested":1}}`)
@@ -519,6 +535,13 @@ func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 		diags := validate(t, types.StringValue(`{"temperature":0.7,"bogus_setting":"x"}`))
 		require.True(t, diags.HasError())
 		require.Contains(t, diags[0].Detail(), "bogus_setting")
+	})
+
+	t.Run("legacy pricing key shadowed by cost is rejected and named", func(t *testing.T) {
+		t.Parallel()
+		diags := validate(t, types.StringValue(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"999"}`))
+		require.True(t, diags.HasError())
+		require.Contains(t, diags[0].Detail(), "input_price_per_million_tokens")
 	})
 
 	t.Run("misplaced provider effort points at the supported path", func(t *testing.T) {

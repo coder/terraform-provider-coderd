@@ -260,6 +260,17 @@ func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
 			dropped[p] = struct{}{}
 		}
 	}
+	// A legacy pricing key and its current cost.<key> twin both survive the path
+	// diff (the SDK folds the legacy value into an unset cost field), but when
+	// cost.<key> is already set the SDK keeps the nested value and discards the
+	// legacy one. Path survival hides that, so flag the shadowed legacy key.
+	for legacy := range agentsModelConfigLegacyPricingKeys {
+		_, hasLegacy := inputPaths[legacy]
+		_, hasNested := inputPaths["cost."+legacy]
+		if hasLegacy && hasNested {
+			dropped[legacy] = struct{}{}
+		}
+	}
 	var out []string
 	for p := range dropped {
 		if !agentsModelConfigHasDroppedAncestor(p, dropped) {
@@ -373,7 +384,7 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 		return
 	}
 	detail := fmt.Sprintf(
-		"These model_config settings are not part of Coder's chat model config schema and would be silently discarded: %s. "+
+		"These model_config settings would be silently discarded by Coder: %s. "+
 			"Remove them or update them to the current schema. See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
 		strings.Join(dropped, ", "),
 	)
