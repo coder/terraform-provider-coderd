@@ -450,6 +450,21 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 		_, err := agentsModelConfigDroppedKeys(`{`)
 		require.Error(t, err)
 	})
+
+	t.Run("hint-recommended effort paths are accepted by the pinned SDK", func(t *testing.T) {
+		t.Parallel()
+		for _, raw := range []string{
+			`{"provider_options":{"openai":{"reasoning_effort":"high"}}}`,
+			`{"provider_options":{"anthropic":{"effort":"high"}}}`,
+			`{"provider_options":{"openaicompat":{"reasoning_effort":"high"}}}`,
+			`{"provider_options":{"openrouter":{"reasoning":{"effort":"high"}}}}`,
+			`{"provider_options":{"vercel":{"reasoning":{"effort":"high"}}}}`,
+		} {
+			dropped, err := agentsModelConfigDroppedKeys(raw)
+			require.NoError(t, err, raw)
+			require.Empty(t, dropped, raw)
+		}
+	})
 }
 
 func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
@@ -475,6 +490,21 @@ func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 		diags := validate(t, types.StringValue(`{"temperature":0.7,"bogus_setting":"x"}`))
 		require.True(t, diags.HasError())
 		require.Contains(t, diags[0].Detail(), "bogus_setting")
+	})
+
+	t.Run("misplaced provider effort points at the supported path", func(t *testing.T) {
+		t.Parallel()
+		diags := validate(t, types.StringValue(`{"provider_options":{"openai":{"effort":"high"}}}`))
+		require.True(t, diags.HasError())
+		require.Contains(t, diags[0].Detail(), "provider_options.openai.effort")
+		require.Contains(t, diags[0].Detail(), "provider_options.openai.reasoning_effort")
+	})
+
+	t.Run("top-level reasoning_effort triggers the hint", func(t *testing.T) {
+		t.Parallel()
+		diags := validate(t, types.StringValue(`{"reasoning_effort":{"default":"medium","max":"high"}}`))
+		require.True(t, diags.HasError())
+		require.Contains(t, diags[0].Detail(), "Reasoning effort is configured per provider")
 	})
 
 	t.Run("null is allowed", func(t *testing.T) {

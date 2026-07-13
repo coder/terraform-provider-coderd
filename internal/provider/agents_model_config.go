@@ -372,9 +372,12 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 		strings.Join(dropped, ", "),
 	)
 	if slices.ContainsFunc(dropped, func(p string) bool {
-		return p == "effort" || strings.HasSuffix(p, ".effort")
+		last := p[strings.LastIndex(p, ".")+1:]
+		return last == "effort" || last == "reasoning_effort"
 	}) {
-		detail += " Reasoning effort is now configured with the top-level \"reasoning_effort\" object ({\"default\":..., \"max\":...}) instead of provider_options.*.effort."
+		detail += " Reasoning effort is configured per provider: \"provider_options.openai.reasoning_effort\" (also Azure), " +
+			"\"provider_options.anthropic.effort\" (also Bedrock), \"provider_options.openaicompat.reasoning_effort\", " +
+			"or \"reasoning.effort\" under \"provider_options.openrouter\" / \"provider_options.vercel\"."
 	}
 	resp.Diagnostics.AddAttributeError(
 		req.Path,
