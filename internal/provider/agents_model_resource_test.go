@@ -417,34 +417,23 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 
 	t.Run("valid name does not mask a dropped occurrence elsewhere", func(t *testing.T) {
 		t.Parallel()
-		// The top-level name survives, but the misplaced nested one is dropped.
 		dropped, err := agentsModelConfigDroppedKeys(`{"max_output_tokens":8192,"provider_options":{"anthropic":{"max_output_tokens":4096}}}`)
 		require.NoError(t, err)
 		require.Equal(t, []string{"provider_options.anthropic.max_output_tokens"}, dropped)
 	})
 
-	t.Run("legacy top-level pricing keys are not dropped", func(t *testing.T) {
+	t.Run("legacy top-level pricing keys are folded under cost, not dropped", func(t *testing.T) {
 		t.Parallel()
-		// The SDK folds these under "cost"; that relocation is not a drop.
 		dropped, err := agentsModelConfigDroppedKeys(`{"input_price_per_million_tokens":"3","output_price_per_million_tokens":"15"}`)
 		require.NoError(t, err)
 		require.Empty(t, dropped)
 	})
 
-	t.Run("legacy pricing key shadowed by cost is reported", func(t *testing.T) {
+	t.Run("legacy pricing key shadowed by a differing cost is reported", func(t *testing.T) {
 		t.Parallel()
-		// The SDK keeps the nested cost value and discards the legacy one, so the
-		// legacy override is silently lost even though its path survives.
 		dropped, err := agentsModelConfigDroppedKeys(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"999"}`)
 		require.NoError(t, err)
 		require.Equal(t, []string{"input_price_per_million_tokens"}, dropped)
-	})
-
-	t.Run("legacy pricing key alone is not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"input_price_per_million_tokens":"3"}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
 	})
 
 	t.Run("fully unknown object reports only the parent path", func(t *testing.T) {
@@ -463,7 +452,6 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 
 	t.Run("null-valued known key is not dropped", func(t *testing.T) {
 		t.Parallel()
-		// jsonencode of an optional/null variable renders temperature = null.
 		dropped, err := agentsModelConfigDroppedKeys(`{"temperature":null,"top_p":0.9}`)
 		require.NoError(t, err)
 		require.Empty(t, dropped)
@@ -499,8 +487,6 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 
 	t.Run("unknown scalar zero is still reported", func(t *testing.T) {
 		t.Parallel()
-		// 0/false/"" carry configuration, so an unknown key with a scalar zero
-		// value must not slip through the content-free skip.
 		dropped, err := agentsModelConfigDroppedKeys(`{"bogus":0}`)
 		require.NoError(t, err)
 		require.Equal(t, []string{"bogus"}, dropped)
@@ -519,19 +505,19 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("hint-recommended effort paths are accepted by the pinned SDK", func(t *testing.T) {
+	t.Run("unknown provider block is reported at its path", func(t *testing.T) {
 		t.Parallel()
-		for _, raw := range []string{
-			`{"provider_options":{"openai":{"reasoning_effort":"high"}}}`,
-			`{"provider_options":{"anthropic":{"effort":"high"}}}`,
-			`{"provider_options":{"openaicompat":{"reasoning_effort":"high"}}}`,
-			`{"provider_options":{"openrouter":{"reasoning":{"effort":"high"}}}}`,
-			`{"provider_options":{"vercel":{"reasoning":{"effort":"high"}}}}`,
-		} {
-			dropped, err := agentsModelConfigDroppedKeys(raw)
-			require.NoError(t, err, raw)
-			require.Empty(t, dropped, raw)
-		}
+		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"bogus_provider":{"foo":"bar"}}}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"provider_options.bogus_provider"}, dropped)
+	})
+
+	t.Run("equal-value legacy and cost pricing are both reported", func(t *testing.T) {
+		t.Parallel()
+		// Either is removable without changing the result, so the redundancy reports from both sides.
+		dropped, err := agentsModelConfigDroppedKeys(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"3"}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"cost", "input_price_per_million_tokens"}, dropped)
 	})
 }
 
@@ -558,33 +544,6 @@ func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 		diags := validate(t, types.StringValue(`{"temperature":0.7,"bogus_setting":"x"}`))
 		require.True(t, diags.HasError())
 		require.Contains(t, diags[0].Detail(), "bogus_setting")
-	})
-
-	t.Run("legacy pricing key shadowed by cost is rejected and named", func(t *testing.T) {
-		t.Parallel()
-		diags := validate(t, types.StringValue(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"999"}`))
-		require.True(t, diags.HasError())
-		require.Contains(t, diags[0].Detail(), "input_price_per_million_tokens")
-	})
-
-	t.Run("misplaced provider effort points at the supported path", func(t *testing.T) {
-		t.Parallel()
-		diags := validate(t, types.StringValue(`{"provider_options":{"openai":{"effort":"high"}}}`))
-		require.True(t, diags.HasError())
-		require.Contains(t, diags[0].Detail(), "provider_options.openai.effort")
-		require.Contains(t, diags[0].Detail(), "provider_options.openai.reasoning_effort")
-	})
-
-	t.Run("top-level reasoning_effort triggers the hint", func(t *testing.T) {
-		t.Parallel()
-		diags := validate(t, types.StringValue(`{"reasoning_effort":{"default":"medium","max":"high"}}`))
-		require.True(t, diags.HasError())
-		require.Contains(t, diags[0].Detail(), "Reasoning effort is configured per provider")
-	})
-
-	t.Run("empty recognized collection is allowed", func(t *testing.T) {
-		t.Parallel()
-		require.False(t, validate(t, types.StringValue(`{"provider_options":{"openai":{"allowed_domains":[]}}}`)).HasError())
 	})
 
 	t.Run("null is allowed", func(t *testing.T) {

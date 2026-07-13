@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -236,137 +235,96 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 	}
 }
 
-// agentsModelConfigDroppedKeys returns the dotted key paths in raw that the SDK
-// silently discards when canonicalizing through codersdk.ChatModelCallConfig.
-// Comparing paths (not bare names) means a key valid in one place can't mask a
-// dropped occurrence of the same name elsewhere. Only the shallowest dropped
-// path per subtree is returned.
+// agentsModelConfigDroppedKeys returns the dotted paths in raw that Coder
+// silently discards when canonicalizing through codersdk.ChatModelCallConfig. A
+// key is dropped iff removing it leaves the canonical output unchanged, so the
+// SDK is the sole oracle and nothing here restates its schema.
 func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
-	// Skip content-free values in the input (omitempty will discard them) but
-	// keep everything in the canonical output: an empty {} there marks a
-	// recognized container that survived, and dropping it would make its
-	// surviving parent look discarded.
-	inputPaths, err := agentsModelConfigKeyPaths(raw, true)
-	if err != nil {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
 		return nil, err
 	}
-	canonical, err := agentsModelConfigCanonicalJSON(raw)
-	if err != nil {
+	root, ok := doc.(map[string]any)
+	if !ok {
+		_, err := agentsModelConfigCanonicalJSON(raw)
 		return nil, err
 	}
-	outputPaths, err := agentsModelConfigKeyPaths(canonical, false)
+	baseline, err := agentsModelConfigCanonicalDoc(doc)
 	if err != nil {
 		return nil, err
 	}
 	dropped := map[string]struct{}{}
-	for p := range inputPaths {
-		if _, ok := outputPaths[agentsModelConfigCanonicalPath(p)]; !ok {
-			dropped[p] = struct{}{}
-		}
-	}
-	// A legacy pricing key and its current cost.<key> twin both survive the path
-	// diff (the SDK folds the legacy value into an unset cost field), but when
-	// cost.<key> is already set the SDK keeps the nested value and discards the
-	// legacy one. Path survival hides that, so flag the shadowed legacy key.
-	for legacy := range agentsModelConfigLegacyPricingKeys {
-		_, hasLegacy := inputPaths[legacy]
-		_, hasNested := inputPaths["cost."+legacy]
-		if hasLegacy && hasNested {
-			dropped[legacy] = struct{}{}
-		}
+	if err := agentsModelConfigProbeDropped(doc, root, "", baseline, dropped); err != nil {
+		return nil, err
 	}
 	var out []string
 	for p := range dropped {
-		if !agentsModelConfigHasDroppedAncestor(p, dropped) {
-			out = append(out, p)
-		}
+		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// agentsModelConfigLegacyPricingKeys are the pre-"cost" top-level pricing keys
-// the SDK still accepts and folds under "cost" on read. This relocation is the
-// only reason agentsModelConfigCanonicalPath exists.
-var agentsModelConfigLegacyPricingKeys = map[string]struct{}{
-	"input_price_per_million_tokens":       {},
-	"output_price_per_million_tokens":      {},
-	"cache_read_price_per_million_tokens":  {},
-	"cache_write_price_per_million_tokens": {},
-}
-
-// agentsModelConfigCanonicalPath maps a legacy top-level pricing key to its
-// post-canonicalization path under "cost", leaving every other path unchanged.
-func agentsModelConfigCanonicalPath(path string) string {
-	if _, ok := agentsModelConfigLegacyPricingKeys[path]; ok {
-		return "cost." + path
+func agentsModelConfigCanonicalDoc(doc any) (string, error) {
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
 	}
-	return path
+	return agentsModelConfigCanonicalJSON(string(encoded))
 }
 
-// agentsModelConfigHasDroppedAncestor reports whether any parent of path is
-// itself dropped.
-func agentsModelConfigHasDroppedAncestor(path string, dropped map[string]struct{}) bool {
-	for i := 0; i < len(path); i++ {
-		if path[i] != '.' {
+// agentsModelConfigProbeDropped marks the path of every key whose removal leaves
+// the canonical output unchanged, then recurses into surviving containers.
+func agentsModelConfigProbeDropped(doc any, node map[string]any, prefix, baseline string, dropped map[string]struct{}) error {
+	// Snapshot keys so mutating node during iteration is safe.
+	keys := make([]string, 0, len(node))
+	for k := range node {
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		val := node[k]
+		if agentsModelConfigIsContentFree(val) {
 			continue
 		}
-		if _, ok := dropped[path[:i]]; ok {
-			return true
+		path := k
+		if prefix != "" {
+			path = prefix + "." + k
 		}
-	}
-	return false
-}
-
-// agentsModelConfigKeyPaths collects the dotted path of every object key in a
-// JSON document. Arrays are traversed without an index segment. When
-// skipContentFree is set, keys whose value is content-free (see
-// agentsModelConfigIsContentFree) are omitted; this is used for the input
-// document only, since omitempty strips those from the canonical output whether
-// or not the key is recognized, so their absence there is not evidence of a
-// dropped setting. The canonical output is collected with skipContentFree false
-// so an empty {} still records the recognized container that produced it.
-func agentsModelConfigKeyPaths(raw string, skipContentFree bool) (map[string]struct{}, error) {
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
-		return nil, err
-	}
-	paths := map[string]struct{}{}
-	collectJSONKeyPaths("", v, paths, skipContentFree)
-	return paths, nil
-}
-
-func collectJSONKeyPaths(prefix string, v any, paths map[string]struct{}, skipContentFree bool) {
-	switch t := v.(type) {
-	case map[string]any:
-		for k, val := range t {
-			if skipContentFree && agentsModelConfigIsContentFree(val) {
-				continue
+		delete(node, k)
+		probe, err := agentsModelConfigCanonicalDoc(doc)
+		node[k] = val
+		if err != nil {
+			return err
+		}
+		if probe == baseline {
+			dropped[path] = struct{}{}
+			continue
+		}
+		switch t := val.(type) {
+		case map[string]any:
+			if err := agentsModelConfigProbeDropped(doc, t, path, baseline, dropped); err != nil {
+				return err
 			}
-			path := k
-			if prefix != "" {
-				path = prefix + "." + k
+		case []any:
+			for _, el := range t {
+				if m, ok := el.(map[string]any); ok {
+					if err := agentsModelConfigProbeDropped(doc, m, path, baseline, dropped); err != nil {
+						return err
+					}
+				}
 			}
-			paths[path] = struct{}{}
-			collectJSONKeyPaths(path, val, paths, skipContentFree)
-		}
-	case []any:
-		for _, val := range t {
-			collectJSONKeyPaths(prefix, val, paths, skipContentFree)
 		}
 	}
+	return nil
 }
 
-// agentsModelConfigIsContentFree reports whether a decoded JSON value carries no
-// configuration: JSON null, or an empty array/object (which jsonencode of an
-// optional/empty variable readily produces). The SDK's fields use omitempty, so
-// it drops these from the canonical output whether or not the key is recognized,
-// making their absence useless as a signal for a dropped setting. Scalars —
-// including 0, false, and "" — are never content-free: recognized ones survive
-// canonicalization through pointer fields, and unrecognized ones must still be
-// reported.
+// agentsModelConfigIsContentFree reports whether a decoded JSON value is null or
+// an empty array/object. The SDK's omitempty fields drop these regardless of
+// whether the key is recognized, so removing one never changes the canonical
+// output and the probe can't judge it. Scalars (including 0, false, "") carry
+// config and are never content-free.
 func agentsModelConfigIsContentFree(v any) bool {
 	switch t := v.(type) {
 	case nil:
@@ -411,22 +369,13 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 	if len(dropped) == 0 {
 		return
 	}
-	detail := fmt.Sprintf(
-		"These model_config settings would be silently discarded by Coder: %s. "+
-			"Remove them or update them to the current schema. See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
-		strings.Join(dropped, ", "),
-	)
-	if slices.ContainsFunc(dropped, func(p string) bool {
-		last := p[strings.LastIndex(p, ".")+1:]
-		return last == "effort" || last == "reasoning_effort"
-	}) {
-		detail += " Reasoning effort is configured per provider: \"provider_options.openai.reasoning_effort\" (also Azure), " +
-			"\"provider_options.anthropic.effort\" (also Bedrock), \"provider_options.openaicompat.reasoning_effort\", " +
-			"or \"reasoning.effort\" under \"provider_options.openrouter\" / \"provider_options.vercel\"."
-	}
 	resp.Diagnostics.AddAttributeError(
 		req.Path,
 		"Unrecognized model_config settings",
-		detail,
+		fmt.Sprintf(
+			"These model_config settings would be silently discarded by Coder: %s. "+
+				"Remove them or update them to the current schema. See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
+			strings.Join(dropped, ", "),
+		),
 	)
 }
