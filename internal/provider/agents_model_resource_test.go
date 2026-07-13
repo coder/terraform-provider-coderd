@@ -391,141 +391,11 @@ func TestAgentsModelConfigNotEmptyValidator(t *testing.T) {
 	})
 }
 
-func TestAgentsModelConfigDroppedKeys(t *testing.T) {
-	t.Parallel()
-
-	t.Run("recognized config drops nothing", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"max_output_tokens":8192,"temperature":0.7,"top_p":0.9}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("unknown top-level key is reported", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"temperature":0.7,"nonsense":true}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"nonsense"}, dropped)
-	})
-
-	t.Run("unknown nested key is reported by path", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"anthropic":{"bogus_setting":"x","thinking":{"budget_tokens":4096}}}}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"provider_options.anthropic.bogus_setting"}, dropped)
-	})
-
-	t.Run("valid name does not mask a dropped occurrence elsewhere", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"max_output_tokens":8192,"provider_options":{"anthropic":{"max_output_tokens":4096}}}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"provider_options.anthropic.max_output_tokens"}, dropped)
-	})
-
-	t.Run("legacy top-level pricing keys are folded under cost, not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"input_price_per_million_tokens":"3","output_price_per_million_tokens":"15"}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("legacy pricing key shadowed by a differing cost is reported", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"999"}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"input_price_per_million_tokens"}, dropped)
-	})
-
-	t.Run("fully unknown object reports only the parent path", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"bogus_block":{"nested":1}}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"bogus_block"}, dropped)
-	})
-
-	t.Run("multiple unknown keys are reported sorted", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"zeta":1,"alpha":2,"temperature":0.7}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"alpha", "zeta"}, dropped)
-	})
-
-	t.Run("null-valued known key is not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"temperature":null,"top_p":0.9}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("nested null-valued known key is not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"openai":{"reasoning_effort":null}}}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("null-valued unknown key is not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"bogus":null}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("empty recognized array is not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"openai":{"allowed_domains":[]}}}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("empty recognized map is not dropped", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"vercel":{"logit_bias":{}}}}`)
-		require.NoError(t, err)
-		require.Empty(t, dropped)
-	})
-
-	t.Run("unknown scalar zero is still reported", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"bogus":0}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"bogus"}, dropped)
-	})
-
-	t.Run("non-null unknown block with only null children is reported", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"bogus_block":{"nested":null}}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"bogus_block"}, dropped)
-	})
-
-	t.Run("invalid json returns error", func(t *testing.T) {
-		t.Parallel()
-		_, err := agentsModelConfigDroppedKeys(`{`)
-		require.Error(t, err)
-	})
-
-	t.Run("unknown provider block is reported at its path", func(t *testing.T) {
-		t.Parallel()
-		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"bogus_provider":{"foo":"bar"}}}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"provider_options.bogus_provider"}, dropped)
-	})
-
-	t.Run("equal-value legacy and cost pricing are both reported", func(t *testing.T) {
-		t.Parallel()
-		// Either is removable without changing the result, so the redundancy reports from both sides.
-		dropped, err := agentsModelConfigDroppedKeys(`{"cost":{"input_price_per_million_tokens":"3"},"input_price_per_million_tokens":"3"}`)
-		require.NoError(t, err)
-		require.Equal(t, []string{"cost", "input_price_per_million_tokens"}, dropped)
-	})
-}
-
 func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 	t.Parallel()
 
 	v := agentsModelConfigNoDroppedKeysValidator{}
-	validate := func(t *testing.T, config types.String) diag.Diagnostics {
+	validate := func(config types.String) diag.Diagnostics {
 		resp := &validator.StringResponse{}
 		v.ValidateString(t.Context(), validator.StringRequest{
 			Path:        path.Root("model_config"),
@@ -534,32 +404,17 @@ func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 		return resp.Diagnostics
 	}
 
-	t.Run("recognized config is allowed", func(t *testing.T) {
-		t.Parallel()
-		require.False(t, validate(t, types.StringValue(`{"max_output_tokens":8192}`)).HasError())
-	})
+	require.False(t, validate(types.StringValue(`{"max_output_tokens":8192,"temperature":0.7}`)).HasError())
 
-	t.Run("dropped key is rejected and named", func(t *testing.T) {
-		t.Parallel()
-		diags := validate(t, types.StringValue(`{"temperature":0.7,"bogus_setting":"x"}`))
-		require.True(t, diags.HasError())
-		require.Contains(t, diags[0].Detail(), "bogus_setting")
-	})
+	diags := validate(types.StringValue(`{"provider_options":{"anthropic":{"bogus_setting":"x"}}}`))
+	require.True(t, diags.HasError())
+	require.Contains(t, diags[0].Detail(), "bogus_setting")
 
-	t.Run("null is allowed", func(t *testing.T) {
-		t.Parallel()
-		require.False(t, validate(t, types.StringNull()).HasError())
-	})
-
-	t.Run("unknown is allowed", func(t *testing.T) {
-		t.Parallel()
-		require.False(t, validate(t, types.StringUnknown()).HasError())
-	})
-
-	t.Run("invalid json is deferred", func(t *testing.T) {
-		t.Parallel()
-		require.False(t, validate(t, types.StringValue(`{`)).HasError())
-	})
+	require.False(t, validate(types.StringNull()).HasError())
+	require.False(t, validate(types.StringUnknown()).HasError())
+	// Invalid and non-object JSON are other validators' problem.
+	require.False(t, validate(types.StringValue(`{`)).HasError())
+	require.False(t, validate(types.StringValue(`[1,2]`)).HasError())
 }
 
 func TestAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {

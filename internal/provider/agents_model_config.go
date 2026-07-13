@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
@@ -236,114 +234,11 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 	}
 }
 
-// agentsModelConfigDroppedKeys returns the dotted paths in raw that the provider
-// silently drops when decoding into codersdk.ChatModelCallConfig, since
-// encoding/json ignores keys with no matching struct field. A key is dropped iff
-// removing it leaves the canonical output unchanged, so the SDK type is the sole
-// oracle and nothing here restates its schema.
-func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	var doc any
-	if err := dec.Decode(&doc); err != nil {
-		return nil, err
-	}
-	root, ok := doc.(map[string]any)
-	if !ok {
-		_, err := agentsModelConfigCanonicalJSON(raw)
-		return nil, err
-	}
-	baseline, err := agentsModelConfigCanonicalDoc(doc)
-	if err != nil {
-		return nil, err
-	}
-	dropped := map[string]struct{}{}
-	if err := agentsModelConfigProbeDropped(doc, root, "", baseline, dropped); err != nil {
-		return nil, err
-	}
-	var out []string
-	for p := range dropped {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-func agentsModelConfigCanonicalDoc(doc any) (string, error) {
-	encoded, err := json.Marshal(doc)
-	if err != nil {
-		return "", err
-	}
-	return agentsModelConfigCanonicalJSON(string(encoded))
-}
-
-// agentsModelConfigProbeDropped marks the path of every key whose removal leaves
-// the canonical output unchanged, then recurses into surviving containers.
-func agentsModelConfigProbeDropped(doc any, node map[string]any, prefix, baseline string, dropped map[string]struct{}) error {
-	// Snapshot keys so mutating node during iteration is safe.
-	keys := make([]string, 0, len(node))
-	for k := range node {
-		keys = append(keys, k)
-	}
-	for _, k := range keys {
-		val := node[k]
-		if agentsModelConfigIsContentFree(val) {
-			continue
-		}
-		path := k
-		if prefix != "" {
-			path = prefix + "." + k
-		}
-		delete(node, k)
-		probe, err := agentsModelConfigCanonicalDoc(doc)
-		node[k] = val
-		if err != nil {
-			return err
-		}
-		if probe == baseline {
-			dropped[path] = struct{}{}
-			continue
-		}
-		switch t := val.(type) {
-		case map[string]any:
-			if err := agentsModelConfigProbeDropped(doc, t, path, baseline, dropped); err != nil {
-				return err
-			}
-		case []any:
-			for _, el := range t {
-				if m, ok := el.(map[string]any); ok {
-					if err := agentsModelConfigProbeDropped(doc, m, path, baseline, dropped); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// agentsModelConfigIsContentFree reports whether a decoded JSON value is null or
-// an empty array/object. The SDK's omitempty fields drop these regardless of
-// whether the key is recognized, so removing one never changes the canonical
-// output and the probe can't judge it. Scalars (including 0, false, "") carry
-// config and are never content-free.
-func agentsModelConfigIsContentFree(v any) bool {
-	switch t := v.(type) {
-	case nil:
-		return true
-	case []any:
-		return len(t) == 0
-	case map[string]any:
-		return len(t) == 0
-	default:
-		return false
-	}
-}
-
-// agentsModelConfigNoDroppedKeysValidator rejects a model_config whose keys the
-// provider would silently drop (see agentsModelConfigDroppedKeys). Without it a
-// removed or renamed field in codersdk.ChatModelCallConfig would drop the user's
-// setting with no plan-time error, and semantic equality would hide the loss.
+// agentsModelConfigNoDroppedKeysValidator rejects a model_config containing
+// settings the provider would silently drop when decoding into
+// codersdk.ChatModelCallConfig. Without it a removed or renamed field in the
+// SDK type would drop the user's setting with no plan-time error, and semantic
+// equality would hide the loss.
 type agentsModelConfigNoDroppedKeysValidator struct{}
 
 var _ validator.String = agentsModelConfigNoDroppedKeysValidator{}
@@ -362,21 +257,22 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 	}
 	// Invalid or non-object JSON is left for the custom type and the not-empty
 	// validator to report.
-	dropped, err := agentsModelConfigDroppedKeys(req.ConfigValue.ValueString())
-	if err != nil {
+	if _, err := agentsModelConfigCanonicalJSON(req.ConfigValue.ValueString()); err != nil {
 		return
 	}
-	if len(dropped) == 0 {
-		return
+	// The lenient decode above succeeded, so a strict failure can only be an
+	// unknown field.
+	var config codersdk.ChatModelCallConfig
+	if err := config.UnmarshalStrict([]byte(req.ConfigValue.ValueString())); err != nil {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Unrecognized model_config settings",
+			fmt.Sprintf(
+				"model_config contains a setting that is not part of the Coder chat model config schema this provider was built against, so it would be silently dropped before reaching Coder: %s. "+
+					"If the setting is valid for your Coder deployment, upgrade the provider to a version built against your Coder release; otherwise remove it or fix the field name. "+
+					"See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
+				err,
+			),
+		)
 	}
-	resp.Diagnostics.AddAttributeError(
-		req.Path,
-		"Unrecognized model_config settings",
-		fmt.Sprintf(
-			"These model_config settings are not part of the Coder chat model config schema this provider was built against, so they would be silently dropped before reaching Coder: %s. "+
-				"If a setting is valid for your Coder deployment, upgrade the provider to a version built against your Coder release; otherwise remove it or fix the field name. "+
-				"See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
-			strings.Join(dropped, ", "),
-		),
-	)
 }
