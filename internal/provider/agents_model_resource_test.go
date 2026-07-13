@@ -483,6 +483,29 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 		require.Empty(t, dropped)
 	})
 
+	t.Run("empty recognized array is not dropped", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"openai":{"allowed_domains":[]}}}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("empty recognized map is not dropped", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"vercel":{"logit_bias":{}}}}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("unknown scalar zero is still reported", func(t *testing.T) {
+		t.Parallel()
+		// 0/false/"" carry configuration, so an unknown key with a scalar zero
+		// value must not slip through the content-free skip.
+		dropped, err := agentsModelConfigDroppedKeys(`{"bogus":0}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"bogus"}, dropped)
+	})
+
 	t.Run("non-null unknown block with only null children is reported", func(t *testing.T) {
 		t.Parallel()
 		dropped, err := agentsModelConfigDroppedKeys(`{"bogus_block":{"nested":null}}`)
@@ -557,6 +580,11 @@ func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 		diags := validate(t, types.StringValue(`{"reasoning_effort":{"default":"medium","max":"high"}}`))
 		require.True(t, diags.HasError())
 		require.Contains(t, diags[0].Detail(), "Reasoning effort is configured per provider")
+	})
+
+	t.Run("empty recognized collection is allowed", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, validate(t, types.StringValue(`{"provider_options":{"openai":{"allowed_domains":[]}}}`)).HasError())
 	})
 
 	t.Run("null is allowed", func(t *testing.T) {

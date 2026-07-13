@@ -242,7 +242,11 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 // dropped occurrence of the same name elsewhere. Only the shallowest dropped
 // path per subtree is returned.
 func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
-	inputPaths, err := agentsModelConfigKeyPaths(raw)
+	// Skip content-free values in the input (omitempty will discard them) but
+	// keep everything in the canonical output: an empty {} there marks a
+	// recognized container that survived, and dropping it would make its
+	// surviving parent look discarded.
+	inputPaths, err := agentsModelConfigKeyPaths(raw, true)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +254,7 @@ func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	outputPaths, err := agentsModelConfigKeyPaths(canonical)
+	outputPaths, err := agentsModelConfigKeyPaths(canonical, false)
 	if err != nil {
 		return nil, err
 	}
@@ -315,11 +319,14 @@ func agentsModelConfigHasDroppedAncestor(path string, dropped map[string]struct{
 }
 
 // agentsModelConfigKeyPaths collects the dotted path of every object key in a
-// JSON document. Arrays are traversed without an index segment. Keys whose value
-// is null are skipped: jsonencode of an optional/null variable emits them and
-// the SDK unmarshals null into an unset pointer, so a null carries no setting
-// and its omission from the canonical output is not a dropped configuration.
-func agentsModelConfigKeyPaths(raw string) (map[string]struct{}, error) {
+// JSON document. Arrays are traversed without an index segment. When
+// skipContentFree is set, keys whose value is content-free (see
+// agentsModelConfigIsContentFree) are omitted; this is used for the input
+// document only, since omitempty strips those from the canonical output whether
+// or not the key is recognized, so their absence there is not evidence of a
+// dropped setting. The canonical output is collected with skipContentFree false
+// so an empty {} still records the recognized container that produced it.
+func agentsModelConfigKeyPaths(raw string, skipContentFree bool) (map[string]struct{}, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
 	var v any
@@ -327,15 +334,15 @@ func agentsModelConfigKeyPaths(raw string) (map[string]struct{}, error) {
 		return nil, err
 	}
 	paths := map[string]struct{}{}
-	collectJSONKeyPaths("", v, paths)
+	collectJSONKeyPaths("", v, paths, skipContentFree)
 	return paths, nil
 }
 
-func collectJSONKeyPaths(prefix string, v any, paths map[string]struct{}) {
+func collectJSONKeyPaths(prefix string, v any, paths map[string]struct{}, skipContentFree bool) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, val := range t {
-			if val == nil {
+			if skipContentFree && agentsModelConfigIsContentFree(val) {
 				continue
 			}
 			path := k
@@ -343,12 +350,33 @@ func collectJSONKeyPaths(prefix string, v any, paths map[string]struct{}) {
 				path = prefix + "." + k
 			}
 			paths[path] = struct{}{}
-			collectJSONKeyPaths(path, val, paths)
+			collectJSONKeyPaths(path, val, paths, skipContentFree)
 		}
 	case []any:
 		for _, val := range t {
-			collectJSONKeyPaths(prefix, val, paths)
+			collectJSONKeyPaths(prefix, val, paths, skipContentFree)
 		}
+	}
+}
+
+// agentsModelConfigIsContentFree reports whether a decoded JSON value carries no
+// configuration: JSON null, or an empty array/object (which jsonencode of an
+// optional/empty variable readily produces). The SDK's fields use omitempty, so
+// it drops these from the canonical output whether or not the key is recognized,
+// making their absence useless as a signal for a dropped setting. Scalars —
+// including 0, false, and "" — are never content-free: recognized ones survive
+// canonicalization through pointer fields, and unrecognized ones must still be
+// reported.
+func agentsModelConfigIsContentFree(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	default:
+		return false
 	}
 }
 
