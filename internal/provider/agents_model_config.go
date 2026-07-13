@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sort"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
@@ -231,4 +234,118 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 			"model_config has no settings, so Coder would discard it and leave Terraform's state inconsistent. Omit the attribute entirely to use Coder's defaults.",
 		)
 	}
+}
+
+// agentsModelConfigDroppedKeys returns the object key names present in raw that
+// disappear after canonicalizing through codersdk.ChatModelCallConfig. The SDK
+// silently discards keys it does not recognize (its custom UnmarshalJSON calls
+// json.Unmarshal internally, which defeats json.DisallowUnknownFields), so a
+// removed or misspelled field would otherwise vanish with no plan diff and no
+// error. Comparing the set of key names before and after the round-trip surfaces
+// those drops. Keys the SDK relocates but keeps (e.g. legacy top-level pricing
+// keys migrated under "cost") reappear under the same name and are not reported.
+func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
+	inputKeys, err := agentsModelConfigKeySet(raw)
+	if err != nil {
+		return nil, err
+	}
+	canonical, err := agentsModelConfigCanonicalJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	outputKeys, err := agentsModelConfigKeySet(canonical)
+	if err != nil {
+		return nil, err
+	}
+	var dropped []string
+	for k := range inputKeys {
+		if _, ok := outputKeys[k]; !ok {
+			dropped = append(dropped, k)
+		}
+	}
+	sort.Strings(dropped)
+	return dropped, nil
+}
+
+// agentsModelConfigKeySet collects every object key name appearing anywhere in a
+// JSON document.
+func agentsModelConfigKeySet(raw string) (map[string]struct{}, error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	keys := map[string]struct{}{}
+	collectJSONKeys(v, keys)
+	return keys, nil
+}
+
+func collectJSONKeys(v any, keys map[string]struct{}) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			keys[k] = struct{}{}
+			collectJSONKeys(val, keys)
+		}
+	case []any:
+		for _, val := range t {
+			collectJSONKeys(val, keys)
+		}
+	}
+}
+
+// agentsModelConfigNoDroppedKeysValidator rejects a model_config whose keys are
+// silently discarded when Coder canonicalizes it. Without this a schema change
+// in codersdk.ChatModelCallConfig (a removed or renamed field) would drop the
+// user's setting with no plan-time error, leaving Terraform to consider the
+// resulting state semantically equal. Erroring at plan time forces users to
+// migrate to the current schema instead of losing configuration.
+type agentsModelConfigNoDroppedKeysValidator struct{}
+
+var _ validator.String = agentsModelConfigNoDroppedKeysValidator{}
+
+func (v agentsModelConfigNoDroppedKeysValidator) Description(_ context.Context) string {
+	return "model_config must not contain settings that Coder does not recognize and would silently discard."
+}
+
+func (v agentsModelConfigNoDroppedKeysValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	// Invalid or non-object JSON is left for the custom type and the not-empty
+	// validator to report.
+	dropped, err := agentsModelConfigDroppedKeys(req.ConfigValue.ValueString())
+	if err != nil {
+		return
+	}
+	if len(dropped) == 0 {
+		return
+	}
+	detail := fmt.Sprintf(
+		"These model_config settings are not part of Coder's chat model config schema and would be silently discarded: %s. "+
+			"Remove them or update them to the current schema. See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
+		strings.Join(dropped, ", "),
+	)
+	if slices.Contains(dropped, "effort") {
+		detail += " Reasoning effort is now configured with the top-level \"reasoning_effort\" object ({\"default\":..., \"max\":...}) instead of provider_options.*.effort."
+	}
+	resp.Diagnostics.AddAttributeError(
+		req.Path,
+		"Unrecognized model_config settings",
+		detail,
+	)
+}
+
+func sliceContains(s []string, target string) (int, bool) {
+	for i, v := range s {
+		if v == target {
+			return i, true
+		}
+	}
+	return 0, false
 }

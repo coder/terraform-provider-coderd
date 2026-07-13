@@ -391,6 +391,85 @@ func TestAgentsModelConfigNotEmptyValidator(t *testing.T) {
 	})
 }
 
+func TestAgentsModelConfigDroppedKeys(t *testing.T) {
+	t.Parallel()
+
+	t.Run("recognized config drops nothing", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"max_output_tokens":8192,"temperature":0.7,"top_p":0.9}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("unknown top-level key is reported", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"temperature":0.7,"nonsense":true}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"nonsense"}, dropped)
+	})
+
+	t.Run("unknown nested key is reported", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"anthropic":{"bogus_setting":"x","thinking":{"budget_tokens":4096}}}}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"bogus_setting"}, dropped)
+	})
+
+	t.Run("multiple unknown keys are reported sorted", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"zeta":1,"alpha":2,"temperature":0.7}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"alpha", "zeta"}, dropped)
+	})
+
+	t.Run("invalid json returns error", func(t *testing.T) {
+		t.Parallel()
+		_, err := agentsModelConfigDroppedKeys(`{`)
+		require.Error(t, err)
+	})
+}
+
+func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
+	t.Parallel()
+
+	v := agentsModelConfigNoDroppedKeysValidator{}
+	validate := func(t *testing.T, config types.String) diag.Diagnostics {
+		resp := &validator.StringResponse{}
+		v.ValidateString(t.Context(), validator.StringRequest{
+			Path:        path.Root("model_config"),
+			ConfigValue: config,
+		}, resp)
+		return resp.Diagnostics
+	}
+
+	t.Run("recognized config is allowed", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, validate(t, types.StringValue(`{"max_output_tokens":8192}`)).HasError())
+	})
+
+	t.Run("dropped key is rejected and named", func(t *testing.T) {
+		t.Parallel()
+		diags := validate(t, types.StringValue(`{"temperature":0.7,"bogus_setting":"x"}`))
+		require.True(t, diags.HasError())
+		require.Contains(t, diags[0].Detail(), "bogus_setting")
+	})
+
+	t.Run("null is allowed", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, validate(t, types.StringNull()).HasError())
+	})
+
+	t.Run("unknown is allowed", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, validate(t, types.StringUnknown()).HasError())
+	})
+
+	t.Run("invalid json is deferred", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, validate(t, types.StringValue(`{`)).HasError())
+	})
+}
+
 func TestAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {
 	t.Parallel()
 

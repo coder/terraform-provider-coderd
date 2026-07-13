@@ -146,6 +146,7 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				Optional:            true,
 				Validators: []validator.String{
 					agentsModelConfigNotEmptyValidator{},
+					agentsModelConfigNoDroppedKeysValidator{},
 				},
 				PlanModifiers: []planmodifier.String{
 					agentsModelConfigUseStateIfSemanticallyEqual{},
