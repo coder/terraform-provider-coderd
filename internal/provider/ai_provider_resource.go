@@ -658,8 +658,8 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 
 // A Coder server older than v2.35.0 drops the unknown role_arn JSON key
 // (omitempty), so a configured value round-trips to null and surfaces as a
-// cryptic "inconsistent values for sensitive attribute" error. Fail loudly
-// instead. (#387)
+// cryptic "inconsistent values for sensitive attribute" error (#387). Fail
+// loudly instead.
 func checkBedrockRoleARNDropped(config AIProviderResourceModel, provider codersdk.AIProvider, diags *diag.Diagnostics) {
 	b := config.bedrock()
 	if b == nil || b.RoleARN.IsNull() || b.RoleARN.IsUnknown() || b.RoleARN.ValueString() == "" {
