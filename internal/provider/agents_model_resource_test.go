@@ -408,11 +408,34 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 		require.Equal(t, []string{"nonsense"}, dropped)
 	})
 
-	t.Run("unknown nested key is reported", func(t *testing.T) {
+	t.Run("unknown nested key is reported by path", func(t *testing.T) {
 		t.Parallel()
 		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"anthropic":{"bogus_setting":"x","thinking":{"budget_tokens":4096}}}}`)
 		require.NoError(t, err)
-		require.Equal(t, []string{"bogus_setting"}, dropped)
+		require.Equal(t, []string{"provider_options.anthropic.bogus_setting"}, dropped)
+	})
+
+	t.Run("valid name does not mask a dropped occurrence elsewhere", func(t *testing.T) {
+		t.Parallel()
+		// The top-level name survives, but the misplaced nested one is dropped.
+		dropped, err := agentsModelConfigDroppedKeys(`{"max_output_tokens":8192,"provider_options":{"anthropic":{"max_output_tokens":4096}}}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"provider_options.anthropic.max_output_tokens"}, dropped)
+	})
+
+	t.Run("legacy top-level pricing keys are not dropped", func(t *testing.T) {
+		t.Parallel()
+		// The SDK folds these under "cost"; that relocation is not a drop.
+		dropped, err := agentsModelConfigDroppedKeys(`{"input_price_per_million_tokens":"3","output_price_per_million_tokens":"15"}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("fully unknown object reports only the parent path", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"bogus_block":{"nested":1}}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"bogus_block"}, dropped)
 	})
 
 	t.Run("multiple unknown keys are reported sorted", func(t *testing.T) {

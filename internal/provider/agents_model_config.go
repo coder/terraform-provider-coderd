@@ -236,16 +236,13 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 	}
 }
 
-// agentsModelConfigDroppedKeys returns the object key names present in raw that
-// disappear after canonicalizing through codersdk.ChatModelCallConfig. The SDK
-// silently discards keys it does not recognize (its custom UnmarshalJSON calls
-// json.Unmarshal internally, which defeats json.DisallowUnknownFields), so a
-// removed or misspelled field would otherwise vanish with no plan diff and no
-// error. Comparing the set of key names before and after the round-trip surfaces
-// those drops. Keys the SDK relocates but keeps (e.g. legacy top-level pricing
-// keys migrated under "cost") reappear under the same name and are not reported.
+// agentsModelConfigDroppedKeys returns the dotted key paths in raw that the SDK
+// silently discards when canonicalizing through codersdk.ChatModelCallConfig.
+// Comparing paths (not bare names) means a key valid in one place can't mask a
+// dropped occurrence of the same name elsewhere. Only the shallowest dropped
+// path per subtree is returned.
 func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
-	inputKeys, err := agentsModelConfigKeySet(raw)
+	inputPaths, err := agentsModelConfigKeyPaths(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -253,44 +250,87 @@ func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	outputKeys, err := agentsModelConfigKeySet(canonical)
+	outputPaths, err := agentsModelConfigKeyPaths(canonical)
 	if err != nil {
 		return nil, err
 	}
-	var dropped []string
-	for k := range inputKeys {
-		if _, ok := outputKeys[k]; !ok {
-			dropped = append(dropped, k)
+	dropped := map[string]struct{}{}
+	for p := range inputPaths {
+		if _, ok := outputPaths[agentsModelConfigCanonicalPath(p)]; !ok {
+			dropped[p] = struct{}{}
 		}
 	}
-	sort.Strings(dropped)
-	return dropped, nil
+	var out []string
+	for p := range dropped {
+		if !agentsModelConfigHasDroppedAncestor(p, dropped) {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
-// agentsModelConfigKeySet collects every object key name appearing anywhere in a
-// JSON document.
-func agentsModelConfigKeySet(raw string) (map[string]struct{}, error) {
+// agentsModelConfigLegacyPricingKeys are the pre-"cost" top-level pricing keys
+// the SDK still accepts and folds under "cost" on read. This relocation is the
+// only reason agentsModelConfigCanonicalPath exists.
+var agentsModelConfigLegacyPricingKeys = map[string]struct{}{
+	"input_price_per_million_tokens":       {},
+	"output_price_per_million_tokens":      {},
+	"cache_read_price_per_million_tokens":  {},
+	"cache_write_price_per_million_tokens": {},
+}
+
+// agentsModelConfigCanonicalPath maps a legacy top-level pricing key to its
+// post-canonicalization path under "cost", leaving every other path unchanged.
+func agentsModelConfigCanonicalPath(path string) string {
+	if _, ok := agentsModelConfigLegacyPricingKeys[path]; ok {
+		return "cost." + path
+	}
+	return path
+}
+
+// agentsModelConfigHasDroppedAncestor reports whether any parent of path is
+// itself dropped.
+func agentsModelConfigHasDroppedAncestor(path string, dropped map[string]struct{}) bool {
+	for i := 0; i < len(path); i++ {
+		if path[i] != '.' {
+			continue
+		}
+		if _, ok := dropped[path[:i]]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// agentsModelConfigKeyPaths collects the dotted path of every object key in a
+// JSON document. Arrays are traversed without an index segment.
+func agentsModelConfigKeyPaths(raw string) (map[string]struct{}, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
 	var v any
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	keys := map[string]struct{}{}
-	collectJSONKeys(v, keys)
-	return keys, nil
+	paths := map[string]struct{}{}
+	collectJSONKeyPaths("", v, paths)
+	return paths, nil
 }
 
-func collectJSONKeys(v any, keys map[string]struct{}) {
+func collectJSONKeyPaths(prefix string, v any, paths map[string]struct{}) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, val := range t {
-			keys[k] = struct{}{}
-			collectJSONKeys(val, keys)
+			path := k
+			if prefix != "" {
+				path = prefix + "." + k
+			}
+			paths[path] = struct{}{}
+			collectJSONKeyPaths(path, val, paths)
 		}
 	case []any:
 		for _, val := range t {
-			collectJSONKeys(val, keys)
+			collectJSONKeyPaths(prefix, val, paths)
 		}
 	}
 }
@@ -331,7 +371,9 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 			"Remove them or update them to the current schema. See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
 		strings.Join(dropped, ", "),
 	)
-	if slices.Contains(dropped, "effort") {
+	if slices.ContainsFunc(dropped, func(p string) bool {
+		return p == "effort" || strings.HasSuffix(p, ".effort")
+	}) {
 		detail += " Reasoning effort is now configured with the top-level \"reasoning_effort\" object ({\"default\":..., \"max\":...}) instead of provider_options.*.effort."
 	}
 	resp.Diagnostics.AddAttributeError(
@@ -339,13 +381,4 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 		"Unrecognized model_config settings",
 		detail,
 	)
-}
-
-func sliceContains(s []string, target string) (int, bool) {
-	for i, v := range s {
-		if v == target {
-			return i, true
-		}
-	}
-	return 0, false
 }
