@@ -26,9 +26,12 @@ resource "coderd_agents_model" "sonnet" {
       input_price_per_million_tokens  = "3"
       output_price_per_million_tokens = "15"
     }
+    reasoning_effort = {
+      default = "high"
+      max     = "high"
+    }
     provider_options = {
       anthropic = {
-        effort   = "high"
         thinking = { budget_tokens = 4096 }
       }
     }
