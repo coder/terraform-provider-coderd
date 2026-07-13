@@ -304,7 +304,10 @@ func agentsModelConfigHasDroppedAncestor(path string, dropped map[string]struct{
 }
 
 // agentsModelConfigKeyPaths collects the dotted path of every object key in a
-// JSON document. Arrays are traversed without an index segment.
+// JSON document. Arrays are traversed without an index segment. Keys whose value
+// is null are skipped: jsonencode of an optional/null variable emits them and
+// the SDK unmarshals null into an unset pointer, so a null carries no setting
+// and its omission from the canonical output is not a dropped configuration.
 func agentsModelConfigKeyPaths(raw string) (map[string]struct{}, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
@@ -321,6 +324,9 @@ func collectJSONKeyPaths(prefix string, v any, paths map[string]struct{}) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, val := range t {
+			if val == nil {
+				continue
+			}
 			path := k
 			if prefix != "" {
 				path = prefix + "." + k

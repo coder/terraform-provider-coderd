@@ -445,6 +445,35 @@ func TestAgentsModelConfigDroppedKeys(t *testing.T) {
 		require.Equal(t, []string{"alpha", "zeta"}, dropped)
 	})
 
+	t.Run("null-valued known key is not dropped", func(t *testing.T) {
+		t.Parallel()
+		// jsonencode of an optional/null variable renders temperature = null.
+		dropped, err := agentsModelConfigDroppedKeys(`{"temperature":null,"top_p":0.9}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("nested null-valued known key is not dropped", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"provider_options":{"openai":{"reasoning_effort":null}}}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("null-valued unknown key is not dropped", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"bogus":null}`)
+		require.NoError(t, err)
+		require.Empty(t, dropped)
+	})
+
+	t.Run("non-null unknown block with only null children is reported", func(t *testing.T) {
+		t.Parallel()
+		dropped, err := agentsModelConfigDroppedKeys(`{"bogus_block":{"nested":null}}`)
+		require.NoError(t, err)
+		require.Equal(t, []string{"bogus_block"}, dropped)
+	})
+
 	t.Run("invalid json returns error", func(t *testing.T) {
 		t.Parallel()
 		_, err := agentsModelConfigDroppedKeys(`{`)
