@@ -137,11 +137,12 @@ func agentsModelConfigCanonicalJSON(raw string) (string, error) {
 // agentsModelConfigSortedJSON re-encodes a JSON document with object keys sorted
 // alphabetically (recursively) and compact spacing, matching Terraform's
 // jsonencode output. Numbers are preserved verbatim via json.Number, so the only
-// change is key order. Coder stores model_config in the SDK struct's field order,
-// which is not alphabetical; without this the byte string in state never matches
-// the user's jsonencode config, and the framework's raw-byte plan guard
-// (server_planresourcechange.go: PlannedState.Raw.Equal(PriorState.Raw)) then
-// marks the computed updated_at attribute unknown on every plan after import.
+// change is key order. The model_config read back from Coder is re-encoded from
+// codersdk.ChatModelCallConfig in struct field order, which is not alphabetical;
+// without this the byte string in state never matches the user's jsonencode
+// config, and the framework's raw-byte plan guard (server_planresourcechange.go:
+// PlannedState.Raw.Equal(PriorState.Raw)) then marks the computed updated_at
+// attribute unknown on every plan after import.
 func agentsModelConfigSortedJSON(raw []byte) (string, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -235,10 +236,11 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 	}
 }
 
-// agentsModelConfigDroppedKeys returns the dotted paths in raw that Coder
-// silently discards when canonicalizing through codersdk.ChatModelCallConfig. A
-// key is dropped iff removing it leaves the canonical output unchanged, so the
-// SDK is the sole oracle and nothing here restates its schema.
+// agentsModelConfigDroppedKeys returns the dotted paths in raw that the provider
+// silently drops when decoding into codersdk.ChatModelCallConfig, since
+// encoding/json ignores keys with no matching struct field. A key is dropped iff
+// removing it leaves the canonical output unchanged, so the SDK type is the sole
+// oracle and nothing here restates its schema.
 func agentsModelConfigDroppedKeys(raw string) ([]string, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
@@ -338,18 +340,16 @@ func agentsModelConfigIsContentFree(v any) bool {
 	}
 }
 
-// agentsModelConfigNoDroppedKeysValidator rejects a model_config whose keys are
-// silently discarded when Coder canonicalizes it. Without this a schema change
-// in codersdk.ChatModelCallConfig (a removed or renamed field) would drop the
-// user's setting with no plan-time error, leaving Terraform to consider the
-// resulting state semantically equal. Erroring at plan time forces users to
-// migrate to the current schema instead of losing configuration.
+// agentsModelConfigNoDroppedKeysValidator rejects a model_config whose keys the
+// provider would silently drop (see agentsModelConfigDroppedKeys). Without it a
+// removed or renamed field in codersdk.ChatModelCallConfig would drop the user's
+// setting with no plan-time error, and semantic equality would hide the loss.
 type agentsModelConfigNoDroppedKeysValidator struct{}
 
 var _ validator.String = agentsModelConfigNoDroppedKeysValidator{}
 
 func (v agentsModelConfigNoDroppedKeysValidator) Description(_ context.Context) string {
-	return "model_config must not contain settings that Coder does not recognize and would silently discard."
+	return "model_config must only contain settings from the Coder chat model config schema this provider was built against; unrecognized settings would be silently dropped."
 }
 
 func (v agentsModelConfigNoDroppedKeysValidator) MarkdownDescription(ctx context.Context) string {
@@ -373,8 +373,9 @@ func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Contex
 		req.Path,
 		"Unrecognized model_config settings",
 		fmt.Sprintf(
-			"These model_config settings would be silently discarded by Coder: %s. "+
-				"Remove them or update them to the current schema. See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
+			"These model_config settings are not part of the Coder chat model config schema this provider was built against, so they would be silently dropped before reaching Coder: %s. "+
+				"If a setting is valid for your Coder deployment, upgrade the provider to a version built against your Coder release; otherwise remove it or fix the field name. "+
+				"See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
 			strings.Join(dropped, ", "),
 		),
 	)
