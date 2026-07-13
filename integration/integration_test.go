@@ -224,51 +224,59 @@ func TestIntegration(t *testing.T) {
 							"cache_read_price_per_million_tokens": "0.5",
 							"cache_write_price_per_million_tokens": "6.25"
 						},
-						"provider_options": {
-							"anthropic": {
-								"send_reasoning": true,
-								"effort": "high"
-							}
+						"reasoning_effort": {
+							"default": "high",
+								"max": "high"
+							},
+							"provider_options": {
+								"anthropic": {
+									"send_reasoning": true
+								}
 						}
-					}`},
+						}`},
 					"claude-sonnet-4-6": {"anthropic", `{
 						"cost": {
-							"input_price_per_million_tokens": "3",
+								"input_price_per_million_tokens": "3",
 							"output_price_per_million_tokens": "15"
-						},
-						"provider_options": {
+							},
+							"reasoning_effort": {
+								"default": "max",
+								"max": "max"
+							},
+							"provider_options": {
 							"anthropic": {
-								"send_reasoning": true,
-								"effort": "max",
-								"web_search_enabled": true,
-								"thinking": {
-									"budget_tokens": 16000
-								}
+									"send_reasoning": true,
+									"web_search_enabled": true,
+									"thinking": {
+										"budget_tokens": 16000
+									}
 							}
-						}
-					}`},
+							}
+						}`},
 					"gpt-5.5": {"openai", `{
-						"cost": {
-							"input_price_per_million_tokens": "2.5",
-							"output_price_per_million_tokens": "15",
-							"cache_read_price_per_million_tokens": "0.25"
+							"cost": {
+								"input_price_per_million_tokens": "2.5",
+								"output_price_per_million_tokens": "15",
+								"cache_read_price_per_million_tokens": "0.25"
+							},
+							"reasoning_effort": {
+								"default": "xhigh",
+							"max": "xhigh"
 						},
-						"provider_options": {
-							"openai": {
-								"parallel_tool_calls": false,
-								"reasoning_effort": "xhigh",
-								"reasoning_summary": "detailed",
+							"provider_options": {
+								"openai": {
+									"parallel_tool_calls": false,
+									"reasoning_summary": "detailed",
 								"text_verbosity": "high",
-								"web_search_enabled": true,
+									"web_search_enabled": true,
 								"search_context_size": "medium"
 							}
 						}
 					}`},
 					"gpt-5.4-mini": {"openai", `{
-						"provider_options": {
-							"openai": {
-								"reasoning_effort": "medium"
-							}
+						"reasoning_effort": {
+							"default": "medium",
+							"max": "medium"
 						}
 					}`},
 				}

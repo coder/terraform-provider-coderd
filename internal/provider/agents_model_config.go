@@ -135,11 +135,12 @@ func agentsModelConfigCanonicalJSON(raw string) (string, error) {
 // agentsModelConfigSortedJSON re-encodes a JSON document with object keys sorted
 // alphabetically (recursively) and compact spacing, matching Terraform's
 // jsonencode output. Numbers are preserved verbatim via json.Number, so the only
-// change is key order. Coder stores model_config in the SDK struct's field order,
-// which is not alphabetical; without this the byte string in state never matches
-// the user's jsonencode config, and the framework's raw-byte plan guard
-// (server_planresourcechange.go: PlannedState.Raw.Equal(PriorState.Raw)) then
-// marks the computed updated_at attribute unknown on every plan after import.
+// change is key order. The model_config read back from Coder is re-encoded from
+// codersdk.ChatModelCallConfig in struct field order, which is not alphabetical;
+// without this the byte string in state never matches the user's jsonencode
+// config, and the framework's raw-byte plan guard (server_planresourcechange.go:
+// PlannedState.Raw.Equal(PriorState.Raw)) then marks the computed updated_at
+// attribute unknown on every plan after import.
 func agentsModelConfigSortedJSON(raw []byte) (string, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -229,6 +230,49 @@ func (v agentsModelConfigNotEmptyValidator) ValidateString(_ context.Context, re
 			req.Path,
 			"Empty model_config",
 			"model_config has no settings, so Coder would discard it and leave Terraform's state inconsistent. Omit the attribute entirely to use Coder's defaults.",
+		)
+	}
+}
+
+// agentsModelConfigNoDroppedKeysValidator rejects a model_config containing
+// settings the provider would silently drop when decoding into
+// codersdk.ChatModelCallConfig. Without it a removed or renamed field in the
+// SDK type would drop the user's setting with no plan-time error, and semantic
+// equality would hide the loss.
+type agentsModelConfigNoDroppedKeysValidator struct{}
+
+var _ validator.String = agentsModelConfigNoDroppedKeysValidator{}
+
+func (v agentsModelConfigNoDroppedKeysValidator) Description(_ context.Context) string {
+	return "model_config must only contain settings from the Coder chat model config schema this provider was built against; unrecognized settings would be silently dropped."
+}
+
+func (v agentsModelConfigNoDroppedKeysValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v agentsModelConfigNoDroppedKeysValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	// Invalid or non-object JSON is left for the custom type and the not-empty
+	// validator to report.
+	if _, err := agentsModelConfigCanonicalJSON(req.ConfigValue.ValueString()); err != nil {
+		return
+	}
+	// The lenient decode above succeeded, so a strict failure can only be an
+	// unknown field.
+	var config codersdk.ChatModelCallConfig
+	if err := config.UnmarshalStrict([]byte(req.ConfigValue.ValueString())); err != nil {
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Unrecognized model_config settings",
+			fmt.Sprintf(
+				"model_config contains a setting that is not part of the Coder chat model config schema this provider was built against, so it would be silently dropped before reaching Coder: %s. "+
+					"If the setting is valid for your Coder deployment, upgrade the provider to a version built against your Coder release; otherwise remove it or fix the field name. "+
+					"See https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
+				err,
+			),
 		)
 	}
 }

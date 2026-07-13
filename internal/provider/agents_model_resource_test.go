@@ -391,6 +391,40 @@ func TestAgentsModelConfigNotEmptyValidator(t *testing.T) {
 	})
 }
 
+func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		config  types.String
+		wantErr string
+	}{
+		{name: "recognized config", config: types.StringValue(`{"max_output_tokens":8192,"temperature":0.7}`)},
+		{name: "unknown nested field", config: types.StringValue(`{"provider_options":{"anthropic":{"bogus_setting":"x"}}}`), wantErr: "bogus_setting"},
+		{name: "null", config: types.StringNull()},
+		{name: "unknown", config: types.StringUnknown()},
+		// Invalid and non-object JSON are other validators' problem.
+		{name: "invalid json", config: types.StringValue(`{`)},
+		{name: "non-object json", config: types.StringValue(`[1,2]`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp := &validator.StringResponse{}
+			agentsModelConfigNoDroppedKeysValidator{}.ValidateString(t.Context(), validator.StringRequest{
+				Path:        path.Root("model_config"),
+				ConfigValue: tt.config,
+			}, resp)
+			if tt.wantErr == "" {
+				require.False(t, resp.Diagnostics.HasError())
+				return
+			}
+			require.True(t, resp.Diagnostics.HasError())
+			require.Contains(t, resp.Diagnostics[0].Detail(), tt.wantErr)
+		})
+	}
+}
+
 func TestAgentsModelResourceValidationDefersUnknownConfig(t *testing.T) {
 	t.Parallel()
 

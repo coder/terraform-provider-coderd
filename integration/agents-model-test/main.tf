@@ -42,10 +42,13 @@ resource "coderd_agents_model" "claude_opus" {
       cache_read_price_per_million_tokens  = "0.5"
       cache_write_price_per_million_tokens = "6.25"
     }
+    reasoning_effort = {
+      default = "high"
+      max     = "high"
+    }
     provider_options = {
       anthropic = {
         send_reasoning = true
-        effort         = "high"
       }
     }
   })
@@ -63,10 +66,13 @@ resource "coderd_agents_model" "claude_sonnet" {
       input_price_per_million_tokens  = "3"
       output_price_per_million_tokens = "15"
     }
+    reasoning_effort = {
+      default = "max"
+      max     = "max"
+    }
     provider_options = {
       anthropic = {
         send_reasoning     = true
-        effort             = "max"
         web_search_enabled = true
         thinking = {
           budget_tokens = 16000
@@ -89,10 +95,13 @@ resource "coderd_agents_model" "gpt_xhigh" {
       output_price_per_million_tokens     = "15"
       cache_read_price_per_million_tokens = "0.25"
     }
+    reasoning_effort = {
+      default = "xhigh"
+      max     = "xhigh"
+    }
     provider_options = {
       openai = {
         parallel_tool_calls = false
-        reasoning_effort    = "xhigh"
         reasoning_summary   = "detailed"
         text_verbosity      = "high"
         web_search_enabled  = true
@@ -110,10 +119,9 @@ resource "coderd_agents_model" "gpt_mini" {
   compression_threshold = 70
 
   model_config = jsonencode({
-    provider_options = {
-      openai = {
-        reasoning_effort = "medium"
-      }
+    reasoning_effort = {
+      default = "medium"
+      max     = "medium"
     }
   })
 }
