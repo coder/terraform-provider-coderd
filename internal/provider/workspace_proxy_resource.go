@@ -66,6 +66,7 @@ func (r *WorkspaceProxyResource) Schema(ctx context.Context, req resource.Schema
 			"session_token": schema.StringAttribute{
 				MarkdownDescription: "Session token for the workspace proxy.",
 				Computed:            true,
+				Sensitive:           true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
