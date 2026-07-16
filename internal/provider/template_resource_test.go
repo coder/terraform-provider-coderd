@@ -14,9 +14,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
-	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 
@@ -58,27 +58,27 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
 		cfg2.Name = ptr.Ref("example-template-new")
-		cfg2.Versions[0].Directory = &exTemplateTwo
-		cfg2.Versions[0].Name = ptr.Ref("new")
+		(*cfg2.Versions)[0].Directory = &exTemplateTwo
+		(*cfg2.Versions)[0].Name = ptr.Ref("new")
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions = append(cfg3.Versions, testAccTemplateVersionConfig{
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		cfg3.Versions = ptr.Ref(append(*cfg3.Versions, testAccTemplateVersionConfig{
 			Name:      ptr.Ref("legacy-template"),
 			Directory: &exTemplateOne,
 			Active:    ptr.Ref(false),
@@ -88,19 +88,19 @@ func TestAccTemplateResource(t *testing.T) {
 					Value: ptr.Ref("world"),
 				},
 			},
-		})
+		}))
 
 		cfg4 := cfg3
-		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Active = ptr.Ref(false)
-		cfg4.Versions[1].Active = ptr.Ref(true)
+		cfg4.Versions = ptr.Ref(slices.Clone(*cfg4.Versions))
+		(*cfg4.Versions)[0].Active = ptr.Ref(false)
+		(*cfg4.Versions)[1].Active = ptr.Ref(true)
 
 		cfg5 := cfg4
-		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[0], cfg5.Versions[1] = cfg5.Versions[1], cfg5.Versions[0]
+		cfg5.Versions = ptr.Ref(slices.Clone(*cfg5.Versions))
+		(*cfg5.Versions)[0], (*cfg5.Versions)[1] = (*cfg5.Versions)[1], (*cfg5.Versions)[0]
 
 		cfg6 := cfg4
-		cfg6.Versions = slices.Clone(cfg6.Versions[1:])
+		cfg6.Versions = ptr.Ref(slices.Clone((*cfg6.Versions)[1:]))
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -143,7 +143,7 @@ func TestAccTemplateResource(t *testing.T) {
 				{
 					Config: cfg1.String(t),
 					PreConfig: func() {
-						file := fmt.Sprintf("%s/terraform.tfvars", *cfg1.Versions[0].Directory)
+						file := fmt.Sprintf("%s/terraform.tfvars", *(*cfg1.Versions)[0].Directory)
 						newFile := []byte("name = \"world2\"")
 						err := os.WriteFile(file, newFile, 0644)
 						require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestAccTemplateResource(t *testing.T) {
 				{
 					Config: cfg1.String(t),
 					PreConfig: func() {
-						file := fmt.Sprintf("%s/terraform.tfvars", *cfg1.Versions[0].Directory)
+						file := fmt.Sprintf("%s/terraform.tfvars", *(*cfg1.Versions)[0].Directory)
 						newFile := []byte("name = \"world\"")
 						err := os.WriteFile(file, newFile, 0644)
 						require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template2"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
@@ -280,33 +280,33 @@ func TestAccTemplateResource(t *testing.T) {
 					},
 					Active: ptr.Ref(false),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[1].Name = ptr.Ref("new-name")
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[1].Name = ptr.Ref("new-name")
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Name = ptr.Ref("new-name-one")
-		cfg3.Versions[1].Name = ptr.Ref("new-name-two")
-		cfg3.Versions[0], cfg3.Versions[1] = cfg3.Versions[1], cfg3.Versions[0]
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Name = ptr.Ref("new-name-one")
+		(*cfg3.Versions)[1].Name = ptr.Ref("new-name-two")
+		(*cfg3.Versions)[0], (*cfg3.Versions)[1] = (*cfg3.Versions)[1], (*cfg3.Versions)[0]
 
 		cfg4 := cfg1
-		cfg4.Versions = slices.Clone(cfg4.Versions)
-		cfg4.Versions[0].Directory = &exTemplateOne
+		cfg4.Versions = ptr.Ref(slices.Clone(*cfg4.Versions))
+		(*cfg4.Versions)[0].Directory = &exTemplateOne
 
 		cfg5 := cfg4
-		cfg5.Versions = slices.Clone(cfg5.Versions)
-		cfg5.Versions[1].Directory = &exTemplateOne
+		cfg5.Versions = ptr.Ref(slices.Clone(*cfg5.Versions))
+		(*cfg5.Versions)[1].Directory = &exTemplateOne
 
 		cfg6 := cfg5
-		cfg6.Versions = slices.Clone(cfg6.Versions)
-		cfg6.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+		cfg6.Versions = ptr.Ref(slices.Clone(*cfg6.Versions))
+		(*cfg6.Versions)[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
 				Key:   ptr.Ref("name"),
 				Value: ptr.Ref("world2"),
@@ -386,7 +386,7 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template3"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
@@ -398,15 +398,15 @@ func TestAccTemplateResource(t *testing.T) {
 					},
 					Active: ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].TerraformVariables = []testAccTemplateKeyValueConfig{
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
 				Key:   ptr.Ref("name"),
 				Value: ptr.Ref("world2"),
@@ -439,13 +439,13 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(false),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
@@ -457,7 +457,11 @@ func TestAccTemplateResource(t *testing.T) {
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
-					Config:      cfg1.String(t),
+					Config: cfg1.String(t),
+					// PlanOnly asserts this is caught by the versions plan
+					// modifier during `terraform plan`, not deferred to
+					// `terraform apply`
+					PlanOnly:    true,
 					ExpectError: regexp.MustCompile("At least one template version must be active when creating"),
 				},
 			},
@@ -469,36 +473,36 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].Active = ptr.Ref(false)
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = ptr.Ref(false)
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Directory = &exTemplateTwo
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Directory = &exTemplateTwo
 
 		cfg2b := cfg1
-		cfg2b.Versions = slices.Clone(cfg2b.Versions)
-		cfg2b.Versions = append(cfg2b.Versions, testAccTemplateVersionConfig{
+		cfg2b.Versions = ptr.Ref(slices.Clone(*cfg2b.Versions))
+		cfg2b.Versions = ptr.Ref(append(*cfg2b.Versions, testAccTemplateVersionConfig{
 			Directory: &exTemplateTwo,
 			Active:    ptr.Ref(false),
-		})
+		}))
 
 		cfg3b := cfg2b
-		cfg3b.Versions = slices.Clone(cfg3b.Versions)
-		cfg3b.Versions[1].Active = ptr.Ref(true)
+		cfg3b.Versions = ptr.Ref(slices.Clone(*cfg3b.Versions))
+		(*cfg3b.Versions)[1].Active = ptr.Ref(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -537,29 +541,29 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].Active = ptr.Ref(false)
-		cfg2.Versions = append(cfg2.Versions, testAccTemplateVersionConfig{
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = ptr.Ref(false)
+		cfg2.Versions = ptr.Ref(append(*cfg2.Versions, testAccTemplateVersionConfig{
 			Directory: &exTemplateTwo,
 			Active:    ptr.Ref(false),
-		})
+		}))
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[1].Active = ptr.Ref(true)
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[1].Active = ptr.Ref(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -593,26 +597,26 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				null: true,
 			},
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = slices.Clone(cfg2.Versions)
-		cfg2.Versions[0].Active = ptr.Ref(false)
-		cfg2.Versions[0].Directory = &exTemplateTwo
+		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = ptr.Ref(false)
+		(*cfg2.Versions)[0].Directory = &exTemplateTwo
 
 		cfg3 := cfg2
-		cfg3.Versions = slices.Clone(cfg3.Versions)
-		cfg3.Versions[0].Active = ptr.Ref(true)
+		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Active = ptr.Ref(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -655,12 +659,12 @@ func TestAccTemplateResource(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL:               testAccTemplateACLConfig{null: true},
 			MaxPortShareLevel: ptr.Ref("invalid"),
 		}
@@ -673,6 +677,246 @@ func TestAccTemplateResource(t *testing.T) {
 				{
 					Config:      cfg1.String(t),
 					ExpectError: regexp.MustCompile(`value must be one of`),
+				},
+			},
+		})
+	})
+}
+
+// TestAccTemplateResourceOptionalVersions covers PLAT-288: `versions` is
+// optional, so `coderd_template` can manage a template's settings without
+// owning its version lifecycle. A template still can't be *created* without
+// at least one version (Coderd has no concept of a versionless template), so
+// that case is expected to keep failing with a clear error.
+func TestAccTemplateResourceOptionalVersions(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_optional_versions_acc")
+
+	exTemplate := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplate)
+	require.NoError(t, err)
+
+	t.Run("CreateWithoutVersionsErrors", func(t *testing.T) {
+		cfg := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("no-versions-template"),
+			ACL:   testAccTemplateACLConfig{null: true},
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:   cfg.String(t),
+					PlanOnly: true,
+					// Terraform's CLI diagnostic renderer word-wraps long error
+					// text with real newlines, so `.` must match them too.
+					ExpectError: regexp.MustCompile("(?s)At least one template version.*is required when.*creating"),
+				},
+			},
+		})
+	})
+
+	t.Run("ImportThenPlanWithoutActiveVersionDoesNotError", func(t *testing.T) {
+		firstUser, err := client.User(ctx, codersdk.Me)
+		require.NoError(t, err)
+		orgID := firstUser.OrganizationIDs[0]
+
+		// Create the template directly via the API rather than through
+		// Terraform: a resource.Test call destroys everything it created
+		// once it returns, which would delete the template before the
+		// import step below ever got to see it.
+		version, _, err := newVersion(ctx, client, newVersionRequest{
+			OrganizationID: orgID,
+			Version: &TemplateVersion{
+				Directory:          types.StringValue(exTemplate),
+				TerraformVariables: emptyVariableSet(),
+				ProvisionerTags:    emptyVariableSet(),
+			},
+		})
+		require.NoError(t, err)
+		tpl, err := client.CreateTemplate(ctx, orgID, codersdk.CreateTemplateRequest{
+			Name:      "import-no-active-template",
+			VersionID: version.ID,
+		})
+		require.NoError(t, err)
+
+		cfgManaged := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref(tpl.Name),
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+				{
+					Directory: &exTemplate,
+					Active:    ptr.Ref(true),
+				},
+			}),
+			ACL: testAccTemplateACLConfig{null: true},
+		}
+
+		// Describes the same template post-import, without marking any
+		// version active. The template already has an active version on
+		// the server; this config is just adopting it, not creating it.
+		cfgReimported := cfgManaged
+		cfgReimported.Versions = ptr.Ref(slices.Clone(*cfgReimported.Versions))
+		(*cfgReimported.Versions)[0].Active = ptr.Ref(false)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				// Import into brand new state. `Create` never runs for this
+				// resource instance, so there's no private-state record of
+				// any tracked version -- exactly the scenario that broke the
+				// old private-state-is-nil creation heuristic.
+				{
+					Config:             cfgManaged.String(t),
+					ResourceName:       "coderd_template.test",
+					ImportState:        true,
+					ImportStateId:      tpl.ID.String(),
+					ImportStatePersist: true,
+				},
+				// The first plan after import must not demand an active
+				// version just because there's no tracked private state:
+				// req.State.Raw.IsNull() (unlike the old private-state-is-nil
+				// heuristic it replaced) correctly recognizes this isn't a
+				// Create, since prior state already exists from the import.
+				// A non-empty plan is expected, since Terraform is now
+				// tracking this version for the first time.
+				{
+					Config:             cfgReimported.String(t),
+					PlanOnly:           true,
+					ExpectNonEmptyPlan: true,
+				},
+			},
+		})
+	})
+
+	t.Run("SettingsOnlyManagementAfterDroppingVersions", func(t *testing.T) {
+		firstUser, err := client.User(ctx, codersdk.Me)
+		require.NoError(t, err)
+		orgID := firstUser.OrganizationIDs[0]
+
+		cfgManaged := testAccTemplateResourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Name:  ptr.Ref("settings-only-template"),
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+				{
+					Directory: &exTemplate,
+					Active:    ptr.Ref(true),
+				},
+			}),
+			ACL: testAccTemplateACLConfig{null: true},
+		}
+
+		cfgUnmanaged := cfgManaged
+		cfgUnmanaged.Versions = nil
+
+		cfgUnmanagedWithNewDescription := cfgUnmanaged
+		cfgUnmanagedWithNewDescription.Description = ptr.Ref("now managed by an external pipeline")
+
+		// Captured from state in the first step's Check, then used both to
+		// simulate the pipeline's out-of-band push (PreConfig runs before a
+		// step's plan/apply and has no access to *terraform.State, so the ID
+		// has to be threaded through this way) and to verify against the
+		// Coderd API directly in the last step.
+		var templateID uuid.UUID
+		var pipelineVersionID uuid.UUID
+		captureTemplateID := func(s *terraform.State) error {
+			rs, ok := s.RootModule().Resources["coderd_template.test"]
+			if !ok {
+				return fmt.Errorf("coderd_template.test not found in state")
+			}
+			id, err := uuid.Parse(rs.Primary.ID)
+			if err != nil {
+				return fmt.Errorf("failed to parse template id %q: %w", rs.Primary.ID, err)
+			}
+			templateID = id
+			return nil
+		}
+
+		// Simulates the customer's own CI pipeline calling `coder templates
+		// push --activate` outside of Terraform, after Terraform has stopped
+		// tracking any version for this template.
+		pushAndActivateExternalVersion := func() {
+			version := TemplateVersion{
+				Directory:          types.StringValue(exTemplate),
+				TerraformVariables: emptyVariableSet(),
+				ProvisionerTags:    emptyVariableSet(),
+			}
+			versionResp, logs, err := newVersion(ctx, client, newVersionRequest{
+				Version:        &version,
+				OrganizationID: orgID,
+				TemplateID:     &templateID,
+			})
+			require.NoError(t, err, "%v", logs)
+			require.NoError(t, markActive(ctx, client, templateID, versionResp.ID))
+			pipelineVersionID = versionResp.ID
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:                 func() { testAccPreCheck(t) },
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfgManaged.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttrSet("coderd_template.test", "id"),
+						resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+						captureTemplateID,
+					),
+				},
+				// The team switches to a custom pipeline for pushing versions;
+				// Terraform is told to stop tracking versions entirely.
+				{
+					Config: cfgUnmanaged.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_template.test", "versions"),
+						testAccCheckNumTemplateVersions(ctx, client, 1),
+					),
+				},
+				// The pipeline pushes and activates a new version, entirely
+				// outside Terraform. Terraform's config is unchanged, so the
+				// next plan/apply should be a no-op: it isn't tracking any
+				// version, so there's nothing to reconcile or fight over.
+				{
+					PreConfig: pushAndActivateExternalVersion,
+					Config:    cfgUnmanaged.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckNoResourceAttr("coderd_template.test", "versions"),
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+					),
+				},
+				// Terraform updates a setting. Only the setting should change:
+				// the pipeline's active version must survive untouched.
+				{
+					Config: cfgUnmanagedWithNewDescription.String(t),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr("coderd_template.test", "description", "now managed by an external pipeline"),
+						resource.TestCheckNoResourceAttr("coderd_template.test", "versions"),
+						testAccCheckNumTemplateVersions(ctx, client, 2),
+						func(*terraform.State) error {
+							tmpl, err := client.Template(ctx, templateID)
+							if err != nil {
+								return err
+							}
+							if tmpl.ActiveVersionID != pipelineVersionID {
+								return fmt.Errorf("expected pipeline-pushed version %s to remain active, got %s", pipelineVersionID, tmpl.ActiveVersionID)
+							}
+							return nil
+						},
+					),
 				},
 			},
 		})
@@ -704,13 +948,13 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 			ACL: testAccTemplateACLConfig{
 				GroupACL: []testAccTemplateKeyValueConfig{
 					{
@@ -838,12 +1082,12 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
 			Name:  ptr.Ref("example-template"),
-			Versions: []testAccTemplateVersionConfig{
+			Versions: ptr.Ref([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplateOne,
 					Active:    ptr.Ref(true),
 				},
-			},
+			}),
 		}
 
 		cfgOwner := baseCfg
@@ -901,12 +1145,12 @@ func TestAccTemplateResourceBackCompat(t *testing.T) {
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
 		Name:  ptr.Ref("example-template"),
-		Versions: []testAccTemplateVersionConfig{
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
 			{
 				Directory: &exTemplateOne,
 				Active:    ptr.Ref(true),
 			},
-		},
+		}),
 		ACL: testAccTemplateACLConfig{
 			null: true,
 		},
@@ -946,13 +1190,13 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
 		Name:  ptr.Ref("example-template"),
-		Versions: []testAccTemplateVersionConfig{
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
 				Directory: &exTemplateOne,
 				Active:    ptr.Ref(true),
 			},
-		},
+		}),
 		AllowUserAutostart: ptr.Ref(false),
 	}
 
@@ -1024,6 +1268,9 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 
 func TestAccTemplateResourceVariables(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 	cfg := `
 provider coderd {
 	url   = %q
@@ -1085,6 +1332,9 @@ resource "coderd_template" "sample" {
 
 func TestAccTemplateResourceSensitiveTFVarsDeferredReplan(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	// Changing the sensitive tf_var forces random_uuid to be replaced, which
 	// makes the version name unknown during planning and triggers a deferred
@@ -1141,14 +1391,8 @@ resource "coderd_template" "test" {
 	cfg2 := fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "yes", exTemplateOne)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:   func() { testAccPreCheck(t) },
-		IsUnitTest: true,
-		// Terraform 1.0 panics while formatting plans that contain marked nested
-		// values in this scenario ("value is marked, so must be unmarked first").
-		// The provider regression is still covered on Terraform 1.1+.
-		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
-			tfversion.SkipBelow(tfversion.Version1_1_0),
-		},
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		ExternalProviders: map[string]resource.ExternalProvider{
 			"random": {
@@ -1185,6 +1429,91 @@ resource "coderd_template" "test" {
 	})
 }
 
+// TestAccTemplateResourceTFVarsFromVariable reproduces issue #305: tf_vars and
+// provisioner_tags supplied through required input variables (the equivalent
+// of `terraform plan -var-file=...`) are unknown while Terraform's validate
+// walk runs at the start of plan and apply, because the validate walk
+// evaluates input variables without values as unknown. With []Variable struct
+// fields this failed with "Value Conversion Error ... Path: [0].tf_vars"
+// before the provider was even configured. The variables must not have
+// defaults; a default would make them known during the validate walk and skip
+// the regression entirely. The two variables deliberately use different type
+// constraints, list(object) and list(map(string)), to cover both input shapes
+// from the original reports.
+func TestAccTemplateResourceTFVarsFromVariable(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+variable "template_variables" {
+	type = list(object({
+		name = string,
+		value = any
+	}))
+}
+
+variable "provisioner_tags" {
+	type = list(map(string))
+}
+
+resource "coderd_template" "test" {
+	name = "tf-vars-from-variable"
+
+	versions = [{
+		directory        = %q
+		active           = true
+		tf_vars          = var.template_variables
+		provisioner_tags = var.provisioner_tags
+	}]
+}
+`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_tfvars_from_var_acc")
+
+	exTemplateOne := t.TempDir()
+	err := cp.Copy("../../integration/template-test/example-template", exTemplateOne)
+	require.NoError(t, err)
+
+	cfg = fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), exTemplateOne)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				ConfigVariables: config.Variables{
+					"template_variables": config.ListVariable(
+						config.MapVariable(map[string]config.Variable{
+							"name":  config.StringVariable("name"),
+							"value": config.StringVariable("world"),
+						}),
+					),
+					"provisioner_tags": config.ListVariable(),
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.#", "1"),
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.tf_vars.#", "1"),
+					resource.TestCheckTypeSetElemNestedAttrs("coderd_template.test", "versions.0.tf_vars.*", map[string]string{
+						"name":  "name",
+						"value": "world",
+					}),
+					testAccCheckNumTemplateVersions(ctx, client, 1),
+				),
+			},
+		},
+	})
+}
+
 type testAccTemplateResourceConfig struct {
 	URL   string
 	Token string
@@ -1210,7 +1539,10 @@ type testAccTemplateResourceConfig struct {
 	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
 
-	Versions []testAccTemplateVersionConfig
+	// Versions is a pointer so that a nil value renders `versions = null`
+	// (matching AutostartRequirement above), letting tests exercise
+	// settings-only management of a template (see PLAT-288).
+	Versions *[]testAccTemplateVersionConfig
 	ACL      testAccTemplateACLConfig
 }
 
@@ -1289,6 +1621,45 @@ func (c testAccAutostopRequirementConfig) String(t *testing.T) string {
 	return buf.String()
 }
 
+func (c testAccTemplateResourceConfig) versionsString(t *testing.T) string {
+	t.Helper()
+	if c.Versions == nil {
+		return "null"
+	}
+	tpl := `[
+	{{- range . }}
+	{
+		name      = {{orNull .Name}}
+		directory = {{orNull .Directory}}
+		active    = {{orNull .Active}}
+
+		tf_vars = [
+			{{- range .TerraformVariables }}
+			{
+				name  = {{orNull .Key}}
+				value = {{orNull .Value}}
+			},
+			{{- end}}
+		]
+	},
+	{{- end}}
+	]
+	`
+
+	funcMap := template.FuncMap{
+		"orNull": PrintOrNull,
+	}
+
+	buf := strings.Builder{}
+	tmpl, err := template.New("versions").Funcs(funcMap).Parse(tpl)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&buf, *c.Versions)
+	require.NoError(t, err)
+
+	return buf.String()
+}
+
 func (c testAccTemplateResourceConfig) String(t *testing.T) string {
 	t.Helper()
 	tpl := `
@@ -1321,24 +1692,7 @@ resource "coderd_template" "test" {
 
 	acl = ` + c.ACL.String(t) + `
 
-	versions = [
-	{{- range .Versions }}
-	{
-		name      = {{orNull .Name}}
-		directory = {{orNull .Directory}}
-		active    = {{orNull .Active}}
-
-		tf_vars = [
-			{{- range .TerraformVariables }}
-			{
-				name  = {{orNull .Key}}
-				value = {{orNull .Value}}
-			},
-			{{- end}}
-		]
-	},
-	{{- end}}
-	]
+	versions = ` + c.versionsString(t) + `
 }
 `
 

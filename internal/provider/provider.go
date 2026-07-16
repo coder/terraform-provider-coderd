@@ -233,6 +233,9 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewProvisionerKeyResource,
 		NewOrganizationSyncSettingsResource,
 		NewOrganizationGroupSyncResource,
+		NewAIProviderResource,
+		NewAgentsModelResource,
+		NewDefaultAgentsModelResource,
 	}
 }
 

@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -192,6 +195,114 @@ func TestIntegration(t *testing.T) {
 				require.Len(t, acl.Users, 1)
 				require.Equal(t, codersdk.TemplateRoleAdmin, acl.Users[0].Role)
 				require.Equal(t, user.ID, acl.Users[0].ID)
+			},
+		},
+		{
+			name: "agents-model-test",
+			preF: func(t testing.TB, c *codersdk.Client) {},
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				providers, err := c.AIProviders(ctx)
+				require.NoError(t, err)
+				require.Len(t, providers, 2)
+
+				exp := codersdk.NewExperimentalClient(c)
+				configs, err := exp.ListChatModelConfigs(ctx)
+				require.NoError(t, err)
+
+				providerTypeByID := make(map[uuid.UUID]string, len(providers))
+				for _, p := range providers {
+					providerTypeByID[p.ID] = string(p.Type)
+				}
+
+				// model -> {provider type, expected model_config JSON} (mirrors main.tf).
+				want := map[string]struct{ provider, config string }{
+					"claude-opus-4-8": {"anthropic", `{
+						"max_output_tokens": 128000,
+						"cost": {
+							"input_price_per_million_tokens": "5",
+							"output_price_per_million_tokens": "25",
+							"cache_read_price_per_million_tokens": "0.5",
+							"cache_write_price_per_million_tokens": "6.25"
+						},
+						"reasoning_effort": {
+							"default": "high",
+								"max": "high"
+							},
+							"provider_options": {
+								"anthropic": {
+									"send_reasoning": true
+								}
+						}
+						}`},
+					"claude-sonnet-4-6": {"anthropic", `{
+						"cost": {
+								"input_price_per_million_tokens": "3",
+							"output_price_per_million_tokens": "15"
+							},
+							"reasoning_effort": {
+								"default": "max",
+								"max": "max"
+							},
+							"provider_options": {
+							"anthropic": {
+									"send_reasoning": true,
+									"web_search_enabled": true,
+									"thinking": {
+										"budget_tokens": 16000
+									}
+							}
+							}
+						}`},
+					"gpt-5.5": {"openai", `{
+							"cost": {
+								"input_price_per_million_tokens": "2.5",
+								"output_price_per_million_tokens": "15",
+								"cache_read_price_per_million_tokens": "0.25"
+							},
+							"reasoning_effort": {
+								"default": "xhigh",
+							"max": "xhigh"
+						},
+							"provider_options": {
+								"openai": {
+									"parallel_tool_calls": false,
+									"reasoning_summary": "detailed",
+								"text_verbosity": "high",
+									"web_search_enabled": true,
+								"search_context_size": "medium"
+							}
+						}
+					}`},
+					"gpt-5.4-mini": {"openai", `{
+						"reasoning_effort": {
+							"default": "medium",
+							"max": "medium"
+						}
+					}`},
+				}
+				require.Len(t, configs, len(want))
+
+				var defaults []string
+				for _, m := range configs {
+					if m.IsDefault {
+						defaults = append(defaults, m.Model)
+					}
+					w, ok := want[m.Model]
+					require.True(t, ok, "unexpected model %s", m.Model)
+					assert.Equal(t, w.provider, providerTypeByID[m.AIProviderID])
+					require.NotNil(t, m.ModelConfig)
+					got, err := json.Marshal(m.ModelConfig)
+					require.NoError(t, err)
+					var wantConfig, gotConfig any
+					require.NoError(t, json.Unmarshal([]byte(w.config), &wantConfig))
+					require.NoError(t, json.Unmarshal(got, &gotConfig))
+					if diff := cmp.Diff(wantConfig, gotConfig); diff != "" {
+						t.Errorf("model_config for %s mismatch (-want +got):\n%s", m.Model, diff)
+					}
+				}
+				// coderd_default_agents_model.default points at claude_sonnet, which
+				// demotes the auto-promoted claude_opus, so Sonnet is the sole default.
+				assert.Equal(t, []string{"claude-sonnet-4-6"}, defaults)
 			},
 		},
 	} {

@@ -2,21 +2,22 @@ package integration
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/coder/coder/v2/codersdk"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
-
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	tcnetwork "github.com/testcontainers/testcontainers-go/network"
+	"github.com/testcontainers/testcontainers-go/wait"
+)
+
+const (
+	coderHTTPPort       = "3000/tcp"
+	coderStartupTimeout = 90 * time.Second
 )
 
 // User-configurable options for coder backend.
@@ -56,10 +57,8 @@ func EnableRateLimits(opts *coderOptions) {
 func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(*coderOptions)) *codersdk.Client {
 	// Start with the defaults.
 	opts := coderOptions{
-		useLicense:  false,
-		image:       "ghcr.io/coder/coder",
-		version:     "latest",
-		experiments: "",
+		image:   "ghcr.io/coder/coder",
+		version: "latest",
 	}
 
 	// Apply user-selected options.
@@ -67,7 +66,6 @@ func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(
 		option(&opts)
 	}
 
-	// Env vars override user-selected options.
 	if v, ok := os.LookupEnv("CODER_IMAGE"); ok {
 		opts.image = v
 	}
@@ -83,60 +81,54 @@ func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(
 		t.Skip("Skipping tests that require a license.")
 	}
 
-	t.Logf("using coder image %s:%s", opts.image, opts.version)
+	ref := opts.image + ":" + opts.version
+	t.Logf("[%s] using coder image %s", name, ref)
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	require.NoError(t, err, "init docker client")
+	// Give Coder an external PostgreSQL on a per-test network instead of its
+	// embedded one, which downloads a binary from Maven at startup (a flaky,
+	// rate-limited fetch that reds CI lanes).
+	nw, err := tcnetwork.New(ctx)
+	testcontainers.CleanupNetwork(t, nw)
+	require.NoError(t, err, "create test network")
+	startPostgres(ctx, t, nw.Name)
 
-	p := randomPort(t)
-	t.Logf("random port is %d", p)
-	// Stand up a temporary Coder instance
-	puller, err := cli.ImagePull(ctx, opts.image+":"+opts.version, image.PullOptions{})
-	require.NoError(t, err, "pull coder image")
-	defer func() {
-		if err := puller.Close(); err != nil {
-			t.Logf("error closing image puller: %v", err)
-		}
-	}()
-	_, err = io.Copy(os.Stderr, puller)
-	require.NoError(t, err, "pull coder image")
-
-	env := []string{
-		"CODER_HTTP_ADDRESS=0.0.0.0:3000",        // Listen on all interfaces inside the container.
-		"CODER_ACCESS_URL=http://localhost:3000", // Avoid creating try.coder.app URLs.
-		"CODER_TELEMETRY_ENABLE=false",           // Avoid creating noise.
+	env := map[string]string{
+		"CODER_HTTP_ADDRESS":      "0.0.0.0:3000",          // Listen on all interfaces inside the container.
+		"CODER_ACCESS_URL":        "http://localhost:3000", // Avoid creating try.coder.app URLs.
+		"CODER_TELEMETRY_ENABLE":  "false",                 // Avoid creating noise.
+		"CODER_PG_CONNECTION_URL": "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable",
 	}
 	if !opts.enableRateLimits {
-		env = append(env, "CODER_DANGEROUS_DISABLE_RATE_LIMITS=true")
+		env["CODER_DANGEROUS_DISABLE_RATE_LIMITS"] = "true"
 	}
 	if opts.experiments != "" {
-		env = append(env, "CODER_EXPERIMENTS="+opts.experiments)
+		env["CODER_EXPERIMENTS"] = opts.experiments
 	}
 
-	ctr, err := cli.ContainerCreate(ctx, &container.Config{
-		Image:        opts.image + ":" + opts.version,
-		Env:          env,
-		Labels:       map[string]string{},
-		ExposedPorts: map[nat.Port]struct{}{nat.Port("3000/tcp"): {}},
-	}, &container.HostConfig{
-		PortBindings: map[nat.Port][]nat.PortBinding{
-			nat.Port("3000/tcp"): {{HostIP: "127.0.0.1", HostPort: fmt.Sprintf("%d", p)}},
+	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:           ref,
+			AlwaysPullImage: true,
+			Env:             env,
+			ExposedPorts:    []string{coderHTTPPort},
+			Networks:        []string{nw.Name},
+			WaitingFor:      wait.ForHTTP("/api/v2/buildinfo").WithPort(coderHTTPPort).WithStartupTimeout(coderStartupTimeout),
 		},
-	}, nil, nil, "terraform-provider-coderd-"+name)
-	require.NoError(t, err, "create test deployment")
-
-	t.Logf("created container %s\n", ctr.ID)
-	t.Cleanup(func() { // Make sure we clean up after ourselves.
-		// TODO: also have this execute if you Ctrl+C!
-		t.Logf("stopping container %s\n", ctr.ID)
-		_ = cli.ContainerRemove(ctx, ctr.ID, container.RemoveOptions{
-			Force: true,
-		})
+		Started: true,
 	})
+	testcontainers.CleanupContainer(t, ctr)
+	t.Cleanup(func() {
+		if t.Failed() && ctr != nil {
+			dumpContainerLogs(t, ctr)
+		}
+	})
+	require.NoError(t, err, "start coder container")
 
-	err = cli.ContainerStart(ctx, ctr.ID, container.StartOptions{})
-	require.NoError(t, err, "start container")
-	t.Logf("started container %s\n", ctr.ID)
+	endpoint, err := ctr.PortEndpoint(ctx, coderHTTPPort, "http")
+	require.NoError(t, err, "coder endpoint")
+	coderURL, err := url.Parse(endpoint)
+	require.NoError(t, err, "parse coder URL")
+	client := codersdk.New(coderURL)
 
 	// nolint:gosec // For testing only.
 	var (
@@ -145,18 +137,8 @@ func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(
 		testUsername = "admin"
 	)
 
-	// Perform first time setup
-	coderURL, err := url.Parse(fmt.Sprintf("http://localhost:%d", p))
-	require.NoError(t, err, "parse coder URL")
-	client := codersdk.New(coderURL)
-	// Wait for container to come up
-	require.Eventually(t, func() bool {
-		_, err := client.BuildInfo(ctx)
-		if err != nil {
-			t.Logf("not ready yet: %s", err.Error())
-		}
-		return err == nil
-	}, 90*time.Second, time.Second, "coder failed to become ready in time")
+	// Perform first time setup. The wait strategy already blocked on
+	// /api/v2/buildinfo returning 200, so the server is ready.
 	_, err = client.CreateFirstUser(ctx, codersdk.CreateFirstUserRequest{
 		Email:    testEmail,
 		Username: testUsername,
@@ -178,14 +160,50 @@ func StartCoder(ctx context.Context, t *testing.T, name string, options ...func(
 	return client
 }
 
-// randomPort is a helper function to find a free random port.
-// Note that the OS may reallocate the port very quickly, so
-// this is not _guaranteed_.
-func randomPort(t *testing.T) int {
-	random, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err, "failed to listen on localhost")
-	_ = random.Close()
-	tcpAddr, valid := random.Addr().(*net.TCPAddr)
-	require.True(t, valid, "random port address is not a *net.TCPAddr?!")
-	return tcpAddr.Port
+// startPostgres runs a throwaway PostgreSQL that Coder connects to instead of
+// starting its embedded one. It's reachable at hostname "postgres" on the given
+// network. Coder retries its database connection on startup, so we don't wait
+// for it.
+func startPostgres(ctx context.Context, t *testing.T, networkName string) {
+	t.Helper()
+	const ref = "us-docker.pkg.dev/coder-v2-images-public/public/postgres:17"
+	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:           ref,
+			AlwaysPullImage: true,
+			Env:             map[string]string{"POSTGRES_PASSWORD": "postgres"},
+			Networks:        []string{networkName},
+			NetworkAliases:  map[string][]string{networkName: {"postgres"}},
+		},
+		Started: true,
+	})
+	testcontainers.CleanupContainer(t, ctr)
+	require.NoError(t, err, "start postgres container")
+}
+
+func dumpContainerLogs(t *testing.T, ctr testcontainers.Container) {
+	t.Helper()
+	if ctr == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	logs, err := ctr.Logs(ctx)
+	if err != nil {
+		t.Logf("failed to fetch coder logs: %v", err)
+		return
+	}
+	defer func() {
+		if err := logs.Close(); err != nil {
+			t.Logf("error closing container log reader: %v", err)
+		}
+	}()
+	// testcontainers already demultiplexes the stream for non-TTY containers,
+	// so read the plain log output directly.
+	out, err := io.ReadAll(logs)
+	if err != nil {
+		t.Logf("failed to read coder logs: %v", err)
+		return
+	}
+	t.Logf("=== coder container logs ===\n%s=== end coder container logs ===", out)
 }
