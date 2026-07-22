@@ -167,7 +167,7 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 					cfg7.WorkspaceSharing = ptr.Ref("everyone")
 
 					cfg8 := cfg7
-					cfg8.DefaultOrgMemberRoles = ptr.Ref([]string{"organization-member", "organization-template-admin"})
+					cfg8.DefaultOrgMemberRoles = ptr.Ref([]string{"organization-template-admin", "organization-workspace-access"})
 
 					steps = append(steps,
 						// Disable workspace sharing for org
@@ -189,8 +189,8 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 							Config: cfg8.String(t),
 							ConfigStateChecks: []statecheck.StateCheck{
 								statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("default_org_member_roles"), knownvalue.ListExact([]knownvalue.Check{
-									knownvalue.StringExact("organization-member"),
 									knownvalue.StringExact("organization-template-admin"),
+									knownvalue.StringExact("organization-workspace-access"),
 								})),
 							},
 						},
