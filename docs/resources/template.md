@@ -143,7 +143,7 @@ Required:
 Required:
 
 - `id` (String)
-- `role` (String)
+- `role` (String) Role assigned to the user or group. Valid roles are `admin` and `use`.
 
 
 <a id="nestedatt--acl--users"></a>
@@ -152,7 +152,7 @@ Required:
 Required:
 
 - `id` (String)
-- `role` (String)
+- `role` (String) Role assigned to the user or group. Valid roles are `admin` and `use`.
 
 
 

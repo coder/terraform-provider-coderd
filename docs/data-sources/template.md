@@ -86,7 +86,7 @@ Read-Only:
 Read-Only:
 
 - `id` (String)
-- `role` (String)
+- `role` (String) Role assigned to the user or group. Valid roles are `admin` and `use`.
 
 
 <a id="nestedatt--acl--users"></a>
@@ -95,7 +95,7 @@ Read-Only:
 Read-Only:
 
 - `id` (String)
-- `role` (String)
+- `role` (String) Role assigned to the user or group. Valid roles are `admin` and `use`.
 
 
 

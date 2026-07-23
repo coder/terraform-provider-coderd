@@ -258,7 +258,11 @@ var permissionAttribute = schema.SetNestedAttribute{
 				Required: true,
 			},
 			"role": schema.StringAttribute{
-				Required: true,
+				MarkdownDescription: "Role assigned to the user or group. Valid roles are `admin` and `use`.",
+				Required:            true,
+				Validators: []validator.String{
+					templateACLRoleValidator,
+				},
 			},
 		},
 	},
@@ -1154,6 +1158,11 @@ var _ planmodifier.List = &versionsPlanModifier{}
 
 var weekValidator = setvalidator.ValueStringsAre(
 	stringvalidator.OneOf("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
+)
+
+var templateACLRoleValidator = stringvalidator.OneOf(
+	string(codersdk.TemplateRoleAdmin),
+	string(codersdk.TemplateRoleUse),
 )
 
 func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.Logger, directory string) (*codersdk.UploadResponse, error) {
