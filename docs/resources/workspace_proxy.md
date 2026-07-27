@@ -58,4 +58,4 @@ resource "kubernetes_deployment" "syd_wsproxy" {
 ### Read-Only
 
 - `id` (String) Workspace Proxy ID
-- `session_token` (String) Session token for the workspace proxy.
+- `session_token` (String, Sensitive) Session token for the workspace proxy.
