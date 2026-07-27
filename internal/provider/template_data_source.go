@@ -353,7 +353,8 @@ var computedPermissionAttribute = schema.SetNestedAttribute{
 				Computed: true,
 			},
 			"role": schema.StringAttribute{
-				Computed: true,
+				MarkdownDescription: "Role assigned to the user or group. Valid roles are `admin` and `use`.",
+				Computed:            true,
 			},
 		},
 	},
