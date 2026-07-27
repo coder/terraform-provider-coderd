@@ -24,6 +24,8 @@ description: |-
   ownership of it, use the coderd_oauth2_provider_settings data source instead.
   ~> Warning
   This resource is only compatible with Coder version 2.35.0 https://github.com/coder/coder/releases/tag/v2.35.0 and later.
+  ~> Warning
+  The deployment must have the oauth2 experiment enabled (CODER_EXPERIMENTS=oauth2 or --experiments=oauth2). It is off by default, and --experiments='*' does not enable it, so it must be named explicitly. Without it, /api/v2/oauth2-provider/settings returns 403 and this resource cannot manage the setting. Development builds of Coder bypass the check, so a -devel deployment works either way — which makes this easy to miss until you apply against a release.
 ---
 
 # coderd_oauth2_provider_settings (Resource)
@@ -55,9 +57,19 @@ ownership of it, use the `coderd_oauth2_provider_settings` data source instead.
 ~> **Warning**
 This resource is only compatible with Coder version [2.35.0](https://github.com/coder/coder/releases/tag/v2.35.0) and later.
 
+~> **Warning**
+The deployment must have the `oauth2` experiment enabled (`CODER_EXPERIMENTS=oauth2` or `--experiments=oauth2`). It is **off by default**, and `--experiments='*'` does **not** enable it, so it must be named explicitly. Without it, `/api/v2/oauth2-provider/settings` returns `403` and this resource cannot manage the setting. Development builds of Coder bypass the check, so a `-devel` deployment works either way — which makes this easy to miss until you apply against a release.
+
 ## Example Usage
 
 ```terraform
+// Prerequisite: the deployment must have the `oauth2` experiment enabled
+// (CODER_EXPERIMENTS=oauth2, or --experiments=oauth2). It is off by default and
+// is NOT included in `--experiments='*'`, so it has to be named explicitly.
+// Without it the API returns 403 and this resource cannot manage the setting.
+// (Development builds of Coder bypass the check, so a `-devel` deployment works
+// either way -- which makes this easy to miss until you hit a real release.)
+//
 // Important note: this setting is a deployment-wide singleton, so you can only
 // have one resource of this type! Declaring it twice is not an error, the
 // blocks will silently overwrite each other on every apply.

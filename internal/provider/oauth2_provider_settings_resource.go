@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -25,6 +26,13 @@ var _ resource.ResourceWithModifyPlan = &OAuth2ProviderSettingsResource{}
 // that endpoint 404s, so an admin pointed at an older deployment gets an
 // actionable message instead of a bare "not found".
 const oauth2ProviderSettingsMinVersion = "2.35.0"
+
+// oauth2ProviderSettingsExperiment is the coderd experiment gating the whole
+// `/api/v2/oauth2-provider` route, settings included. While it is unset, route
+// middleware refuses every request with a 403 before any handler runs, so the
+// setting can be neither read nor changed. It is off by default and is not
+// covered by `--experiments='*'`, so this is the state of a stock deployment.
+const oauth2ProviderSettingsExperiment = "oauth2"
 
 // oauth2ProviderSettingsDefaultDCR is the deployment default for
 // `dynamic_client_registration_enabled`. A never-configured deployment reads
@@ -81,6 +89,9 @@ ownership of it, use the ` + "`coderd_oauth2_provider_settings`" + ` data source
 
 ~> **Warning**
 This resource is only compatible with Coder version [` + oauth2ProviderSettingsMinVersion + `](https://github.com/coder/coder/releases/tag/v` + oauth2ProviderSettingsMinVersion + `) and later.
+
+~> **Warning**
+The deployment must have the ` + "`" + oauth2ProviderSettingsExperiment + "`" + ` experiment enabled (` + "`CODER_EXPERIMENTS=" + oauth2ProviderSettingsExperiment + "`" + ` or ` + "`--experiments=" + oauth2ProviderSettingsExperiment + "`" + `). It is **off by default**, and ` + "`--experiments='*'`" + ` does **not** enable it, so it must be named explicitly. Without it, ` + "`/api/v2/oauth2-provider/settings`" + ` returns ` + "`403`" + ` and this resource cannot manage the setting. Development builds of Coder bypass the check, so a ` + "`-devel`" + ` deployment works either way — which makes this easy to miss until you apply against a release.
 `,
 		Attributes: map[string]schema.Attribute{
 			"dynamic_client_registration_enabled": schema.BoolAttribute{
@@ -346,6 +357,50 @@ func oauth2ProviderSettingsDiag(action string, err error) diag.Diagnostics {
 		return diags
 	}
 
+	if isOAuth2ExperimentOff(err) {
+		diags.AddError(
+			"OAuth2 Experiment Not Enabled",
+			fmt.Sprintf("Unable to %s OAuth2 provider settings: the deployment returned 403 because the `%s` "+
+				"experiment is not enabled. `%s` is gated behind that experiment, so the setting can be "+
+				"neither read nor changed while it is off. Enable it on the Coder deployment "+
+				"(`CODER_EXPERIMENTS=%s`, or `--experiments=%s`) and restart it, or remove "+
+				"`coderd_oauth2_provider_settings` from your configuration. Original error: %s",
+				action,
+				oauth2ProviderSettingsExperiment,
+				"/api/v2/oauth2-provider/settings",
+				oauth2ProviderSettingsExperiment,
+				oauth2ProviderSettingsExperiment,
+				err),
+		)
+		return diags
+	}
+
 	diags.AddError("Client Error", fmt.Sprintf("unable to %s OAuth2 provider settings, got error: %s", action, err))
 	return diags
+}
+
+// isOAuth2ExperimentOff reports whether err is coderd's `httpmw.RequireExperiment`
+// refusal for the OAuth2 experiment rather than an RBAC denial. Both arrive as a
+// 403, and only the message distinguishes them: the experiment gate names the
+// experiment, while an RBAC denial is the generic "Forbidden."
+//
+// Mirrors isWorkspaceSharingExperimentOff, which solves the same problem for the
+// workspace-sharing experiment. Matching on message text is unavoidable — coderd
+// reuses 403 for both — but it degrades safely: a reworded message falls through
+// to the generic "Client Error" that this branch replaced, which still surfaces
+// coderd's own text.
+func isOAuth2ExperimentOff(err error) bool {
+	var sdkErr *codersdk.Error
+	if !errors.As(err, &sdkErr) {
+		return false
+	}
+	if sdkErr.StatusCode() != http.StatusForbidden {
+		return false
+	}
+	// Requiring both substrings covers `RequireExperiment`'s single-experiment
+	// message ("... requires enabling the 'oauth2' experiment.") and its
+	// multi-experiment form ("... the following experiments: oauth2, ...").
+	// An RBAC denial carries neither.
+	return strings.Contains(sdkErr.Message, oauth2ProviderSettingsExperiment) &&
+		strings.Contains(sdkErr.Message, "experiment")
 }

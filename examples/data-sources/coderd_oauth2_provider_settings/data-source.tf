@@ -5,6 +5,10 @@
 //
 // This only issues a GET, so it also works with tokens that can read but not
 // write the deployment configuration, such as an Auditor token.
+//
+// It does still require the deployment's `oauth2` experiment to be enabled: the
+// experiment gates the entire /api/v2/oauth2-provider route, so a read-only
+// token does not get you around it.
 data "coderd_oauth2_provider_settings" "current" {}
 
 // Because Dynamic Client Registration is disabled, provision a static OAuth2

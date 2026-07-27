@@ -46,6 +46,9 @@ read this data source but cannot own the equivalent resource.
 
 ~> **Warning**
 This data source is only compatible with Coder version [` + oauth2ProviderSettingsMinVersion + `](https://github.com/coder/coder/releases/tag/v` + oauth2ProviderSettingsMinVersion + `) and later.
+
+~> **Warning**
+The deployment must have the ` + "`" + oauth2ProviderSettingsExperiment + "`" + ` experiment enabled (` + "`CODER_EXPERIMENTS=" + oauth2ProviderSettingsExperiment + "`" + ` or ` + "`--experiments=" + oauth2ProviderSettingsExperiment + "`" + `). The experiment gates the entire ` + "`/api/v2/oauth2-provider`" + ` route rather than just its write path, so while it is off this data source cannot read the setting either — unlike an authorization failure, a read-only token is no way around it.
 `,
 
 		Attributes: map[string]schema.Attribute{

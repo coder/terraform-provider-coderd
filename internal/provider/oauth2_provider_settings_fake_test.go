@@ -39,6 +39,12 @@ type fakeCoderd struct {
 	getStatus int
 	putStatus int
 
+	// errMessage, when non-empty, replaces the generic message statusMessage
+	// derives from the status code. Needed because coderd reuses 403 for two
+	// unrelated refusals -- an RBAC denial and the `oauth2` experiment gate --
+	// and only the message distinguishes them.
+	errMessage string
+
 	// beforeGet runs before each settings GET is answered, and beforeSettingsPut
 	// before each PUT. Both are used to simulate another actor mutating the
 	// deployment mid-apply.
@@ -101,11 +107,11 @@ func (f *fakeCoderd) handleSettingsGet(w http.ResponseWriter) {
 	}
 
 	f.mu.Lock()
-	status, enabled := f.getStatus, f.dcrEnabled
+	status, enabled, msg := f.getStatus, f.dcrEnabled, f.errMessage
 	f.mu.Unlock()
 
 	if status != 0 {
-		writeJSON(w, status, codersdk.Response{Message: statusMessage(status)})
+		writeJSON(w, status, codersdk.Response{Message: errorMessage(status, msg)})
 		return
 	}
 	// A GET always answers with a non-nil pointer, matching the documented
@@ -117,6 +123,7 @@ func (f *fakeCoderd) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	hook := f.beforePut
 	status := f.putStatus
+	msg := f.errMessage
 	f.mu.Unlock()
 	if hook != nil {
 		hook(f)
@@ -145,10 +152,31 @@ func (f *fakeCoderd) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 
 	if status != 0 {
-		writeJSON(w, status, codersdk.Response{Message: statusMessage(status)})
+		writeJSON(w, status, codersdk.Response{Message: errorMessage(status, msg)})
 		return
 	}
 	writeJSON(w, http.StatusOK, codersdk.OAuth2ProviderSettings{DynamicClientRegistrationEnabled: &resolved})
+}
+
+// oauth2ExperimentOffMessage is the message coderd's `httpmw.RequireExperiment`
+// returns alongside its 403 when the OAuth2 experiment is disabled, copied
+// verbatim from the single-experiment branch of that middleware:
+//
+//	fmt.Sprintf("%s functionality requires enabling the '%s' experiment.",
+//	    experiment.DisplayName(), experiment)
+//
+// Reproduced exactly because isOAuth2ExperimentOff discriminates on this text --
+// a paraphrase here would let the test pass while the real message stopped
+// matching.
+const oauth2ExperimentOffMessage = "OAuth2 Provider Functionality functionality requires enabling the 'oauth2' experiment."
+
+// errorMessage returns the override when set, otherwise the generic message for
+// the status code.
+func errorMessage(status int, override string) string {
+	if override != "" {
+		return override
+	}
+	return statusMessage(status)
 }
 
 // statusMessage mirrors the shape of the message coderd itself returns, so the
@@ -196,6 +224,18 @@ func (f *fakeCoderd) SetPutStatus(status int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.putStatus = status
+}
+
+// SetExperimentOff makes both settings verbs fail the way a deployment without
+// the `oauth2` experiment does: a 403 whose message names the experiment. This
+// is the only practical way to reach that path -- `scripts/develop.sh` cannot,
+// because development builds bypass the experiment check entirely.
+func (f *fakeCoderd) SetExperimentOff() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.getStatus = http.StatusForbidden
+	f.putStatus = http.StatusForbidden
+	f.errMessage = oauth2ExperimentOffMessage
 }
 
 func (f *fakeCoderd) SetBeforeGet(hook func(f *fakeCoderd)) {

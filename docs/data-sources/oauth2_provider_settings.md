@@ -14,6 +14,8 @@ description: |-
   read this data source but cannot own the equivalent resource.
   ~> Warning
   This data source is only compatible with Coder version 2.35.0 https://github.com/coder/coder/releases/tag/v2.35.0 and later.
+  ~> Warning
+  The deployment must have the oauth2 experiment enabled (CODER_EXPERIMENTS=oauth2 or --experiments=oauth2). The experiment gates the entire /api/v2/oauth2-provider route rather than just its write path, so while it is off this data source cannot read the setting either — unlike an authorization failure, a read-only token is no way around it.
 ---
 
 # coderd_oauth2_provider_settings (Data Source)
@@ -33,6 +35,9 @@ read this data source but cannot own the equivalent resource.
 ~> **Warning**
 This data source is only compatible with Coder version [2.35.0](https://github.com/coder/coder/releases/tag/v2.35.0) and later.
 
+~> **Warning**
+The deployment must have the `oauth2` experiment enabled (`CODER_EXPERIMENTS=oauth2` or `--experiments=oauth2`). The experiment gates the entire `/api/v2/oauth2-provider` route rather than just its write path, so while it is off this data source cannot read the setting either — unlike an authorization failure, a read-only token is no way around it.
+
 ## Example Usage
 
 ```terraform
@@ -43,6 +48,10 @@ This data source is only compatible with Coder version [2.35.0](https://github.c
 //
 // This only issues a GET, so it also works with tokens that can read but not
 // write the deployment configuration, such as an Auditor token.
+//
+// It does still require the deployment's `oauth2` experiment to be enabled: the
+// experiment gates the entire /api/v2/oauth2-provider route, so a read-only
+// token does not get you around it.
 data "coderd_oauth2_provider_settings" "current" {}
 
 // Because Dynamic Client Registration is disabled, provision a static OAuth2
