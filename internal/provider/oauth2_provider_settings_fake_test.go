@@ -50,6 +50,20 @@ type fakeCoderd struct {
 	// deployment mid-apply.
 	beforeGet func(f *fakeCoderd)
 	beforePut func(f *fakeCoderd)
+
+	// putEcho, when non-nil, is what a successful PUT reports back regardless of
+	// what was stored. The real endpoint always echoes the value it just wrote,
+	// so this models an API that started normalizing the value -- the only way
+	// to observe whether the provider builds state from the response or from the
+	// plan, since the two are otherwise indistinguishable.
+	putEcho *bool
+
+	// putEchoOmit makes a successful PUT answer with the field absent. The real
+	// endpoint always sets it (`ptr.Ref(resolvedEnabled)`), so this is a
+	// contract violation by construction -- it exists to pin down which value
+	// the provider falls back to, which is the difference between a clean apply
+	// and a spurious "inconsistent result after apply".
+	putEchoOmit bool
 }
 
 type fakeRequest struct {
@@ -149,11 +163,20 @@ func (f *fakeCoderd) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resolved := f.dcrEnabled
+	echo, omit := f.putEcho, f.putEchoOmit
 	f.mu.Unlock()
 
 	if status != 0 {
 		writeJSON(w, status, codersdk.Response{Message: errorMessage(status, msg)})
 		return
+	}
+	if omit {
+		// A nil pointer plus `omitempty` drops the key entirely.
+		writeJSON(w, http.StatusOK, codersdk.OAuth2ProviderSettings{})
+		return
+	}
+	if echo != nil {
+		resolved = *echo
 	}
 	writeJSON(w, http.StatusOK, codersdk.OAuth2ProviderSettings{DynamicClientRegistrationEnabled: &resolved})
 }
@@ -242,6 +265,21 @@ func (f *fakeCoderd) SetBeforeGet(hook func(f *fakeCoderd)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.beforeGet = hook
+}
+
+// SetPutEcho makes a successful PUT report v back regardless of what it stored,
+// standing in for an API that normalizes the value.
+func (f *fakeCoderd) SetPutEcho(v bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.putEcho = &v
+}
+
+// SetPutEchoOmit makes a successful PUT answer without the field at all.
+func (f *fakeCoderd) SetPutEchoOmit() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.putEchoOmit = true
 }
 
 // SettingsRequests returns every request made to the settings endpoint, in

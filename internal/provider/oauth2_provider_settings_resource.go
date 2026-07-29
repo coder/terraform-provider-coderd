@@ -161,13 +161,15 @@ func (r *OAuth2ProviderSettingsResource) Create(ctx context.Context, req resourc
 
 	// Create and Update use a shared implementation: the underlying API is a
 	// single idempotent PUT with no separate create semantics.
-	resp.Diagnostics.Append(r.patch(ctx, data.DynamicClientRegistrationEnabled.ValueBool())...)
+	effective, diags := r.patch(ctx, "create", data.DynamicClientRegistrationEnabled.ValueBool())
+	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	data.DynamicClientRegistrationEnabled = types.BoolValue(effective)
 
 	tflog.Trace(ctx, "successfully created oauth2 provider settings", map[string]any{
-		"dynamic_client_registration_enabled": data.DynamicClientRegistrationEnabled.ValueBool(),
+		"dynamic_client_registration_enabled": effective,
 	})
 
 	// Save data into Terraform state
@@ -187,33 +189,59 @@ func (r *OAuth2ProviderSettingsResource) Update(ctx context.Context, req resourc
 	})
 
 	// Create and Update use a shared implementation
-	resp.Diagnostics.Append(r.patch(ctx, data.DynamicClientRegistrationEnabled.ValueBool())...)
+	effective, diags := r.patch(ctx, "update", data.DynamicClientRegistrationEnabled.ValueBool())
+	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	data.DynamicClientRegistrationEnabled = types.BoolValue(effective)
 
 	tflog.Trace(ctx, "successfully updated oauth2 provider settings", map[string]any{
-		"dynamic_client_registration_enabled": data.DynamicClientRegistrationEnabled.ValueBool(),
+		"dynamic_client_registration_enabled": effective,
 	})
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *OAuth2ProviderSettingsResource) patch(ctx context.Context, dcrEnabled bool) diag.Diagnostics {
+// patch writes dcrEnabled via the settings PUT and returns the value the
+// deployment reports afterwards.
+//
+// action names the Terraform operation being performed ("create", "update",
+// "reset") purely so a failure is reported with the wording of the operation
+// that actually failed: every write path shares this one PUT, but "unable to
+// update" on a `terraform destroy` is needlessly confusing.
+func (r *OAuth2ProviderSettingsResource) patch(ctx context.Context, action string, dcrEnabled bool) (bool, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	// Always send a non-nil pointer. The API treats an omitted field as "leave
 	// the current value alone", which is the right default for a partial
 	// update but wrong for this resource: it owns the value outright, so
 	// omitting it would make Create/Update no-ops and, worse, turn Delete's
 	// reset-to-default into a silent no-op.
-	_, err := r.Client.PutOAuth2ProviderSettings(ctx, codersdk.OAuth2ProviderSettings{
+	updated, err := r.Client.PutOAuth2ProviderSettings(ctx, codersdk.OAuth2ProviderSettings{
 		DynamicClientRegistrationEnabled: &dcrEnabled,
 	})
 	if err != nil {
-		diags.Append(oauth2ProviderSettingsDiag("update", err)...)
+		diags.Append(oauth2ProviderSettingsDiag(action, err)...)
+		return dcrEnabled, diags
 	}
-	return diags
+
+	// Prefer the value the deployment echoes back over the one just sent, so
+	// state records what was actually stored rather than what was asked for.
+	// The two are identical today -- the endpoint writes exactly what it is
+	// given -- so this is not a bug fix. It is so that if the API ever starts
+	// normalizing the value, the divergence fails loudly instead of leaving a
+	// falsehood in state to be discovered as drift on some later plan.
+	//
+	// Deliberately *not* dcrEnabledOrDefault: that coerces nil to false, which
+	// here would turn a successful `true` apply into a spurious "Provider
+	// produced inconsistent result after apply". The attribute is Required, so
+	// Terraform requires final state to equal the planned value; falling back
+	// to what was sent is the only nil handling that preserves that contract.
+	if updated.DynamicClientRegistrationEnabled == nil {
+		return dcrEnabled, diags
+	}
+	return *updated.DynamicClientRegistrationEnabled, diags
 }
 
 func (r *OAuth2ProviderSettingsResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -227,8 +255,10 @@ func (r *OAuth2ProviderSettingsResource) Delete(ctx context.Context, req resourc
 	// If this fails, the appended error keeps the resource in state, so a
 	// subsequent `terraform destroy` retries rather than the admin wrongly
 	// believing DCR was reset.
-	resp.Diagnostics.Append(r.patch(ctx, oauth2ProviderSettingsDefaultDCR)...)
-	if resp.Diagnostics.HasError() {
+	// The returned value is discarded: the resource is leaving state, so there
+	// is nothing left to record it against.
+	if _, diags := r.patch(ctx, "reset", oauth2ProviderSettingsDefaultDCR); diags.HasError() {
+		resp.Diagnostics.Append(diags...)
 		return
 	}
 

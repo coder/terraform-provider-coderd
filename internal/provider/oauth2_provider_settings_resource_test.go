@@ -597,10 +597,12 @@ resource "coderd_oauth2_provider_settings" "test" {
 					Config: oauth2SettingsConfig(f.URL, true),
 				},
 				{
-					PreConfig:   func() { f.SetPutStatus(http.StatusInternalServerError) },
-					Config:      oauth2SettingsConfig(f.URL, true),
-					Destroy:     true,
-					ExpectError: regexp.MustCompile(`unable to update OAuth2 provider settings`),
+					PreConfig: func() { f.SetPutStatus(http.StatusInternalServerError) },
+					Config:    oauth2SettingsConfig(f.URL, true),
+					Destroy:   true,
+					// "reset", not "update": every write path shares one PUT,
+					// but the diagnostic names the operation that failed.
+					ExpectError: regexp.MustCompile(`unable to reset OAuth2 provider settings`),
 				},
 				{
 					// The live value was never reset, and the resource is
@@ -653,8 +655,9 @@ resource "coderd_oauth2_provider_settings" "test" {
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
-					Config:      oauth2SettingsConfig(f.URL, true),
-					ExpectError: regexp.MustCompile(`(?s)unable to update OAuth2 provider settings.*Forbidden`),
+					Config: oauth2SettingsConfig(f.URL, true),
+					// "create": this is a first apply with no prior state.
+					ExpectError: regexp.MustCompile(`(?s)unable to create OAuth2 provider settings.*Forbidden`),
 				},
 			},
 		})
@@ -756,6 +759,63 @@ resource "coderd_oauth2_provider_settings" "b" {
 					Check: func(*terraform.State) error {
 						assert.Equal(t, 2, f.SettingsRequestCount(http.MethodPut),
 							"both blocks should have written, with no collision error")
+						return nil
+					},
+				},
+			},
+		})
+	})
+
+	// State is built from the value the PUT reports back, not from the plan.
+	// The two agree on a real deployment, so the only way to tell them apart is
+	// to make the fake disagree. Both cases below fail if `patch()` goes back to
+	// discarding the response.
+	t.Run("StateComesFromThePutResponse", func(t *testing.T) {
+		f := newFakeCoderd(t)
+		// The deployment stores `true` as asked but claims `false`, as an API
+		// that had started normalizing the value would.
+		f.SetPutEcho(false)
+
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: oauth2SettingsConfig(f.URL, true),
+					// The attribute is Required, so Terraform demands final
+					// state equal the planned value. Reporting the server's
+					// answer therefore surfaces the divergence as a hard error
+					// rather than leaving a falsehood in state to be found as
+					// drift on a later plan. Sourcing state from the plan
+					// instead would apply cleanly and hide it.
+					ExpectError: regexp.MustCompile(`(?s)Provider produced inconsistent result after apply`),
+				},
+			},
+		})
+	})
+
+	// The nil branch of that same read. `dcrEnabledOrDefault` would coerce an
+	// absent field to `false` and turn this successful apply into the error
+	// asserted above; falling back to the value just sent is what keeps
+	// Terraform's plan-equals-state contract intact.
+	t.Run("AbsentPutResponseFieldFallsBackToThePlanValue", func(t *testing.T) {
+		f := newFakeCoderd(t)
+		f.SetPutEchoOmit()
+
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: oauth2SettingsConfig(f.URL, true),
+					ConfigStateChecks: []statecheck.StateCheck{
+						statecheck.ExpectKnownValue(oauth2SettingsResourceAddr,
+							tfjsonpath.New("dynamic_client_registration_enabled"), knownvalue.Bool(true)),
+					},
+					Check: func(*terraform.State) error {
+						assert.True(t, f.DCREnabled(), "the value sent should still have been stored")
 						return nil
 					},
 				},
