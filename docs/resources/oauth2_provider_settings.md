@@ -23,7 +23,7 @@ description: |-
   Dynamic Client Registration alone. Because the setting is a deployment-wide
   singleton, only one Terraform configuration should declare this resource.
   ~> Warning
-  This resource is only compatible with Coder version 2.35.0 https://github.com/coder/coder/releases/tag/v2.35.0 and later.
+  This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
   ~> Warning
   The deployment must have the oauth2 experiment enabled (CODER_EXPERIMENTS=oauth2 or --experiments=oauth2). It is off by default, and --experiments='*' does not enable it, so it must be named explicitly. Without it, /api/v2/oauth2-provider/settings returns 403 and this resource cannot manage the setting. Development builds of Coder bypass the check, so a -devel deployment works either way — which makes this easy to miss until you apply against a release.
 ---
@@ -55,7 +55,7 @@ Dynamic Client Registration alone. Because the setting is a deployment-wide
 singleton, only one Terraform configuration should declare this resource.
 
 ~> **Warning**
-This resource is only compatible with Coder version [2.35.0](https://github.com/coder/coder/releases/tag/v2.35.0) and later.
+This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
 
 ~> **Warning**
 The deployment must have the `oauth2` experiment enabled (`CODER_EXPERIMENTS=oauth2` or `--experiments=oauth2`). It is **off by default**, and `--experiments='*'` does **not** enable it, so it must be named explicitly. Without it, `/api/v2/oauth2-provider/settings` returns `403` and this resource cannot manage the setting. Development builds of Coder bypass the check, so a `-devel` deployment works either way — which makes this easy to miss until you apply against a release.

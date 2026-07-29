@@ -24,7 +24,20 @@ var _ resource.ResourceWithModifyPlan = &OAuth2ProviderSettingsResource{}
 // `/api/v2/oauth2-provider/settings`. It is named in the error surfaced when
 // that endpoint 404s, so an admin pointed at an older deployment gets an
 // actionable message instead of a bare "not found".
-const oauth2ProviderSettingsMinVersion = "2.35.0"
+//
+// 2.37.0 rather than the 2.35.0 this originally claimed, which was wrong. The
+// endpoint arrived with coder/coder#27316, merged 2026-07-28 as `fbac6024`, and
+// at that point the 2.34, 2.35 and 2.36 release branches were all already cut —
+// none contains the commit, so no 2.35.x or 2.36.x release can serve the
+// endpoint. Telling an admin to upgrade to 2.35.0 would not have fixed their
+// 404. The upstream change is a `feat!`, so it will not be backported into a cut
+// release branch, making 2.37 the first line that can carry it.
+//
+// Still unreleased at the time of writing: v2.35.3 (2026-07-27) remains the
+// newest 2.35.x, and `git tag --contains fbac6024` is empty. Worth re-checking
+// once 2.37.0 actually ships, in case the release lands under a different
+// number.
+const oauth2ProviderSettingsMinVersion = "2.37.0"
 
 // oauth2ProviderSettingsExperiment is the coderd experiment gating the whole
 // `/api/v2/oauth2-provider` route, settings included. While it is unset, route
