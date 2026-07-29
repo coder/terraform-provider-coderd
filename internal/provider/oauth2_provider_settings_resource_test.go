@@ -99,113 +99,68 @@ func TestDCREnabledOrDefault(t *testing.T) {
 	}
 }
 
-// TestIsOAuth2ExperimentOff covers the discriminator between coderd's two
-// unrelated 403s: an RBAC denial and the `oauth2` experiment gate. Only the
-// message separates them, so this is the test that pins the matching rule.
+// TestOAuth2ProviderSettingsDiag covers the three branches of the shared
+// diagnostic helper: the 404 version hint, and everything else falling through to
+// a generic client error that preserves coderd's own message.
 //
-// Worth having as a table rather than only via the framework tests below,
-// because the interesting cases are the ones that must NOT match — a false
-// positive here would relabel every genuine permission error as "enable the
-// experiment", sending an admin to change deployment config when the real
-// problem is their token.
-func TestIsOAuth2ExperimentOff(t *testing.T) {
+// There is deliberately no branch for the `oauth2` experiment gate. coderd
+// answers 403 for two unrelated reasons -- an RBAC denial and the experiment gate
+// -- and telling them apart client-side would mean matching on message text
+// copied from coderd's middleware. That match can silently become a no-op when
+// the wording changes upstream, and the test guarding it would keep passing,
+// because the test supplies the same copied string. Passing the message through
+// is just as actionable and cannot rot. A richer remedy needs a machine-readable
+// error code from coderd, not string matching here.
+func TestOAuth2ProviderSettingsDiag(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			// The real message, verbatim from httpmw.RequireExperiment.
-			name: "ExperimentGate",
-			err:  codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: oauth2ExperimentOffMessage}),
-			want: true,
-		},
-		{
-			// RequireExperiment's other branch, used when a route requires
-			// several experiments at once. The settings route requires only
-			// one today, so this guards against a future change upstream.
-			name: "ExperimentGateMultiExperimentForm",
-			err: codersdk.NewError(http.StatusForbidden, codersdk.Response{
-				Message: "This functionality requires enabling the following experiments: oauth2, mcp-server-http",
-			}),
-			want: true,
-		},
-		{
-			// The RBAC denial from TC13/TC23. Same status code, and it
-			// must stay distinguishable.
-			name: "RBACDenialIsNotTheExperimentGate",
-			err:  codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: "Forbidden."}),
-			want: false,
-		},
-		{
-			// Mentions the experiment name but is not an experiment refusal.
-			// Both substrings are required precisely to exclude this.
-			name: "ForbiddenMentioningOAuth2ButNotExperiments",
-			err:  codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: "OAuth2 app not found."}),
-			want: false,
-		},
-		{
-			// An old deployment. Must stay on the version-hint branch.
-			name: "NotFoundIsAVersionProblem",
-			err:  codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "Not Found."}),
-			want: false,
-		},
-		{
-			// Right words, wrong status: the gate always answers 403.
-			name: "NonForbiddenStatusWithExperimentWording",
-			err: codersdk.NewError(http.StatusInternalServerError, codersdk.Response{
-				Message: "requires enabling the 'oauth2' experiment.",
-			}),
-			want: false,
-		},
-		{
-			name: "NotAnSDKError",
-			err:  errors.New("dial tcp: connection refused"),
-			want: false,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, isOAuth2ExperimentOff(tc.err))
-		})
-	}
-}
-
-// TestOAuth2ProviderSettingsExperimentDiag asserts the diagnostic the
-// experiment gate produces, including that it does not collide with the two
-// neighbouring branches of oauth2ProviderSettingsDiag.
-func TestOAuth2ProviderSettingsExperimentDiag(t *testing.T) {
-	t.Parallel()
-
-	experimentDiags := oauth2ProviderSettingsDiag("update",
-		codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: oauth2ExperimentOffMessage}))
-	require.Len(t, experimentDiags, 1)
-	assert.Equal(t, "OAuth2 Experiment Not Enabled", experimentDiags[0].Summary())
-	// The remedy must be actionable: name the experiment and how to set it.
-	assert.Contains(t, experimentDiags[0].Detail(), "CODER_EXPERIMENTS=oauth2")
-	assert.Contains(t, experimentDiags[0].Detail(), "--experiments=oauth2")
-	// coderd's own text is preserved rather than swallowed.
-	assert.Contains(t, experimentDiags[0].Detail(), oauth2ExperimentOffMessage)
-
-	// A 404 must still be the version hint, not the experiment hint. These two
-	// are the failure modes most easily confused: both mean "this deployment
-	// cannot do it", but one is fixed by upgrading Coder and the other by
-	// changing its configuration.
+	// A 404 is the one status worth special-casing: it means the endpoint is
+	// absent, which is a version problem with an actionable fix, and coderd's
+	// own "Not Found." says nothing useful about that.
 	versionDiags := oauth2ProviderSettingsDiag("read",
 		codersdk.NewError(http.StatusNotFound, codersdk.Response{Message: "Not Found."}))
 	require.Len(t, versionDiags, 1)
 	assert.Equal(t, "Unsupported Coder Version", versionDiags[0].Summary())
-	assert.NotContains(t, versionDiags[0].Detail(), "experiment")
+	assert.Contains(t, versionDiags[0].Detail(), oauth2ProviderSettingsMinVersion)
 
-	// An RBAC 403 must stay the generic client error, so it is not misreported
-	// as a deployment-configuration problem.
-	rbacDiags := oauth2ProviderSettingsDiag("update",
-		codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: "Forbidden."}))
-	require.Len(t, rbacDiags, 1)
-	assert.Equal(t, "Client Error", rbacDiags[0].Summary())
-	assert.NotContains(t, rbacDiags[0].Detail(), "experiment")
+	// Every 403 is a generic client error, whatever its cause, and coderd's
+	// message must survive into the detail. Both cases below assert the same
+	// property, which is the whole point of not classifying: the provider treats
+	// them identically and lets the server explain itself.
+	for _, tc := range []struct {
+		name    string
+		message string
+	}{
+		{
+			// An RBAC denial, as TC13/TC23 produce.
+			name:    "RBACDenial",
+			message: "Forbidden.",
+		},
+		{
+			// The experiment gate. The string is deliberately synthetic rather
+			// than a copy of coderd's wording: nothing here depends on the exact
+			// text, so there is nothing to keep in sync.
+			name:    "ExperimentGate",
+			message: "<some 403 explaining the experiment is off>",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			diags := oauth2ProviderSettingsDiag("update",
+				codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: tc.message}))
+			require.Len(t, diags, 1)
+			assert.Equal(t, "Client Error", diags[0].Summary())
+			assert.Contains(t, diags[0].Detail(), tc.message,
+				"coderd's own message must reach the user, since the provider adds no interpretation")
+			assert.Contains(t, diags[0].Detail(), "unable to update")
+		})
+	}
+
+	// A non-SDK error still produces one clean diagnostic rather than panicking.
+	netDiags := oauth2ProviderSettingsDiag("create", errors.New("dial tcp: connection refused"))
+	require.Len(t, netDiags, 1)
+	assert.Equal(t, "Client Error", netDiags[0].Summary())
+	assert.Contains(t, netDiags[0].Detail(), "connection refused")
 }
 
 // TestOAuth2ProviderSettingsModifyPlan covers the plan-time advisory that
@@ -665,16 +620,21 @@ resource "coderd_oauth2_provider_settings" "test" {
 
 	// Beyond the proposal: the deployment has the `oauth2` experiment disabled,
 	// which is the default for a stock release deployment. Route middleware
-	// refuses both verbs with a 403 before any handler runs, so the setting
-	// cannot be changed — the behaviour we want — and the admin needs to be told
-	// which knob to turn, not handed the same message a bad token produces.
+	// refuses both verbs with a 403 before any handler runs, so the setting cannot
+	// be changed — the behaviour we want — and coderd's own message names the
+	// experiment, so the admin is told which knob to turn without the provider
+	// interpreting anything. This test asserts that pass-through rather than a
+	// provider-authored remedy; see TestOAuth2ProviderSettingsDiag for why.
 	//
 	// Not reachable through `scripts/develop.sh`: development builds bypass the
 	// experiment check (`RequireExperimentWithDevBypass`), so a fake is the only
 	// way to exercise this short of a real release binary.
 	t.Run("ExperimentDisabled", func(t *testing.T) {
 		f := newFakeCoderd(t)
-		f.SetExperimentOff()
+		// Synthetic wording on purpose: the assertion is that coderd's message
+		// reaches the user, not that the provider recognises any particular text.
+		const serverMessage = "<some 403 explaining the experiment is off>"
+		f.SetForbiddenWithMessage(serverMessage)
 
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -682,8 +642,10 @@ resource "coderd_oauth2_provider_settings" "test" {
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
-					Config:      oauth2SettingsConfig(f.URL, true),
-					ExpectError: regexp.MustCompile(`(?s)OAuth2 Experiment Not Enabled.*CODER_EXPERIMENTS=oauth2`),
+					Config: oauth2SettingsConfig(f.URL, true),
+					// The server's own explanation is surfaced verbatim; the
+					// provider adds only which operation failed.
+					ExpectError: regexp.MustCompile(`(?s)unable to create OAuth2 provider settings.*` + regexp.QuoteMeta(serverMessage)),
 				},
 			},
 		})
