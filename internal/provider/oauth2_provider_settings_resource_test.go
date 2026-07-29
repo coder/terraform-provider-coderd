@@ -133,7 +133,7 @@ func TestIsOAuth2ExperimentOff(t *testing.T) {
 			want: true,
 		},
 		{
-			// The RBAC denial from TC13/TC17/TC23. Same status code, and it
+			// The RBAC denial from TC13/TC23. Same status code, and it
 			// must stay distinguishable.
 			name: "RBACDenialIsNotTheExperimentGate",
 			err:  codersdk.NewError(http.StatusForbidden, codersdk.Response{Message: "Forbidden."}),

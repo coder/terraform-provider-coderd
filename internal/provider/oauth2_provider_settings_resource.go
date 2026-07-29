@@ -84,8 +84,8 @@ deployment default. The API has no delete operation for this setting, so the
 value cannot be returned to a "never configured" state.
 
 -> Managing this setting is entirely optional: omit the resource to leave
-Dynamic Client Registration alone. To read the current value without taking
-ownership of it, use the ` + "`coderd_oauth2_provider_settings`" + ` data source instead.
+Dynamic Client Registration alone. Because the setting is a deployment-wide
+singleton, only one Terraform configuration should declare this resource.
 
 ~> **Warning**
 This resource is only compatible with Coder version [` + oauth2ProviderSettingsMinVersion + `](https://github.com/coder/coder/releases/tag/v` + oauth2ProviderSettingsMinVersion + `) and later.
@@ -335,9 +335,9 @@ func dcrEnabledOrDefault(settings codersdk.OAuth2ProviderSettings) bool {
 }
 
 // oauth2ProviderSettingsDiag converts a codersdk error from the OAuth2
-// provider settings endpoint into a diagnostic. Both the resource and the data
-// source route through here so a deployment that predates the endpoint
-// produces the same actionable message either way.
+// provider settings endpoint into a diagnostic. Every CRUD path routes through
+// here so a deployment that predates the endpoint produces the same actionable
+// message whichever operation hit it first.
 func oauth2ProviderSettingsDiag(action string, err error) diag.Diagnostics {
 	var diags diag.Diagnostics
 

@@ -20,8 +20,8 @@ description: |-
   deployment default. The API has no delete operation for this setting, so the
   value cannot be returned to a "never configured" state.
   -> Managing this setting is entirely optional: omit the resource to leave
-  Dynamic Client Registration alone. To read the current value without taking
-  ownership of it, use the coderd_oauth2_provider_settings data source instead.
+  Dynamic Client Registration alone. Because the setting is a deployment-wide
+  singleton, only one Terraform configuration should declare this resource.
   ~> Warning
   This resource is only compatible with Coder version 2.35.0 https://github.com/coder/coder/releases/tag/v2.35.0 and later.
   ~> Warning
@@ -51,8 +51,8 @@ deployment default. The API has no delete operation for this setting, so the
 value cannot be returned to a "never configured" state.
 
 -> Managing this setting is entirely optional: omit the resource to leave
-Dynamic Client Registration alone. To read the current value without taking
-ownership of it, use the `coderd_oauth2_provider_settings` data source instead.
+Dynamic Client Registration alone. Because the setting is a deployment-wide
+singleton, only one Terraform configuration should declare this resource.
 
 ~> **Warning**
 This resource is only compatible with Coder version [2.35.0](https://github.com/coder/coder/releases/tag/v2.35.0) and later.

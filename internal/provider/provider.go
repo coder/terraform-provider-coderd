@@ -246,7 +246,6 @@ func (p *CoderdProvider) DataSources(ctx context.Context) []func() datasource.Da
 		NewUserDataSource,
 		NewOrganizationDataSource,
 		NewTemplateDataSource,
-		NewOAuth2ProviderSettingsDataSource,
 	}
 }
 
