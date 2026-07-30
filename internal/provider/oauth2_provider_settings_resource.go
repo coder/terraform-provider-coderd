@@ -77,33 +77,23 @@ func (r *OAuth2ProviderSettingsResource) Schema(ctx context.Context, req resourc
 	resp.Schema = schema.Schema{
 		MarkdownDescription: `Deployment-wide OAuth2 provider settings.
 
-This setting is a deployment-wide singleton, so this resource can only be
-declared once. Declaring it more than once is not an error: whichever block
-applies last silently wins.
+This is a deployment-wide singleton. Declare it once; duplicate resources silently overwrite each other.
 
 ~> **Warning**
-When adopting a deployment where this setting has already been configured out
-of band (via ` + "`coder oauth2-provider dcr enable`" + ` or the deployment settings UI), run
-` + "`terraform import`" + ` **before** your first ` + "`terraform apply`" + `. There is no prior state
-for Terraform to diff against on a first apply, so the live value is overwritten
-with your configured one without appearing as a change in the plan. A plan-time
-warning is raised if this would disable Dynamic Client Registration where it is
-currently enabled, but a warning does not block the apply.
+If DCR was configured out of band, ` + "`terraform import`" + ` this resource before the first apply. Otherwise Terraform overwrites the live value without a diff; disabling an enabled setting emits a non-blocking warning.
 
 ~> **Warning**
 ` + "`terraform destroy`" + ` resets ` + "`dynamic_client_registration_enabled`" + ` to ` + "`false`" + `, the
 deployment default. The API has no delete operation for this setting, so the
 value cannot be returned to a "never configured" state.
 
--> Managing this setting is entirely optional: omit the resource to leave
-Dynamic Client Registration alone. Because the setting is a deployment-wide
-singleton, only one Terraform configuration should declare this resource.
+-> Omit this resource to leave DCR unmanaged. Only one Terraform configuration should own it.
 
 ~> **Warning**
 This resource is only compatible with Coder version [` + oauth2ProviderSettingsMinVersion + `](https://github.com/coder/coder/releases/tag/v` + oauth2ProviderSettingsMinVersion + `) and later.
 
 ~> **Warning**
-The deployment must have the ` + "`" + oauth2ProviderSettingsExperiment + "`" + ` experiment enabled (` + "`CODER_EXPERIMENTS=" + oauth2ProviderSettingsExperiment + "`" + ` or ` + "`--experiments=" + oauth2ProviderSettingsExperiment + "`" + `). It is **off by default**, and ` + "`--experiments='*'`" + ` does **not** enable it, so it must be named explicitly. Without it, ` + "`/api/v2/oauth2-provider/settings`" + ` returns ` + "`403`" + ` and this resource cannot manage the setting. Development builds of Coder bypass the check, so a ` + "`-devel`" + ` deployment works either way — which makes this easy to miss until you apply against a release.
+Requires the ` + "`" + oauth2ProviderSettingsExperiment + "`" + ` experiment (` + "`CODER_EXPERIMENTS=" + oauth2ProviderSettingsExperiment + "`" + ` or ` + "`--experiments=" + oauth2ProviderSettingsExperiment + "`" + `); ` + "`*`" + ` does not enable it. Without it, ` + "`/api/v2/oauth2-provider/settings`" + ` returns ` + "`403`" + ` (development builds bypass this check).
 `,
 		Attributes: map[string]schema.Attribute{
 			"dynamic_client_registration_enabled": schema.BoolAttribute{

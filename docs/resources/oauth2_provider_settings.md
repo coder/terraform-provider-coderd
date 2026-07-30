@@ -4,79 +4,47 @@ page_title: "coderd_oauth2_provider_settings Resource - terraform-provider-coder
 subcategory: ""
 description: |-
   Deployment-wide OAuth2 provider settings.
-  This setting is a deployment-wide singleton, so this resource can only be
-  declared once. Declaring it more than once is not an error: whichever block
-  applies last silently wins.
+  This is a deployment-wide singleton. Declare it once; duplicate resources silently overwrite each other.
   ~> Warning
-  When adopting a deployment where this setting has already been configured out
-  of band (via coder oauth2-provider dcr enable or the deployment settings UI), run
-  terraform import before your first terraform apply. There is no prior state
-  for Terraform to diff against on a first apply, so the live value is overwritten
-  with your configured one without appearing as a change in the plan. A plan-time
-  warning is raised if this would disable Dynamic Client Registration where it is
-  currently enabled, but a warning does not block the apply.
+  If DCR was configured out of band, terraform import this resource before the first apply. Otherwise Terraform overwrites the live value without a diff; disabling an enabled setting emits a non-blocking warning.
   ~> Warning
   terraform destroy resets dynamic_client_registration_enabled to false, the
   deployment default. The API has no delete operation for this setting, so the
   value cannot be returned to a "never configured" state.
-  -> Managing this setting is entirely optional: omit the resource to leave
-  Dynamic Client Registration alone. Because the setting is a deployment-wide
-  singleton, only one Terraform configuration should declare this resource.
+  -> Omit this resource to leave DCR unmanaged. Only one Terraform configuration should own it.
   ~> Warning
   This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
   ~> Warning
-  The deployment must have the oauth2 experiment enabled (CODER_EXPERIMENTS=oauth2 or --experiments=oauth2). It is off by default, and --experiments='*' does not enable it, so it must be named explicitly. Without it, /api/v2/oauth2-provider/settings returns 403 and this resource cannot manage the setting. Development builds of Coder bypass the check, so a -devel deployment works either way — which makes this easy to miss until you apply against a release.
+  Requires the oauth2 experiment (CODER_EXPERIMENTS=oauth2 or --experiments=oauth2); * does not enable it. Without it, /api/v2/oauth2-provider/settings returns 403 (development builds bypass this check).
 ---
 
 # coderd_oauth2_provider_settings (Resource)
 
 Deployment-wide OAuth2 provider settings.
 
-This setting is a deployment-wide singleton, so this resource can only be
-declared once. Declaring it more than once is not an error: whichever block
-applies last silently wins.
+This is a deployment-wide singleton. Declare it once; duplicate resources silently overwrite each other.
 
 ~> **Warning**
-When adopting a deployment where this setting has already been configured out
-of band (via `coder oauth2-provider dcr enable` or the deployment settings UI), run
-`terraform import` **before** your first `terraform apply`. There is no prior state
-for Terraform to diff against on a first apply, so the live value is overwritten
-with your configured one without appearing as a change in the plan. A plan-time
-warning is raised if this would disable Dynamic Client Registration where it is
-currently enabled, but a warning does not block the apply.
+If DCR was configured out of band, `terraform import` this resource before the first apply. Otherwise Terraform overwrites the live value without a diff; disabling an enabled setting emits a non-blocking warning.
 
 ~> **Warning**
 `terraform destroy` resets `dynamic_client_registration_enabled` to `false`, the
 deployment default. The API has no delete operation for this setting, so the
 value cannot be returned to a "never configured" state.
 
--> Managing this setting is entirely optional: omit the resource to leave
-Dynamic Client Registration alone. Because the setting is a deployment-wide
-singleton, only one Terraform configuration should declare this resource.
+-> Omit this resource to leave DCR unmanaged. Only one Terraform configuration should own it.
 
 ~> **Warning**
 This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
 
 ~> **Warning**
-The deployment must have the `oauth2` experiment enabled (`CODER_EXPERIMENTS=oauth2` or `--experiments=oauth2`). It is **off by default**, and `--experiments='*'` does **not** enable it, so it must be named explicitly. Without it, `/api/v2/oauth2-provider/settings` returns `403` and this resource cannot manage the setting. Development builds of Coder bypass the check, so a `-devel` deployment works either way — which makes this easy to miss until you apply against a release.
+Requires the `oauth2` experiment (`CODER_EXPERIMENTS=oauth2` or `--experiments=oauth2`); `*` does not enable it. Without it, `/api/v2/oauth2-provider/settings` returns `403` (development builds bypass this check).
 
 ## Example Usage
 
 ```terraform
-// Prerequisite: the deployment must have the `oauth2` experiment enabled
-// (CODER_EXPERIMENTS=oauth2, or --experiments=oauth2). It is off by default and
-// is NOT included in `--experiments='*'`, so it has to be named explicitly.
-// Without it the API returns 403 and this resource cannot manage the setting.
-// (Development builds of Coder bypass the check, so a `-devel` deployment works
-// either way -- which makes this easy to miss until you hit a real release.)
-//
-// Important note: this setting is a deployment-wide singleton, so you can only
-// have one resource of this type! Declaring it twice is not an error, the
-// blocks will silently overwrite each other on every apply.
-//
-// If the deployment already has this setting configured (via the CLI or the
-// deployment settings UI), run `terraform import` before your first apply, or
-// this resource will overwrite the live value without showing a diff.
+// Requires the `oauth2` experiment.
+// Import first if DCR is already managed out of band.
 resource "coderd_oauth2_provider_settings" "dcr" {
   dynamic_client_registration_enabled = true
 
@@ -112,14 +80,8 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# This setting is a deployment-wide singleton with no identifying attribute, so
-# the import ID is an unused placeholder. Any string works; a fixed one keeps
-# the command copy-pasteable.
-#
-# Import before your first apply when adopting a deployment that already has
-# this setting configured: state is then populated from the live value, and the
-# following `terraform plan` shows an honest diff instead of silently
-# overwriting it.
+# The singleton has no ID; any placeholder works.
+# Import before the first apply to adopt the live value.
 $ terraform import coderd_oauth2_provider_settings.dcr oauth2_provider_settings
 ```
 Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:

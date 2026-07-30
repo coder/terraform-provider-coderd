@@ -1,17 +1,5 @@
-// Prerequisite: the deployment must have the `oauth2` experiment enabled
-// (CODER_EXPERIMENTS=oauth2, or --experiments=oauth2). It is off by default and
-// is NOT included in `--experiments='*'`, so it has to be named explicitly.
-// Without it the API returns 403 and this resource cannot manage the setting.
-// (Development builds of Coder bypass the check, so a `-devel` deployment works
-// either way -- which makes this easy to miss until you hit a real release.)
-//
-// Important note: this setting is a deployment-wide singleton, so you can only
-// have one resource of this type! Declaring it twice is not an error, the
-// blocks will silently overwrite each other on every apply.
-//
-// If the deployment already has this setting configured (via the CLI or the
-// deployment settings UI), run `terraform import` before your first apply, or
-// this resource will overwrite the live value without showing a diff.
+// Requires the `oauth2` experiment.
+// Import first if DCR is already managed out of band.
 resource "coderd_oauth2_provider_settings" "dcr" {
   dynamic_client_registration_enabled = true
 
