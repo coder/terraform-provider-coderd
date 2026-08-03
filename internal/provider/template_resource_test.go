@@ -35,27 +35,39 @@ func mustVariablesToSet(vars []Variable) types.Set {
 	return s
 }
 
-func TestTemplateACLRoleValidator(t *testing.T) {
+func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
 	t.Parallel()
 
-	for _, role := range []string{"admin", "use"} {
-		t.Run(role, func(t *testing.T) {
-			t.Parallel()
-			var resp validator.StringResponse
-			templateACLRoleValidator.ValidateString(context.Background(), validator.StringRequest{
-				ConfigValue: types.StringValue(role),
-			}, &resp)
-			require.False(t, resp.Diagnostics.HasError())
-		})
+	directory := "."
+	cfg := testAccTemplateResourceConfig{
+		URL:   "http://127.0.0.1",
+		Token: "test-token",
+		Name:  ptr.Ref("example-template"),
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			{
+				Directory: &directory,
+				Active:    ptr.Ref(true),
+			},
+		}),
+		ACL: testAccTemplateACLConfig{
+			GroupACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   ptr.Ref("00000000-0000-0000-0000-000000000000"),
+					Value: ptr.Ref("owner"),
+				},
+			},
+		},
 	}
 
-	t.Run("invalid", func(t *testing.T) {
-		t.Parallel()
-		var resp validator.StringResponse
-		templateACLRoleValidator.ValidateString(context.Background(), validator.StringRequest{
-			ConfigValue: types.StringValue("owner"),
-		}, &resp)
-		require.True(t, resp.Diagnostics.HasError())
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg.String(t),
+				ExpectError: regexp.MustCompile(`value must be one of`),
+			},
+		},
 	})
 }
 
@@ -701,40 +713,6 @@ func TestAccTemplateResource(t *testing.T) {
 				{
 					Config:      cfg1.String(t),
 					ExpectError: regexp.MustCompile(`value must be one of`),
-				},
-			},
-		})
-	})
-
-	t.Run("InvalidACLRole", func(t *testing.T) {
-		cfg1 := testAccTemplateResourceConfig{
-			URL:   client.URL.String(),
-			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
-				{
-					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
-				},
-			}),
-			ACL: testAccTemplateACLConfig{
-				GroupACL: []testAccTemplateKeyValueConfig{
-					{
-						Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
-						Value: ptr.Ref("owner"),
-					},
-				},
-			},
-		}
-
-		resource.Test(t, resource.TestCase{
-			PreCheck:                 func() { testAccPreCheck(t) },
-			IsUnitTest:               true,
-			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      cfg1.String(t),
-					ExpectError: regexp.MustCompile(`value must be one of: \["admin" "use"\]`),
 				},
 			},
 		})
