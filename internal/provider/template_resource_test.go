@@ -71,6 +71,38 @@ func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
 	})
 }
 
+func TestTemplateResourceDescriptionSchemaValidation(t *testing.T) {
+	t.Parallel()
+
+	directory := "."
+	cfg := testAccTemplateResourceConfig{
+		URL:         "http://127.0.0.1",
+		Token:       "test-token",
+		Name:        ptr.Ref("example-template"),
+		Description: ptr.Ref(strings.Repeat("a", 128)),
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			{
+				Directory: &directory,
+				Active:    ptr.Ref(true),
+			},
+		}),
+		ACL: testAccTemplateACLConfig{
+			null: true,
+		},
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg.String(t),
+				ExpectError: regexp.MustCompile(`must be at most 127`),
+			},
+		},
+	})
+}
+
 func TestAccTemplateResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
