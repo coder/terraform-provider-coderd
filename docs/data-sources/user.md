@@ -39,6 +39,7 @@ resource "coderd_group" "bosses" {
 
 ### Optional
 
+- `email` (String) Email of the user.
 - `id` (String) The ID of the user to retrieve. This field will be populated if a username is supplied.
 - `username` (String) The username of the user to retrieve. This field will be populated if an ID is supplied.
 
@@ -46,7 +47,6 @@ resource "coderd_group" "bosses" {
 
 - `avatar_url` (String) URL of the user's avatar.
 - `created_at` (Number) Unix timestamp of when the user was created.
-- `email` (String) Email of the user.
 - `is_service_account` (Boolean) Whether the user is a service account: an admin-managed account that cannot log in interactively and does not consume a licensed user seat.
 - `last_seen_at` (Number) Unix timestamp of when the user was last seen.
 - `login_type` (String) Type of login for the user. Valid types are `none`, `password', `github`, and `oidc`.
