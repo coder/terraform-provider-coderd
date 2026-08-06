@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"os"
 	"regexp"
 	"strings"
@@ -9,9 +10,21 @@ import (
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWorkspaceProxyResourceSessionTokenSensitive(t *testing.T) {
+	t.Parallel()
+
+	resp := &fwresource.SchemaResponse{}
+	(&WorkspaceProxyResource{}).Schema(context.Background(), fwresource.SchemaRequest{}, resp)
+	require.Empty(t, resp.Diagnostics)
+
+	attr := resp.Schema.Attributes["session_token"]
+	require.True(t, attr.IsSensitive())
+}
 
 func TestAccWorkspaceProxyResource(t *testing.T) {
 	t.Parallel()

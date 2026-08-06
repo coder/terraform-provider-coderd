@@ -35,6 +35,42 @@ func mustVariablesToSet(vars []Variable) types.Set {
 	return s
 }
 
+func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
+	t.Parallel()
+
+	directory := "."
+	cfg := testAccTemplateResourceConfig{
+		URL:   "http://127.0.0.1",
+		Token: "test-token",
+		Name:  ptr.Ref("example-template"),
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			{
+				Directory: &directory,
+				Active:    ptr.Ref(true),
+			},
+		}),
+		ACL: testAccTemplateACLConfig{
+			GroupACL: []testAccTemplateKeyValueConfig{
+				{
+					Key:   ptr.Ref("00000000-0000-0000-0000-000000000000"),
+					Value: ptr.Ref("owner"),
+				},
+			},
+		},
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg.String(t),
+				ExpectError: regexp.MustCompile(`value must be one of`),
+			},
+		},
+	})
+}
+
 func TestAccTemplateResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {

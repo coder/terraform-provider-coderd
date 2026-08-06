@@ -1,0 +1,21 @@
+// Requires the `oauth2` experiment.
+// Import first if DCR is already managed out of band.
+resource "coderd_oauth2_provider_settings" "dcr" {
+  dynamic_client_registration_enabled = true
+
+  // Only needed when the same configuration also upgrades Coder itself.
+  // `/api/v2/oauth2-provider/settings` does not exist until the new version is
+  // actually serving, and `depends_on = [helm_release.coder]` alone only orders
+  // "the Helm apply returned", which for a rolling update can still leave
+  // old-version pods behind the load balancer. Gate on the API responding
+  // instead, or apply the upgrade and this resource in two separate runs.
+  depends_on = [terraform_data.coder_ready]
+}
+
+resource "terraform_data" "coder_ready" {
+  depends_on = [helm_release.coder]
+
+  provisioner "local-exec" {
+    command = "until curl -sfo /dev/null $CODER_URL/api/v2/buildinfo; do sleep 5; done"
+  }
+}
