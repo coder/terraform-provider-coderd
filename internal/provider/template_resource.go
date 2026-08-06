@@ -323,6 +323,11 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				Computed:            true,
 				Optional:            true,
 				Default:             stringdefault.StaticString(""),
+				Validators: []validator.String{
+					// codersdk.CreateTemplateRequest.Description is `validate:"lt=128"`,
+					// which go-playground measures in runes, not bytes.
+					stringvalidator.UTF8LengthAtMost(127),
+				},
 			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the organization. Defaults to the provider's default organization",
