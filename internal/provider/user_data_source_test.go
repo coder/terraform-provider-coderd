@@ -1,19 +1,91 @@
 package provider
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUserDataSourceLookupUserByEmailFallback(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	orgID := uuid.New()
+	email := "example@coder.com"
+	var exactCalls, fallbackCalls int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v2/users", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("q") {
+		case "email:" + email:
+			exactCalls++
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(codersdk.Response{
+				Message: "Invalid user search query.",
+				Validations: []codersdk.ValidationError{
+					{Field: "email", Detail: `"email" is not a valid query param`},
+				},
+			})
+		case email:
+			fallbackCalls++
+			assert.Equal(t, "100", r.URL.Query().Get("limit"))
+			_ = json.NewEncoder(w).Encode(codersdk.GetUsersResponse{
+				Users: []codersdk.User{
+					{
+						ReducedUser: codersdk.ReducedUser{
+							MinimalUser: codersdk.MinimalUser{
+								ID:        userID,
+								Username:  "example",
+								Name:      "Example User",
+								AvatarURL: "",
+							},
+							Email:           email,
+							CreatedAt:       time.Now(),
+							LastSeenAt:      time.Now(),
+							Status:          codersdk.UserStatusActive,
+							LoginType:       codersdk.LoginTypePassword,
+							UpdatedAt:       time.Now(),
+							ThemePreference: "",
+						},
+						OrganizationIDs: []uuid.UUID{orgID},
+						Roles:           []codersdk.SlimRole{{Name: "auditor"}},
+					},
+				},
+				Count: 1,
+			})
+		default:
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+	}))
+	defer srv.Close()
+
+	clientURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	client := codersdk.New(clientURL)
+	user, err := lookupUserByEmail(t.Context(), client, email)
+	require.NoError(t, err)
+	assert.Equal(t, userID, user.ID)
+	assert.Equal(t, email, user.Email)
+	assert.Equal(t, 1, exactCalls)
+	assert.Equal(t, 1, fallbackCalls)
+}
 
 func TestAccUserDataSource(t *testing.T) {
 	t.Parallel()
@@ -90,6 +162,24 @@ func TestAccUserDataSource(t *testing.T) {
 			},
 		})
 	})
+	t.Run("UserByEmailOk", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Email: ptr.Ref(user.Email),
+		}
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg.String(t),
+					Check:  checkFn,
+				},
+			},
+		})
+	})
 	t.Run("NeitherIDNorUsernameError", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
@@ -103,7 +193,7 @@ func TestAccUserDataSource(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config:      cfg.String(t),
-					ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username\]`),
+					ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username,email\]`),
 				},
 			},
 		})
@@ -180,6 +270,7 @@ type testAccUserDataSourceConfig struct {
 
 	ID       *string
 	Username *string
+	Email    *string
 }
 
 func (c testAccUserDataSourceConfig) String(t *testing.T) string {
@@ -193,6 +284,7 @@ provider coderd {
 data "coderd_user" "test" {
 	id       = {{orNull .ID}}
 	username = {{orNull .Username}}
+	email    = {{orNull .Email}}
 }`
 
 	funcMap := template.FuncMap{
