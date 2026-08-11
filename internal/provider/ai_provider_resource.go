@@ -69,6 +69,7 @@ type AIProviderBedrockSettingsModel struct {
 	AccessKeyWO          types.String `tfsdk:"access_key_wo"`
 	AccessKeySecretWO    types.String `tfsdk:"access_key_secret_wo"`
 	CredentialsWOVersion types.Int64  `tfsdk:"credentials_wo_version"`
+	Protocol             types.String `tfsdk:"protocol"`
 }
 
 func (r *AIProviderResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -250,6 +251,20 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								MarkdownDescription: "Version for Bedrock write-only credentials. Bump this value to send, rotate, or clear credentials.",
 								Optional:            true,
 							},
+							"protocol": schema.StringAttribute{
+								MarkdownDescription: "Bedrock wire protocol. `\"invoke-model\"` (default) translates the native Messages request into Bedrock's InvokeModel format and requires `model` and `small_fast_model`. `\"mantle\"` forwards the native Messages request body unchanged with AWS SigV4 signing and passes through the client's model; requires `region` (and the region/scoped base URL). Requires Coder v2.36.0 or later for the Mantle protocol.",
+								Optional:            true,
+								Computed:            true,
+								Validators: []validator.String{
+									stringvalidator.OneOf(
+										string(codersdk.AIProviderBedrockProtocolInvokeModel),
+										string(codersdk.AIProviderBedrockProtocolMantle),
+									),
+								},
+								PlanModifiers: []planmodifier.String{
+									stringplanmodifier.UseStateForUnknown(),
+								},
+							},
 						},
 					},
 				},
@@ -371,6 +386,7 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 			RoleARN:         bedrock.RoleARN.ValueString(),
 			AccessKey:       stringPtrOrNil(bedrock.AccessKeyWO),
 			AccessKeySecret: stringPtrOrNil(bedrock.AccessKeySecretWO),
+			Protocol:        bedrockProtocol(bedrock.Protocol),
 		}
 		if !sdkSettings.IsConfigured() {
 			resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires Bedrock settings sufficient for the Coder API: set `region` or write-only AWS credentials.")
@@ -402,6 +418,7 @@ func (r *AIProviderResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
+	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -477,6 +494,7 @@ func (r *AIProviderResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
+	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -584,6 +602,7 @@ func (m AIProviderResourceModel) validateEffectiveUpdateState(state, config AIPr
 		RoleARN:         cfgBedrock.RoleARN.ValueString(),
 		AccessKey:       stringPtrOrNil(cfgBedrock.AccessKeyWO),
 		AccessKeySecret: stringPtrOrNil(cfgBedrock.AccessKeySecretWO),
+		Protocol:        bedrockProtocol(cfgBedrock.Protocol),
 	}
 	if !settings.IsConfigured() {
 		diags.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires Bedrock settings sufficient for the Coder API: set `region` or write-only AWS credentials.")
@@ -605,6 +624,7 @@ func (m AIProviderResourceModel) sdkSettings(config AIProviderResourceModel, inc
 		Model:          bedrock.Model.ValueString(),
 		SmallFastModel: bedrock.SmallFastModel.ValueString(),
 		RoleARN:        bedrock.RoleARN.ValueString(),
+		Protocol:       bedrockProtocol(bedrock.Protocol),
 	}
 	if includeCredentials {
 		if cfgBedrock == nil || cfgBedrock.AccessKeyWO.IsNull() || cfgBedrock.AccessKeyWO.IsUnknown() || cfgBedrock.AccessKeySecretWO.IsNull() || cfgBedrock.AccessKeySecretWO.IsUnknown() {
@@ -644,6 +664,7 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 			SmallFastModel:    stringValueOrNull(provider.Settings.Bedrock.SmallFastModel),
 			RoleARN:           stringValueOrNull(provider.Settings.Bedrock.RoleARN),
 			ExternalID:        stringValueOrNull(provider.Settings.Bedrock.ExternalID),
+			Protocol:          stringValueOrNull(string(provider.Settings.Bedrock.Protocol)),
 			AccessKeyWO:       types.StringNull(),
 			AccessKeySecretWO: types.StringNull(),
 		}}
@@ -673,6 +694,36 @@ func checkBedrockRoleARNDropped(config AIProviderResourceModel, provider codersd
 		"Bedrock role_arn not supported by this Coder deployment",
 		"The Coder server accepted the request but did not persist `role_arn`, which means it predates Bedrock STS assume-role support. Upgrade to Coder v2.35.0 or later, or remove `role_arn`.",
 	)
+}
+
+// A Coder server older than v2.36.0 drops the unknown protocol JSON key
+// (omitempty), so a configured value round-trips to the zero value and the
+// provider silently falls back to invoke-model. Fail loudly instead (mirrors
+// checkBedrockRoleARNDropped).
+func checkBedrockProtocolDropped(config AIProviderResourceModel, provider codersdk.AIProvider, diags *diag.Diagnostics) {
+	b := config.bedrock()
+	if b == nil || b.Protocol.IsNull() || b.Protocol.IsUnknown() || b.Protocol.ValueString() == "" {
+		return
+	}
+	configured := b.Protocol.ValueString()
+	if provider.Settings.Bedrock != nil && string(provider.Settings.Bedrock.Protocol) == configured {
+		return
+	}
+	diags.AddAttributeError(
+		path.Root("settings").AtName("bedrock").AtName("protocol"),
+		"Bedrock protocol not supported by this Coder deployment",
+		"The Coder server accepted the request but did not persist `protocol`, which means it predates Bedrock protocol selection. Upgrade to Coder v2.36.0 or later, or remove `protocol`.",
+	)
+}
+
+// bedrockProtocol converts a framework protocol value into its SDK form,
+// mapping null/unknown to the zero value (which the server resolves to
+// invoke-model).
+func bedrockProtocol(p types.String) codersdk.AIProviderBedrockProtocol {
+	if p.IsNull() || p.IsUnknown() {
+		return ""
+	}
+	return codersdk.AIProviderBedrockProtocol(p.ValueString())
 }
 
 func (m AIProviderResourceModel) bedrock() *AIProviderBedrockSettingsModel {

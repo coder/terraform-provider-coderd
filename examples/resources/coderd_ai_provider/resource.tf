@@ -10,6 +10,14 @@ resource "coderd_ai_provider" "bedrock" {
       model            = "anthropic.claude-3-5-sonnet-20241022-v2:0"
       small_fast_model = "anthropic.claude-3-5-haiku-20241022-v1:0"
 
+      // Optional: select the Bedrock wire protocol. Omitted (or explicitly
+      // "invoke-model") translates the native Messages request into Bedrock's
+      // InvokeModel format and requires model + small_fast_model above.
+      // "mantle" forwards the request unchanged with SigV4 signing and passes
+      // through the client's model; requires a region-scoped base_url such as
+      // https://bedrock-mantle.us-east-1.api.aws/anthropic and Coder v2.36.0+.
+      // protocol = "mantle"
+
       // Optional: assume an IAM role via STS before calling Bedrock. The base
       // identity signs the AssumeRole call; the temporary credentials sign requests.
       // role_arn = "arn:aws:iam::123456789012:role/bedrock-access"
