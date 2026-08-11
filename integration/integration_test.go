@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/semver"
 )
 
 // TestIntegration performs an integration test against an ephemeral Coder deployment.
@@ -45,9 +46,10 @@ func TestIntegration(t *testing.T) {
 	tfrcPath := setupProvider(t)
 
 	for _, tt := range []struct {
-		name    string
-		preF    func(testing.TB, *codersdk.Client)
-		assertF func(testing.TB, *codersdk.Client)
+		name       string
+		preF       func(testing.TB, *codersdk.Client)
+		assertF    func(testing.TB, *codersdk.Client)
+		minVersion string
 	}{
 		{
 			name: "user-test",
@@ -305,11 +307,44 @@ func TestIntegration(t *testing.T) {
 				assert.Equal(t, []string{"claude-sonnet-4-6"}, defaults)
 			},
 		},
+		{
+			name:       "bedrock-protocol-test",
+			minVersion: "v2.36.0",
+			preF:       func(t testing.TB, c *codersdk.Client) {},
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				providers, err := c.AIProviders(ctx)
+				require.NoError(t, err)
+
+				var bedrock *codersdk.AIProvider
+				for i := range providers {
+					if providers[i].Name == "bedrock-protocol" {
+						bedrock = &providers[i]
+						break
+					}
+				}
+				require.NotNil(t, bedrock, "bedrock-protocol provider missing")
+				require.NotNil(t, bedrock.Settings.Bedrock, "bedrock-protocol must have bedrock settings")
+				// The explicit mantle protocol set in main.tf must round-trip through
+				// the API, and the provider must not require model/small_fast_model.
+				require.Equal(t, codersdk.AIProviderBedrockProtocolMantle, bedrock.Settings.Bedrock.Protocol)
+				require.Equal(t, "us-east-1", bedrock.Settings.Bedrock.Region)
+				require.Empty(t, bedrock.Settings.Bedrock.Model, "mantle passes the client model through and needs no model field")
+				require.Empty(t, bedrock.Settings.Bedrock.SmallFastModel, "mantle passes the client model through and needs no small_fast_model field")
+			},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
 			client := StartCoder(ctx, t, tt.name, UseLicense)
+			if tt.minVersion != "" {
+				buildInfo, err := client.BuildInfo(ctx)
+				require.NoError(t, err, "fetch buildinfo")
+				canonical := buildInfo.CanonicalVersion()
+				if semver.Compare(canonical, tt.minVersion) < 0 {
+					t.Skipf("test requires Coder %s or later, deployment is %s", tt.minVersion, canonical)
+				}
+			}
 			wd, err := os.Getwd()
 			require.NoError(t, err)
 			srcDir := filepath.Join(wd, tt.name)
