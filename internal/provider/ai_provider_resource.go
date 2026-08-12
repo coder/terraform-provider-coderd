@@ -252,17 +252,13 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 								Optional:            true,
 							},
 							"protocol": schema.StringAttribute{
-								MarkdownDescription: "Bedrock wire protocol. `\"invoke-model\"` (default) translates the native Messages request into Bedrock's InvokeModel format and requires `model` and `small_fast_model`. `\"mantle\"` forwards the native Messages request body unchanged with AWS SigV4 signing and passes through the client's model; requires `region` (and the region/scoped base URL). Requires Coder v2.36.0 or later for the Mantle protocol.",
+								MarkdownDescription: "Bedrock wire protocol. `\"invoke-model\"` (default) translates the native Messages request into Bedrock's InvokeModel format and requires `model` and `small_fast_model`. `\"mantle\"` forwards the native Messages request body unchanged with AWS SigV4 signing and passes through the client's model; requires `region` (the Mantle base URL is not a canonical Bedrock URL, so the region is never derived from `base_url`). Requires Coder v2.36.0 or later for the Mantle protocol. Omit (or set to `\"invoke-model\"`) to use the default. Removing the attribute clears it back to the default; Coder maps an empty value to `\"invoke-model\"`.",
 								Optional:            true,
-								Computed:            true,
 								Validators: []validator.String{
 									stringvalidator.OneOf(
 										string(codersdk.AIProviderBedrockProtocolInvokeModel),
 										string(codersdk.AIProviderBedrockProtocolMantle),
 									),
-								},
-								PlanModifiers: []planmodifier.String{
-									stringplanmodifier.UseStateForUnknown(),
 								},
 							},
 						},
@@ -376,7 +372,7 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 		resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("bedrock"), "Invalid Attribute Combination", "`settings.bedrock` is only valid when `type` is `anthropic` or `bedrock`.")
 	}
 	if providerType == codersdk.AIProviderTypeBedrock {
-		if !baseURLKnown || bedrock.Region.IsUnknown() || bedrock.RoleARN.IsUnknown() || bedrock.AccessKeyWO.IsUnknown() || bedrock.AccessKeySecretWO.IsUnknown() {
+		if !baseURLKnown || bedrock.Region.IsUnknown() || bedrock.RoleARN.IsUnknown() || bedrock.AccessKeyWO.IsUnknown() || bedrock.AccessKeySecretWO.IsUnknown() || bedrock.Protocol.IsUnknown() {
 			return
 		}
 		sdkSettings := codersdk.AIProviderBedrockSettings{
@@ -390,6 +386,13 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 		}
 		if !sdkSettings.IsConfigured() {
 			resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("bedrock"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires Bedrock settings sufficient for the Coder API: set `region` or write-only AWS credentials.")
+		}
+		if sdkSettings.Protocol == codersdk.AIProviderBedrockProtocolMantle && sdkSettings.Region == "" {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("settings").AtName("bedrock").AtName("region"),
+				"Missing Bedrock Region",
+				"`protocol = \"mantle\"` signs requests with AWS SigV4, which requires `region`. The Mantle base URL is not a canonical Bedrock runtime URL, so the region is not derived from `base_url`; set `region` explicitly.",
+			)
 		}
 	}
 }
@@ -705,8 +708,12 @@ func checkBedrockProtocolDropped(config AIProviderResourceModel, provider coders
 	if b == nil || b.Protocol.IsNull() || b.Protocol.IsUnknown() || b.Protocol.ValueString() == "" {
 		return
 	}
-	configured := b.Protocol.ValueString()
-	if provider.Settings.Bedrock != nil && string(provider.Settings.Bedrock.Protocol) == configured {
+	configured := codersdk.AIProviderBedrockProtocol(b.Protocol.ValueString())
+	// Normalize the server's stored value: an empty response means the legacy
+	// invoke-model default (ResolvedProtocol), matching the comment on
+	// bedrockProtocol. This avoids a false positive when a user explicitly sets
+	// protocol = "invoke-model" and the server normalizes it to the zero value.
+	if provider.Settings.Bedrock != nil && provider.Settings.Bedrock.ResolvedProtocol() == configured {
 		return
 	}
 	diags.AddAttributeError(

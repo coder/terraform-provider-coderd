@@ -322,6 +322,21 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 `,
 			wantError: `value must be one of`,
 		},
+		"mantle protocol requires region": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "bedrock"
+  name     = "bedrock-test"
+  base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
+
+  settings = {
+    bedrock = {
+      protocol = "mantle"
+    }
+  }
+}
+`,
+			wantError: `Missing Bedrock Region`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -1025,6 +1040,20 @@ func TestAIProviderCheckBedrockProtocolDropped(t *testing.T) {
 				Bedrock: &codersdk.AIProviderBedrockSettings{
 					Region:   "us-east-1",
 					Protocol: codersdk.AIProviderBedrockProtocolInvokeModel,
+				},
+			}},
+			wantError: false,
+		},
+		"invoke-model configured, server echoes empty (default)": {
+			config: AIProviderResourceModel{
+				Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+					Protocol: types.StringValue(string(codersdk.AIProviderBedrockProtocolInvokeModel)),
+				}},
+			},
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{
+					Region: "us-east-1",
+					// Empty means the legacy invoke-model default (ResolvedProtocol).
 				},
 			}},
 			wantError: false,
