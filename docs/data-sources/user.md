@@ -23,6 +23,12 @@ data "coderd_user" "admin" {
   username = "admin"
 }
 
+// Get a user on the Coder deployment by `email`.
+// Email lookup requires permission to list users.
+data "coderd_user" "developer" {
+  email = "developer@example.com"
+}
+
 
 // Use them to create a group
 resource "coderd_group" "bosses" {
@@ -39,9 +45,9 @@ resource "coderd_group" "bosses" {
 
 ### Optional
 
-- `email` (String) Email of the user.
-- `id` (String) The ID of the user to retrieve. This field will be populated if a username is supplied.
-- `username` (String) The username of the user to retrieve. This field will be populated if an ID is supplied.
+- `email` (String) The email of the user to retrieve. Looking up users by email requires permission to list users. This field will be populated if an ID or username is supplied.
+- `id` (String) The ID of the user to retrieve. This field will be populated if a username or email is supplied.
+- `username` (String) The username of the user to retrieve. This field will be populated if an ID or email is supplied.
 
 ### Read-Only
 

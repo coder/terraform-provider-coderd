@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"testing"
 	"text/template"
-	"time"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -21,70 +21,65 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUserDataSourceLookupUserByEmailFallback(t *testing.T) {
+func TestUserDataSourceLookupUserByEmailPaginates(t *testing.T) {
 	t.Parallel()
 
-	userID := uuid.New()
-	orgID := uuid.New()
 	email := "example@coder.com"
-	var exactCalls, fallbackCalls int
+	pageOne := make([]codersdk.User, userEmailLookupPageLimit)
+	for i := range pageOne {
+		pageOne[i] = codersdk.User{
+			ReducedUser: codersdk.ReducedUser{
+				MinimalUser: codersdk.MinimalUser{ID: uuid.New(), Username: fmt.Sprintf("user-%03d", i)},
+				Email:       fmt.Sprintf("user-%03d@coder.com", i),
+			},
+		}
+	}
+	lastID := pageOne[len(pageOne)-1].ID
+	targetID := uuid.New()
+	target := codersdk.User{
+		ReducedUser: codersdk.ReducedUser{
+			MinimalUser: codersdk.MinimalUser{ID: targetID, Username: "example"},
+			Email:       "Example@Coder.com",
+		},
+	}
+	var requests []url.Values
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v2/users", r.URL.Path)
-
+		requests = append(requests, r.URL.Query())
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("q") {
-		case "email:" + email:
-			exactCalls++
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(codersdk.Response{
-				Message: "Invalid user search query.",
-				Validations: []codersdk.ValidationError{
-					{Field: "email", Detail: `"email" is not a valid query param`},
-				},
-			})
-		case email:
-			fallbackCalls++
-			assert.Equal(t, "100", r.URL.Query().Get("limit"))
-			_ = json.NewEncoder(w).Encode(codersdk.GetUsersResponse{
-				Users: []codersdk.User{
-					{
-						ReducedUser: codersdk.ReducedUser{
-							MinimalUser: codersdk.MinimalUser{
-								ID:        userID,
-								Username:  "example",
-								Name:      "Example User",
-								AvatarURL: "",
-							},
-							Email:           email,
-							CreatedAt:       time.Now(),
-							LastSeenAt:      time.Now(),
-							Status:          codersdk.UserStatusActive,
-							LoginType:       codersdk.LoginTypePassword,
-							UpdatedAt:       time.Now(),
-							ThemePreference: "",
-						},
-						OrganizationIDs: []uuid.UUID{orgID},
-						Roles:           []codersdk.SlimRole{{Name: "auditor"}},
-					},
-				},
-				Count: 1,
-			})
-		default:
-			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		response := codersdk.GetUsersResponse{Users: pageOne, Count: len(pageOne) + 1}
+		if r.URL.Query().Get("after_id") == lastID.String() {
+			response = codersdk.GetUsersResponse{Users: []codersdk.User{target}, Count: 1}
 		}
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer srv.Close()
 
 	clientURL, err := url.Parse(srv.URL)
 	require.NoError(t, err)
-	client := codersdk.New(clientURL)
-	user, err := lookupUserByEmail(t.Context(), client, email)
+	user, err := lookupUserByEmail(t.Context(), codersdk.New(clientURL), email)
 	require.NoError(t, err)
-	assert.Equal(t, userID, user.ID)
-	assert.Equal(t, email, user.Email)
-	assert.Equal(t, 1, exactCalls)
-	assert.Equal(t, 1, fallbackCalls)
+	assert.Equal(t, targetID, user.ID)
+	require.Len(t, requests, 2)
+	assert.Equal(t, email, requests[0].Get("q"))
+	assert.Equal(t, "100", requests[0].Get("limit"))
+	assert.Empty(t, requests[0].Get("after_id"))
+	assert.Equal(t, lastID.String(), requests[1].Get("after_id"))
+}
+
+func TestUserDataSourceLookupUserByEmailNotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(codersdk.GetUsersResponse{})
+	}))
+	defer srv.Close()
+
+	clientURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	_, err = lookupUserByEmail(t.Context(), codersdk.New(clientURL), "missing@coder.com")
+	require.ErrorIs(t, err, errUserNotFound)
 }
 
 func TestAccUserDataSource(t *testing.T) {
@@ -180,7 +175,26 @@ func TestAccUserDataSource(t *testing.T) {
 			},
 		})
 	})
-	t.Run("NeitherIDNorUsernameError", func(t *testing.T) {
+	t.Run("UserByEmailNotFound", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Email: ptr.Ref("missing@coder.com"),
+		}
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg.String(t),
+					ExpectError: regexp.MustCompile(`User Not Found`),
+				},
+			},
+		})
+	})
+
+	t.Run("NoIdentifierError", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
@@ -189,7 +203,6 @@ func TestAccUserDataSource(t *testing.T) {
 			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-			// Neither ID nor Username
 			Steps: []resource.TestStep{
 				{
 					Config:      cfg.String(t),

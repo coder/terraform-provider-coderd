@@ -4,20 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
-	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 const userEmailLookupPageLimit = 100
+
+var errUserNotFound = errors.New("user not found")
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ datasource.DataSource = &UserDataSource{}
@@ -34,7 +36,7 @@ type UserDataSource struct {
 
 // UserDataSourceModel describes the data source data model.
 type UserDataSourceModel struct {
-	// Username or ID must be set
+	// At least one identifier must be set.
 	ID       UUID         `tfsdk:"id"`
 	Username types.String `tfsdk:"username"`
 
@@ -62,17 +64,23 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				CustomType:          UUIDType,
-				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username is supplied.",
+				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username or email is supplied.",
 				Optional:            true,
 			},
 			"username": schema.StringAttribute{
-				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID is supplied.",
+				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID or email is supplied.",
 				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"email": schema.StringAttribute{
-				MarkdownDescription: "Email of the user.",
+				MarkdownDescription: "The email of the user to retrieve. Looking up users by email requires permission to list users. This field will be populated if an ID or username is supplied.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: "Display name of the user.",
@@ -164,17 +172,11 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		user, err = lookupUserByEmail(ctx, client, ident)
 	}
 	if err != nil {
-		if isNotFound(err) {
-			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with identifier %q not found. Marking as deleted.", ident))
-			resp.State.RemoveResource(ctx)
+		if isNotFound(err) || errors.Is(err, errUserNotFound) {
+			resp.Diagnostics.AddError("User Not Found", fmt.Sprintf("Unable to find a user with identifier %q.", ident))
 			return
 		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
-		return
-	}
-	if user.ID == uuid.Nil {
-		resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with identifier %q not found. Marking as deleted.", ident))
-		resp.State.RemoveResource(ctx)
 		return
 	}
 	if len(user.OrganizationIDs) < 1 {
@@ -230,32 +232,6 @@ func (d *UserDataSource) ConfigValidators(context.Context) []datasource.ConfigVa
 }
 
 func lookupUserByEmail(ctx context.Context, client *codersdk.Client, email string) (codersdk.User, error) {
-	user, err := lookupUserByExactEmail(ctx, client, email)
-	if err == nil || !isUnsupportedExactEmailSearch(err) {
-		return user, err
-	}
-	return lookupUserByEmailSearch(ctx, client, email)
-}
-
-func lookupUserByExactEmail(ctx context.Context, client *codersdk.Client, email string) (codersdk.User, error) {
-	users, err := client.Users(ctx, codersdk.UsersRequest{
-		SearchQuery: "email:" + email,
-		Pagination: codersdk.Pagination{
-			Limit: 2,
-		},
-	})
-	if err != nil {
-		return codersdk.User{}, err
-	}
-	for _, candidate := range users.Users {
-		if strings.EqualFold(candidate.Email, email) {
-			return candidate, nil
-		}
-	}
-	return codersdk.User{}, nil
-}
-
-func lookupUserByEmailSearch(ctx context.Context, client *codersdk.Client, email string) (codersdk.User, error) {
 	req := codersdk.UsersRequest{
 		Search: email,
 		Pagination: codersdk.Pagination{
@@ -273,24 +249,8 @@ func lookupUserByEmailSearch(ctx context.Context, client *codersdk.Client, email
 			}
 		}
 		if len(users.Users) < userEmailLookupPageLimit {
-			return codersdk.User{}, nil
+			return codersdk.User{}, errUserNotFound
 		}
 		req.AfterID = users.Users[len(users.Users)-1].ID
 	}
-}
-
-func isUnsupportedExactEmailSearch(err error) bool {
-	var sdkErr *codersdk.Error
-	if !errors.As(err, &sdkErr) || sdkErr.StatusCode() != http.StatusBadRequest {
-		return false
-	}
-	if sdkErr.Message != "Invalid user search query." {
-		return false
-	}
-	for _, validation := range sdkErr.Validations {
-		if validation.Field == "email" && strings.Contains(validation.Detail, `"email" is not a valid query param`) {
-			return true
-		}
-	}
-	return false
 }
