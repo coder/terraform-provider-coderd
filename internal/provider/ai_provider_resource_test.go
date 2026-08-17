@@ -306,6 +306,37 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 `,
 			wantError: `at least 1`,
 		},
+		"invalid bedrock protocol rejected": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "bedrock"
+  name     = "bedrock-test"
+  base_url = "https://bedrock.us-east-1.amazonaws.com"
+
+  settings = {
+    bedrock = {
+      region   = "us-east-1"
+      protocol = "bogus"
+    }
+  }
+}
+`,
+			wantError: `value must be one of`,
+		},
+		"mantle protocol requires region": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "bedrock"
+  name     = "bedrock-test"
+  base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
+
+  settings = {
+    bedrock = {
+      protocol = "mantle"
+    }
+  }
+}
+`,
+			wantError: `Missing Bedrock Region`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -525,6 +556,30 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 	require.Empty(t, req.Settings.Bedrock.ExternalID, "external_id is server-generated and must not be sent")
 	require.Nil(t, req.Settings.Bedrock.AccessKey)
 	require.Nil(t, req.Settings.Bedrock.AccessKeySecret)
+}
+
+func TestAIProviderCreateRequestBedrockMantleProtocol(t *testing.T) {
+	t.Parallel()
+
+	plan := AIProviderResourceModel{
+		Type:        types.StringValue(string(codersdk.AIProviderTypeBedrock)),
+		Name:        types.StringValue("bedrock-mantle"),
+		DisplayName: types.StringValue("Bedrock Mantle us-east-1"),
+		Enabled:     types.BoolValue(true),
+		BaseURL:     types.StringValue("https://bedrock-mantle.us-east-1.api.aws/anthropic"),
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Region:   types.StringValue("us-east-1"),
+			Protocol: types.StringValue(string(codersdk.AIProviderBedrockProtocolMantle)),
+		}},
+	}
+	config := plan
+
+	var diags diag.Diagnostics
+	req := plan.createRequest(config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, req.Settings.Bedrock)
+	require.Equal(t, "us-east-1", req.Settings.Bedrock.Region)
+	require.Equal(t, codersdk.AIProviderBedrockProtocolMantle, req.Settings.Bedrock.Protocol, "mantle must be sent to the Coder API")
 }
 
 func TestAIProviderUpdateRejectsDroppingBedrockSettings(t *testing.T) {
@@ -935,6 +990,133 @@ func TestAIProviderCheckBedrockRoleARNDropped(t *testing.T) {
 			} else {
 				require.False(t, diags.HasError(), diags.Errors())
 			}
+		})
+	}
+}
+
+func TestAIProviderCheckBedrockProtocolDropped(t *testing.T) {
+	t.Parallel()
+
+	configWithProtocol := AIProviderResourceModel{
+		Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+			Protocol: types.StringValue(string(codersdk.AIProviderBedrockProtocolMantle)),
+		}},
+	}
+
+	for name, tc := range map[string]struct {
+		config    AIProviderResourceModel
+		response  codersdk.AIProvider
+		wantError bool
+	}{
+		"protocol stripped by old server": {
+			config: configWithProtocol,
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{Region: "us-east-1"},
+			}},
+			wantError: true,
+		},
+		"bedrock settings dropped entirely": {
+			config:    configWithProtocol,
+			response:  codersdk.AIProvider{},
+			wantError: true,
+		},
+		"protocol persisted": {
+			config: configWithProtocol,
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{
+					Region:   "us-east-1",
+					Protocol: codersdk.AIProviderBedrockProtocolMantle,
+				},
+			}},
+			wantError: false,
+		},
+		"invoke-model persisted": {
+			config: AIProviderResourceModel{
+				Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+					Protocol: types.StringValue(string(codersdk.AIProviderBedrockProtocolInvokeModel)),
+				}},
+			},
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{
+					Region:   "us-east-1",
+					Protocol: codersdk.AIProviderBedrockProtocolInvokeModel,
+				},
+			}},
+			wantError: false,
+		},
+		"invoke-model configured, server echoes empty (default)": {
+			config: AIProviderResourceModel{
+				Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+					Protocol: types.StringValue(string(codersdk.AIProviderBedrockProtocolInvokeModel)),
+				}},
+			},
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{
+					Region: "us-east-1",
+					// Empty means the legacy invoke-model default (ResolvedProtocol).
+				},
+			}},
+			wantError: false,
+		},
+		"protocol not configured": {
+			config: AIProviderResourceModel{
+				Settings: &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
+					Protocol: types.StringNull(),
+				}},
+			},
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				Bedrock: &codersdk.AIProviderBedrockSettings{Region: "us-east-1"},
+			}},
+			wantError: false,
+		},
+		"no bedrock settings": {
+			config:    AIProviderResourceModel{},
+			response:  codersdk.AIProvider{},
+			wantError: false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var diags diag.Diagnostics
+			checkBedrockProtocolDropped(tc.config, tc.response, &diags)
+			if tc.wantError {
+				require.True(t, diags.HasError(), "expected a diagnostic")
+				require.Contains(t, diags.Errors()[0].Summary(), "Bedrock protocol not supported by this Coder deployment")
+			} else {
+				require.False(t, diags.HasError(), diags.Errors())
+			}
+		})
+	}
+}
+
+func TestAIProviderStateFromProviderRetainsProtocol(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		protocol codersdk.AIProviderBedrockProtocol
+		want     types.String
+	}{
+		"mantle":                 {codersdk.AIProviderBedrockProtocolMantle, types.StringValue("mantle")},
+		"invoke-model":           {codersdk.AIProviderBedrockProtocolInvokeModel, types.StringValue("invoke-model")},
+		"empty resolves to null": {codersdk.AIProviderBedrockProtocol(""), types.StringNull()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			state := AIProviderResourceModel{}.stateFromProvider(codersdk.AIProvider{
+				ID:   uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+				Type: codersdk.AIProviderTypeBedrock,
+				Name: "aws-bedrock",
+				Settings: codersdk.AIProviderSettings{Bedrock: &codersdk.AIProviderBedrockSettings{
+					Region:   "us-east-1",
+					Protocol: tc.protocol,
+				}},
+			})
+
+			require.NotNil(t, state.Settings)
+			require.NotNil(t, state.Settings.Bedrock)
+			require.Equal(t, tc.want, state.Settings.Bedrock.Protocol)
 		})
 	}
 }
