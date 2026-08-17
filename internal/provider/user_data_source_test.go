@@ -1,6 +1,11 @@
 package provider
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -12,8 +17,70 @@ import (
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUserDataSourceLookupUserByEmailPaginates(t *testing.T) {
+	t.Parallel()
+
+	email := "example@coder.com"
+	pageOne := make([]codersdk.User, userEmailLookupPageLimit)
+	for i := range pageOne {
+		pageOne[i] = codersdk.User{
+			ReducedUser: codersdk.ReducedUser{
+				MinimalUser: codersdk.MinimalUser{ID: uuid.New(), Username: fmt.Sprintf("user-%03d", i)},
+				Email:       fmt.Sprintf("user-%03d@coder.com", i),
+			},
+		}
+	}
+	lastID := pageOne[len(pageOne)-1].ID
+	targetID := uuid.New()
+	target := codersdk.User{
+		ReducedUser: codersdk.ReducedUser{
+			MinimalUser: codersdk.MinimalUser{ID: targetID, Username: "example"},
+			Email:       "Example@Coder.com",
+		},
+	}
+	var requests []url.Values
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Query())
+		w.Header().Set("Content-Type", "application/json")
+		response := codersdk.GetUsersResponse{Users: pageOne, Count: len(pageOne) + 1}
+		if r.URL.Query().Get("after_id") == lastID.String() {
+			response = codersdk.GetUsersResponse{Users: []codersdk.User{target}, Count: 1}
+		}
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer srv.Close()
+
+	clientURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	user, err := lookupUserByEmail(t.Context(), codersdk.New(clientURL), email)
+	require.NoError(t, err)
+	assert.Equal(t, targetID, user.ID)
+	require.Len(t, requests, 2)
+	assert.Equal(t, email, requests[0].Get("q"))
+	assert.Equal(t, "100", requests[0].Get("limit"))
+	assert.Empty(t, requests[0].Get("after_id"))
+	assert.Equal(t, lastID.String(), requests[1].Get("after_id"))
+}
+
+func TestUserDataSourceLookupUserByEmailNotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(codersdk.GetUsersResponse{})
+	}))
+	defer srv.Close()
+
+	clientURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	_, err = lookupUserByEmail(t.Context(), codersdk.New(clientURL), "missing@coder.com")
+	require.ErrorIs(t, err, errUserNotFound)
+}
 
 func TestAccUserDataSource(t *testing.T) {
 	t.Parallel()
@@ -90,7 +157,44 @@ func TestAccUserDataSource(t *testing.T) {
 			},
 		})
 	})
-	t.Run("NeitherIDNorUsernameError", func(t *testing.T) {
+	t.Run("UserByEmailOk", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Email: ptr.Ref(user.Email),
+		}
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: cfg.String(t),
+					Check:  checkFn,
+				},
+			},
+		})
+	})
+	t.Run("UserByEmailNotFound", func(t *testing.T) {
+		cfg := testAccUserDataSourceConfig{
+			URL:   client.URL.String(),
+			Token: client.SessionToken(),
+			Email: ptr.Ref("missing@coder.com"),
+		}
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config:      cfg.String(t),
+					ExpectError: regexp.MustCompile(`User Not Found`),
+				},
+			},
+		})
+	})
+
+	t.Run("NoIdentifierError", func(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
@@ -99,11 +203,10 @@ func TestAccUserDataSource(t *testing.T) {
 			IsUnitTest:               true,
 			PreCheck:                 func() { testAccPreCheck(t) },
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-			// Neither ID nor Username
 			Steps: []resource.TestStep{
 				{
 					Config:      cfg.String(t),
-					ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username\]`),
+					ExpectError: regexp.MustCompile(`At least one of these attributes must be configured: \[id,username,email\]`),
 				},
 			},
 		})
@@ -180,6 +283,7 @@ type testAccUserDataSourceConfig struct {
 
 	ID       *string
 	Username *string
+	Email    *string
 }
 
 func (c testAccUserDataSourceConfig) String(t *testing.T) string {
@@ -193,6 +297,7 @@ provider coderd {
 data "coderd_user" "test" {
 	id       = {{orNull .ID}}
 	username = {{orNull .Username}}
+	email    = {{orNull .Email}}
 }`
 
 	funcMap := template.FuncMap{

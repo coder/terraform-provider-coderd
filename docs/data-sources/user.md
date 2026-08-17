@@ -23,6 +23,12 @@ data "coderd_user" "admin" {
   username = "admin"
 }
 
+// Get a user on the Coder deployment by `email`.
+// Email lookup requires permission to list users.
+data "coderd_user" "developer" {
+  email = "developer@example.com"
+}
+
 
 // Use them to create a group
 resource "coderd_group" "bosses" {
@@ -39,14 +45,14 @@ resource "coderd_group" "bosses" {
 
 ### Optional
 
-- `id` (String) The ID of the user to retrieve. This field will be populated if a username is supplied.
-- `username` (String) The username of the user to retrieve. This field will be populated if an ID is supplied.
+- `email` (String) The email of the user to retrieve. Looking up users by email requires permission to list users. This field will be populated if an ID or username is supplied.
+- `id` (String) The ID of the user to retrieve. This field will be populated if a username or email is supplied.
+- `username` (String) The username of the user to retrieve. This field will be populated if an ID or email is supplied.
 
 ### Read-Only
 
 - `avatar_url` (String) URL of the user's avatar.
 - `created_at` (Number) Unix timestamp of when the user was created.
-- `email` (String) Email of the user.
 - `is_service_account` (Boolean) Whether the user is a service account: an admin-managed account that cannot log in interactively and does not consume a licensed user seat.
 - `last_seen_at` (Number) Unix timestamp of when the user was last seen.
 - `login_type` (String) Type of login for the user. Valid types are `none`, `password', `github`, and `oidc`.

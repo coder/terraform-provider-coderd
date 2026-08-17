@@ -2,16 +2,24 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+const userEmailLookupPageLimit = 100
+
+var errUserNotFound = errors.New("user not found")
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ datasource.DataSource = &UserDataSource{}
@@ -28,7 +36,7 @@ type UserDataSource struct {
 
 // UserDataSourceModel describes the data source data model.
 type UserDataSourceModel struct {
-	// Username or ID must be set
+	// At least one identifier must be set.
 	ID       UUID         `tfsdk:"id"`
 	Username types.String `tfsdk:"username"`
 
@@ -56,19 +64,26 @@ func (d *UserDataSource) Schema(ctx context.Context, req datasource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				CustomType:          UUIDType,
-				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username is supplied.",
+				MarkdownDescription: "The ID of the user to retrieve. This field will be populated if a username or email is supplied.",
 				Optional:            true,
 			},
 			"username": schema.StringAttribute{
-				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID is supplied.",
+				MarkdownDescription: "The username of the user to retrieve. This field will be populated if an ID or email is supplied.",
 				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+			},
+			"email": schema.StringAttribute{
+				MarkdownDescription: "The email of the user to retrieve. Looking up users by email requires permission to list users. This field will be populated if an ID or username is supplied.",
+				Optional:            true,
+				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: "Display name of the user.",
-				Computed:            true,
-			},
-			"email": schema.StringAttribute{
-				MarkdownDescription: "Email of the user.",
 				Computed:            true,
 			},
 			"roles": schema.SetAttribute{
@@ -141,17 +156,24 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 
 	client := d.data.Client
 
-	var ident string
+	var (
+		ident string
+		user  codersdk.User
+		err   error
+	)
 	if !data.ID.IsNull() {
 		ident = data.ID.ValueString()
-	} else {
+		user, err = client.User(ctx, ident)
+	} else if !data.Username.IsNull() {
 		ident = data.Username.ValueString()
+		user, err = client.User(ctx, ident)
+	} else {
+		ident = data.Email.ValueString()
+		user, err = lookupUserByEmail(ctx, client, ident)
 	}
-	user, err := client.User(ctx, ident)
 	if err != nil {
-		if isNotFound(err) {
-			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("User with identifier %q not found. Marking as deleted.", ident))
-			resp.State.RemoveResource(ctx)
+		if isNotFound(err) || errors.Is(err, errUserNotFound) {
+			resp.Diagnostics.AddError("User Not Found", fmt.Sprintf("Unable to find a user with identifier %q.", ident))
 			return
 		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get current user, got error: %s", err))
@@ -164,8 +186,13 @@ func (d *UserDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	if !data.ID.IsNull() && user.ID != data.ID.ValueUUID() {
 		resp.Diagnostics.AddError("Client Error", "Retrieved User's ID does not match the provided ID")
 		return
-	} else if !data.Username.IsNull() && user.Username != data.Username.ValueString() {
+	}
+	if !data.Username.IsNull() && user.Username != data.Username.ValueString() {
 		resp.Diagnostics.AddError("Client Error", "Retrieved User's username does not match the provided username")
+		return
+	}
+	if !data.Email.IsNull() && !strings.EqualFold(user.Email, data.Email.ValueString()) {
+		resp.Diagnostics.AddError("Client Error", "Retrieved User's email does not match the provided email")
 		return
 	}
 
@@ -199,6 +226,31 @@ func (d *UserDataSource) ConfigValidators(context.Context) []datasource.ConfigVa
 		datasourcevalidator.AtLeastOneOf(
 			path.MatchRoot("id"),
 			path.MatchRoot("username"),
+			path.MatchRoot("email"),
 		),
+	}
+}
+
+func lookupUserByEmail(ctx context.Context, client *codersdk.Client, email string) (codersdk.User, error) {
+	req := codersdk.UsersRequest{
+		Search: email,
+		Pagination: codersdk.Pagination{
+			Limit: userEmailLookupPageLimit,
+		},
+	}
+	for {
+		users, err := client.Users(ctx, req)
+		if err != nil {
+			return codersdk.User{}, err
+		}
+		for _, candidate := range users.Users {
+			if strings.EqualFold(candidate.Email, email) {
+				return candidate, nil
+			}
+		}
+		if len(users.Users) < userEmailLookupPageLimit {
+			return codersdk.User{}, errUserNotFound
+		}
+		req.AfterID = users.Users[len(users.Users)-1].ID
 	}
 }

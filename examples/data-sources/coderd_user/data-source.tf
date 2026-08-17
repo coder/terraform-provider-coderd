@@ -8,6 +8,12 @@ data "coderd_user" "admin" {
   username = "admin"
 }
 
+// Get a user on the Coder deployment by `email`.
+// Email lookup requires permission to list users.
+data "coderd_user" "developer" {
+  email = "developer@example.com"
+}
+
 
 // Use them to create a group
 resource "coderd_group" "bosses" {
