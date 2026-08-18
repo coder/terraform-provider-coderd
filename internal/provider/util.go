@@ -145,7 +145,7 @@ func stringPtrOrNil(v types.String) *string {
 }
 
 // boolPtrOrNil returns nil for null or unknown booleans.
-// ValueBoolPointer returns false for unknown, which can accidentally send a value.
+// ValueBoolPointer returns a pointer to false for unknown, which sends a deferred value in the request.
 func boolPtrOrNil(v types.Bool) *bool {
 	if v.IsNull() || v.IsUnknown() {
 		return nil

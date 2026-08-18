@@ -73,7 +73,7 @@ func TestTemplateResourceReconcileVersionedMetadata(t *testing.T) {
 	})
 }
 
-func TestTemplateResourceUseClassicParameterFlowRequests(t *testing.T) {
+func TestTemplateResourceBoolRequests(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -97,6 +97,7 @@ func TestTemplateResourceUseClassicParameterFlowRequests(t *testing.T) {
 				}),
 				AutostartPermittedDaysOfWeek: types.SetValueMust(types.StringType, []attr.Value{}),
 				UseClassicParameterFlow:      tc.value,
+				AgentsAllowed:                tc.value,
 				ACL:                          types.ObjectNull(aclTypeAttr),
 			}
 
@@ -104,11 +105,13 @@ func TestTemplateResourceUseClassicParameterFlowRequests(t *testing.T) {
 			updateReq := model.toUpdateRequest(t.Context(), &updateDiags)
 			require.False(t, updateDiags.HasError(), updateDiags.Errors())
 			require.Equal(t, tc.want, updateReq.UseClassicParameterFlow)
+			require.Equal(t, tc.want, updateReq.AgentsAllowed)
 
 			createResp := frameworkresource.CreateResponse{}
 			createReq := model.toCreateRequest(t.Context(), &createResp, uuid.New())
 			require.False(t, createResp.Diagnostics.HasError(), createResp.Diagnostics.Errors())
 			require.Equal(t, tc.want, createReq.UseClassicParameterFlow)
+			require.Equal(t, tc.want, createReq.AgentsAllowed)
 		})
 	}
 }
