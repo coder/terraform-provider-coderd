@@ -187,7 +187,7 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 				Computed:            true,
 			},
 			"agents_allowed": schema.BoolAttribute{
-				MarkdownDescription: "Whether Coder Agents can create workspaces from the template. Requires a Coder deployment running v2.37.0 or later.",
+				MarkdownDescription: fmt.Sprintf("Whether Coder Agents can create workspaces from the template. Requires a Coder deployment running v%s or later.", templateAgentsAllowedMinVersion),
 				Computed:            true,
 			},
 			"max_port_share_level": schema.StringAttribute{

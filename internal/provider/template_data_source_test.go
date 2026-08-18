@@ -32,7 +32,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 
 	buildInfo, err := client.BuildInfo(ctx)
 	require.NoError(t, err, "fetch buildinfo")
-	supportsAgentsAllowed := semver.Compare(buildInfo.CanonicalVersion(), "v2.37.0") >= 0
+	supportsAgentsAllowed := semver.Compare(buildInfo.CanonicalVersion(), "v"+templateAgentsAllowedMinVersion) >= 0
 
 	version, _, err := newVersion(ctx, client, newVersionRequest{
 		OrganizationID: orgID,

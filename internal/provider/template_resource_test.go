@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/config"
@@ -36,26 +38,79 @@ func mustVariablesToSet(vars []Variable) types.Set {
 	return s
 }
 
-func TestTemplateResourceReconcileUpdateResponse(t *testing.T) {
+func TestTemplateResourceReconcileVersionedMetadata(t *testing.T) {
 	t.Parallel()
 
-	state := TemplateResourceModel{
-		MaxPortShareLevel:       types.StringValue("owner"),
-		CORSBehavior:            types.StringValue("simple"),
-		UseClassicParameterFlow: types.BoolValue(true),
-		AgentsAllowed:           types.BoolValue(true),
-	}
-	state.reconcileUpdateResponse(codersdk.Template{
-		MaxPortShareLevel:       codersdk.WorkspaceAgentPortShareLevelPublic,
-		CORSBehavior:            codersdk.CORSBehaviorPassthru,
-		UseClassicParameterFlow: false,
-		AgentsAllowed:           false,
+	t.Run("values", func(t *testing.T) {
+		t.Parallel()
+
+		state := TemplateResourceModel{
+			MaxPortShareLevel:       types.StringValue("owner"),
+			CORSBehavior:            types.StringValue("simple"),
+			UseClassicParameterFlow: types.BoolValue(true),
+			AgentsAllowed:           types.BoolValue(false),
+		}
+		state.reconcileVersionedMetadata(&codersdk.Template{
+			MaxPortShareLevel:       codersdk.WorkspaceAgentPortShareLevelPublic,
+			CORSBehavior:            codersdk.CORSBehaviorPassthru,
+			UseClassicParameterFlow: false,
+			AgentsAllowed:           true,
+		})
+
+		require.Equal(t, "public", state.MaxPortShareLevel.ValueString())
+		require.Equal(t, "passthru", state.CORSBehavior.ValueString())
+		require.False(t, state.UseClassicParameterFlow.ValueBool())
+		require.True(t, state.AgentsAllowed.ValueBool())
 	})
 
-	require.Equal(t, "public", state.MaxPortShareLevel.ValueString())
-	require.Equal(t, "passthru", state.CORSBehavior.ValueString())
-	require.False(t, state.UseClassicParameterFlow.ValueBool())
-	require.False(t, state.AgentsAllowed.ValueBool())
+	t.Run("empty CORS behavior", func(t *testing.T) {
+		t.Parallel()
+
+		state := TemplateResourceModel{CORSBehavior: types.StringValue("simple")}
+		state.reconcileVersionedMetadata(&codersdk.Template{})
+
+		require.True(t, state.CORSBehavior.IsNull())
+	})
+}
+
+func TestTemplateResourceUseClassicParameterFlowRequests(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		value types.Bool
+		want  *bool
+	}{
+		{name: "null", value: types.BoolNull()},
+		{name: "unknown", value: types.BoolUnknown()},
+		{name: "false", value: types.BoolValue(false), want: ptr.Ref(false)},
+		{name: "true", value: types.BoolValue(true), want: ptr.Ref(true)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			model := TemplateResourceModel{
+				AutostopRequirement: types.ObjectValueMust(autostopRequirementTypeAttr, map[string]attr.Value{
+					"days_of_week": types.SetValueMust(types.StringType, []attr.Value{}),
+					"weeks":        types.Int64Value(1),
+				}),
+				AutostartPermittedDaysOfWeek: types.SetValueMust(types.StringType, []attr.Value{}),
+				UseClassicParameterFlow:      tc.value,
+				ACL:                          types.ObjectNull(aclTypeAttr),
+			}
+
+			var updateDiags diag.Diagnostics
+			updateReq := model.toUpdateRequest(t.Context(), &updateDiags)
+			require.False(t, updateDiags.HasError(), updateDiags.Errors())
+			require.Equal(t, tc.want, updateReq.UseClassicParameterFlow)
+
+			createResp := frameworkresource.CreateResponse{}
+			createReq := model.toCreateRequest(t.Context(), &createResp, uuid.New())
+			require.False(t, createResp.Diagnostics.HasError(), createResp.Diagnostics.Errors())
+			require.Equal(t, tc.want, createReq.UseClassicParameterFlow)
+		})
+	}
 }
 
 func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
@@ -297,7 +352,7 @@ func TestAccTemplateResource(t *testing.T) {
 						testAccCheckNumTemplateVersions(ctx, client, 5),
 					),
 				},
-				// Change the active version and omit agents_allowed.
+				// Change the active version.
 				{
 					Config: cfg4.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
@@ -783,8 +838,8 @@ func TestAccTemplateResourceAgentsAllowed(t *testing.T) {
 	client := integration.StartCoder(ctx, t, "template_agents_allowed_acc")
 	buildInfo, err := client.BuildInfo(ctx)
 	require.NoError(t, err, "fetch buildinfo")
-	if semver.Compare(buildInfo.CanonicalVersion(), "v2.37.0") < 0 {
-		t.Skipf("test requires Coder v2.37.0 or later, deployment is %s", buildInfo.CanonicalVersion())
+	if semver.Compare(buildInfo.CanonicalVersion(), "v"+templateAgentsAllowedMinVersion) < 0 {
+		t.Skipf("test requires Coder v%s or later, deployment is %s", templateAgentsAllowedMinVersion, buildInfo.CanonicalVersion())
 	}
 
 	directory := t.TempDir()
@@ -807,8 +862,8 @@ func TestAccTemplateResourceAgentsAllowed(t *testing.T) {
 	cfgFalse.AgentsAllowed = ptr.Ref(false)
 	cfgTrue := cfgFalse
 	cfgTrue.AgentsAllowed = ptr.Ref(true)
-	cfgUnmanaged := cfgTrue
-	cfgUnmanaged.AgentsAllowed = nil
+	cfgOmittedAgain := cfgTrue
+	cfgOmittedAgain.AgentsAllowed = nil
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -828,9 +883,9 @@ func TestAccTemplateResourceAgentsAllowed(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "true"),
 			},
 			{
-				Config:             cfgUnmanaged.String(t),
-				PlanOnly:           true,
-				ExpectNonEmptyPlan: false,
+				// Omitting the attribute again preserves the prior state value.
+				Config:   cfgOmittedAgain.String(t),
+				PlanOnly: true,
 			},
 		},
 	})

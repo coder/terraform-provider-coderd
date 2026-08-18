@@ -46,6 +46,8 @@ var (
 	_ resource.ResourceWithConfigValidators = &TemplateResource{}
 )
 
+const templateAgentsAllowedMinVersion = "2.37.0"
+
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
 }
@@ -470,7 +472,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				},
 			},
 			"agents_allowed": schema.BoolAttribute{
-				MarkdownDescription: "Whether Coder Agents can create workspaces from this template. Defaults to true. Requires a Coder deployment running v2.37.0 or later.",
+				MarkdownDescription: fmt.Sprintf("Whether Coder Agents can create workspaces from this template. Coder defaults this setting to true. Requires a Coder deployment running v%s or later.", templateAgentsAllowedMinVersion),
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.Bool{
@@ -915,7 +917,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
 		return
 	}
-	newState.reconcileUpdateResponse(templateResp)
+	newState.reconcileVersionedMetadata(&templateResp)
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -1425,7 +1427,7 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	}
 }
 
-func (r *TemplateResourceModel) reconcileUpdateResponse(template codersdk.Template) {
+func (r *TemplateResourceModel) reconcileVersionedMetadata(template *codersdk.Template) {
 	r.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 	r.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
 	r.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
@@ -1508,7 +1510,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
-		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		UseClassicParameterFlow:        boolPtrOrNil(r.UseClassicParameterFlow),
 		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		// If we're managing ACL, we want to delete the everyone group.
 		DisableEveryoneGroupAccess: ptr.Ref(!r.ACL.IsNull()),
@@ -1554,7 +1556,7 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64Pointer(),
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
-		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		UseClassicParameterFlow:        boolPtrOrNil(r.UseClassicParameterFlow),
 		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
