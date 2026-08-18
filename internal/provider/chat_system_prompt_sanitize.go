@@ -10,6 +10,11 @@ import (
 // Unicode characters, normalizes line endings, collapses excessive
 // blank lines, and trims surrounding whitespace.
 //
+// TODO(https://github.com/coder/coder/pull/28283): the sanitizer is
+// being exported as codersdk.SanitizePromptText. Once the pinned
+// coder/coder dependency includes that commit, delete this file and
+// use the codersdk function so the two cannot drift.
+//
 // The chat system prompt endpoint stores the sanitized form of
 // whatever is PUT to it, so the value read back rarely matches the
 // configured value byte-for-byte (a trailing newline from

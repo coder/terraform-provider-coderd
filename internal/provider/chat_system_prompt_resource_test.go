@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -13,13 +14,17 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -493,4 +498,162 @@ resource "coderd_chat_system_prompt" "test" {
 			},
 		},
 	})
+}
+
+// TestChatSystemPromptModifyPlan covers the create-time overwrite advisories
+// for both attributes. Every case carries the always-on experimental-resource
+// warning, so the baseline warning count is 1.
+func TestChatSystemPromptModifyPlan(t *testing.T) {
+	t.Parallel()
+
+	objType := tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"system_prompt":                 tftypes.String,
+			"include_default_system_prompt": tftypes.Bool,
+		},
+	}
+	// promptObject builds a state/plan value. A nil prompt yields a null
+	// object, which is how the framework signals "no prior state" (a create)
+	// and "no plan" (a destroy).
+	promptObject := func(prompt any, include any) tftypes.Value {
+		if prompt == nil && include == nil {
+			return tftypes.NewValue(objType, nil)
+		}
+		return tftypes.NewValue(objType, map[string]tftypes.Value{
+			"system_prompt":                 tftypes.NewValue(tftypes.String, prompt),
+			"include_default_system_prompt": tftypes.NewValue(tftypes.Bool, include),
+		})
+	}
+	nullObject := promptObject(nil, nil)
+
+	for _, tc := range []struct {
+		name string
+		// livePrompt and liveInclude are the deployment's current values.
+		livePrompt  string
+		liveInclude bool
+		// lookupStatus, when non-zero, makes the GET fail.
+		lookupStatus int
+		plan         tftypes.Value
+		state        tftypes.Value
+		wantWarnings int
+	}{
+		{
+			name:         "WarnsWhenFirstApplyWouldOverwriteLivePrompt",
+			livePrompt:   "configured in the dashboard",
+			liveInclude:  true,
+			plan:         promptObject("from terraform", true),
+			state:        nullObject,
+			wantWarnings: 2,
+		},
+		{
+			name:         "WarnsWhenFirstApplyWouldFlipIncludeDefault",
+			livePrompt:   "",
+			liveInclude:  false,
+			plan:         promptObject("from terraform", true),
+			state:        nullObject,
+			wantWarnings: 2,
+		},
+		{
+			name:         "WarnsOnBothWhenBothDiffer",
+			livePrompt:   "configured in the dashboard",
+			liveInclude:  false,
+			plan:         promptObject("from terraform", true),
+			state:        nullObject,
+			wantWarnings: 3,
+		},
+		{
+			// A live prompt differing from the plan only by sanitization is
+			// the same setting, not an overwrite.
+			name:         "SilentWhenPromptMatchesModuloSanitization",
+			livePrompt:   "from terraform",
+			liveInclude:  true,
+			plan:         promptObject("from terraform\n", true),
+			state:        nullObject,
+			wantWarnings: 1,
+		},
+		{
+			// A never-configured deployment has nothing to lose.
+			name:         "SilentOnGreenfieldDeployment",
+			livePrompt:   "",
+			liveInclude:  true,
+			plan:         promptObject("from terraform", true),
+			state:        nullObject,
+			wantWarnings: 1,
+		},
+		{
+			// Not a create: an update already renders a real diff, and this
+			// is also the first plan after `terraform import`.
+			name:         "SilentWhenPriorStateExists",
+			livePrompt:   "configured in the dashboard",
+			liveInclude:  false,
+			plan:         promptObject("from terraform", true),
+			state:        promptObject("from terraform", true),
+			wantWarnings: 1,
+		},
+		{
+			name:         "SilentOnDestroyPlan",
+			livePrompt:   "configured in the dashboard",
+			liveInclude:  false,
+			plan:         nullObject,
+			state:        promptObject("from terraform", true),
+			wantWarnings: 1,
+		},
+		{
+			// A Required attribute is still unknown when it comes from an
+			// input variable or module output. Defer rather than guess.
+			name:         "SilentWhenPlannedPromptUnknown",
+			livePrompt:   "configured in the dashboard",
+			liveInclude:  false,
+			plan:         promptObject(tftypes.UnknownValue, true),
+			state:        nullObject,
+			wantWarnings: 1,
+		},
+		{
+			// Best-effort: a failed lookup must not turn into a plan error.
+			// Create() makes the same call and reports it properly.
+			name:         "SilentWhenLookupFails",
+			livePrompt:   "configured in the dashboard",
+			liveInclude:  false,
+			lookupStatus: http.StatusForbidden,
+			plan:         promptObject("from terraform", true),
+			state:        nullObject,
+			wantWarnings: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			f := newFakeChatCoderd(t)
+			f.mu.Lock()
+			f.prompt = tc.livePrompt
+			f.includeDflt = tc.liveInclude
+			f.getStatus = tc.lookupStatus
+			f.mu.Unlock()
+
+			serverURL, err := url.Parse(f.URL)
+			require.NoError(t, err)
+			client := codersdk.New(serverURL)
+			client.SetSessionToken("test-token")
+
+			r := &ChatSystemPromptResource{
+				CoderdProviderData: &CoderdProviderData{Client: client},
+			}
+
+			schemaResp := &fwresource.SchemaResponse{}
+			r.Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+			require.Empty(t, schemaResp.Diagnostics)
+			s := schemaResp.Schema
+
+			resp := &fwresource.ModifyPlanResponse{Plan: tfsdk.Plan{Schema: s, Raw: tc.plan}}
+			r.ModifyPlan(ctx, fwresource.ModifyPlanRequest{
+				Config: tfsdk.Config{Schema: s, Raw: tc.plan},
+				Plan:   tfsdk.Plan{Schema: s, Raw: tc.plan},
+				State:  tfsdk.State{Schema: s, Raw: tc.state},
+			}, resp)
+
+			assert.Empty(t, resp.Diagnostics.Errors(), "a plan-time advisory must never fail the plan")
+			assert.Len(t, resp.Diagnostics.Warnings(), tc.wantWarnings)
+		})
+	}
 }

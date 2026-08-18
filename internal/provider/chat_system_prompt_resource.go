@@ -36,9 +36,12 @@ const chatSystemPromptMinVersion = "2.32.0"
 // time; validating here fails the same way at plan time instead.
 const maxChatSystemPromptBytes = 131072
 
-// pathSystemPrompt anchors plan-time diagnostics to the attribute they are
-// about.
-var pathSystemPrompt = path.Root("system_prompt")
+// pathSystemPrompt and pathIncludeDefaultSystemPrompt anchor plan-time
+// diagnostics to the attributes they are about.
+var (
+	pathSystemPrompt               = path.Root("system_prompt")
+	pathIncludeDefaultSystemPrompt = path.Root("include_default_system_prompt")
+)
 
 type ChatSystemPromptResource struct {
 	*CoderdProviderData
@@ -233,8 +236,9 @@ func (r *ChatSystemPromptResource) Delete(ctx context.Context, req resource.Dele
 }
 
 // ModifyPlan emits the standard experimental-resource warning and, on a first
-// apply, warns when a non-empty out-of-band prompt is about to be overwritten,
-// giving the admin a chance to `terraform import` instead.
+// apply, warns when a non-empty out-of-band prompt or a differing
+// include-default flag is about to be overwritten, giving the admin a chance
+// to `terraform import` instead.
 func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	resp.Diagnostics.AddWarning(
 		"Experimental Resource",
@@ -277,23 +281,33 @@ func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.
 		})
 		return
 	}
-	if live.SystemPrompt == "" {
-		// Nothing configured out of band; nothing to lose.
-		return
-	}
-	if sanitizePromptText(live.SystemPrompt) == sanitizePromptText(data.SystemPrompt.ValueString()) {
-		// The planned prompt matches the live one.
-		return
+
+	if live.SystemPrompt != "" &&
+		sanitizePromptText(live.SystemPrompt) != sanitizePromptText(data.SystemPrompt.ValueString()) {
+		resp.Diagnostics.AddAttributeWarning(
+			pathSystemPrompt,
+			"Overwriting an out-of-band value",
+			"This deployment already has a chat system prompt configured, and applying will overwrite it. "+
+				"Terraform has no prior state for this resource, so this change is not shown as a diff.\n\n"+
+				"If you meant to adopt the deployment's existing value rather than overwrite it, run "+
+				"`terraform import coderd_chat_system_prompt.<name> chat_system_prompt` first.",
+		)
 	}
 
-	resp.Diagnostics.AddAttributeWarning(
-		pathSystemPrompt,
-		"Overwriting an out-of-band value",
-		"This deployment already has a chat system prompt configured, and applying will overwrite it. "+
-			"Terraform has no prior state for this resource, so this change is not shown as a diff.\n\n"+
-			"If you meant to adopt the deployment's existing value rather than overwrite it, run "+
-			"`terraform import coderd_chat_system_prompt.<name> chat_system_prompt` first.",
-	)
+	// The attribute has a schema default, so it is only unknown when it comes
+	// from an unresolved expression.
+	if !data.IncludeDefaultSystemPrompt.IsUnknown() && !data.IncludeDefaultSystemPrompt.IsNull() &&
+		data.IncludeDefaultSystemPrompt.ValueBool() != live.IncludeDefaultSystemPrompt {
+		resp.Diagnostics.AddAttributeWarning(
+			pathIncludeDefaultSystemPrompt,
+			"Overwriting an out-of-band value",
+			fmt.Sprintf("`include_default_system_prompt` is currently `%t` on this deployment, and applying will set it "+
+				"to `%t`. Terraform has no prior state for this resource, so this change is not shown as a diff.\n\n"+
+				"If you meant to adopt the deployment's existing value rather than overwrite it, run "+
+				"`terraform import coderd_chat_system_prompt.<name> chat_system_prompt` first.",
+				live.IncludeDefaultSystemPrompt, data.IncludeDefaultSystemPrompt.ValueBool()),
+		)
+	}
 }
 
 func (r *ChatSystemPromptResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
