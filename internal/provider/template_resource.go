@@ -915,8 +915,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
 		return
 	}
-	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
-	newState.CORSBehavior = stringValueOrNull(string(templateResp.CORSBehavior))
+	newState.reconcileUpdateResponse(templateResp)
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -1424,6 +1423,13 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 		UserPermissions:  userPerms,
 		GroupPermissions: groupPerms,
 	}
+}
+
+func (r *TemplateResourceModel) reconcileUpdateResponse(template codersdk.Template) {
+	r.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
+	r.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
+	r.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
+	r.AgentsAllowed = types.BoolValue(template.AgentsAllowed)
 }
 
 func (r *TemplateResourceModel) readResponse(ctx context.Context, template *codersdk.Template) diag.Diagnostics {

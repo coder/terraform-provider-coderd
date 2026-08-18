@@ -36,6 +36,28 @@ func mustVariablesToSet(vars []Variable) types.Set {
 	return s
 }
 
+func TestTemplateResourceReconcileUpdateResponse(t *testing.T) {
+	t.Parallel()
+
+	state := TemplateResourceModel{
+		MaxPortShareLevel:       types.StringValue("owner"),
+		CORSBehavior:            types.StringValue("simple"),
+		UseClassicParameterFlow: types.BoolValue(true),
+		AgentsAllowed:           types.BoolValue(true),
+	}
+	state.reconcileUpdateResponse(codersdk.Template{
+		MaxPortShareLevel:       codersdk.WorkspaceAgentPortShareLevelPublic,
+		CORSBehavior:            codersdk.CORSBehaviorPassthru,
+		UseClassicParameterFlow: false,
+		AgentsAllowed:           false,
+	})
+
+	require.Equal(t, "public", state.MaxPortShareLevel.ValueString())
+	require.Equal(t, "passthru", state.CORSBehavior.ValueString())
+	require.False(t, state.UseClassicParameterFlow.ValueBool())
+	require.False(t, state.AgentsAllowed.ValueBool())
+}
+
 func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
 	t.Parallel()
 
