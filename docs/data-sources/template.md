@@ -51,6 +51,7 @@ resource "coderd_template" "debian-main" {
 - `active_user_count` (Number) Number of active users using the template.
 - `active_version_id` (String) ID of the active version of the template.
 - `activity_bump_ms` (Number) Duration to bump the deadline of a workspace when it receives activity.
+- `agents_allowed` (Boolean) Whether Coder Agents can create workspaces from the template. Requires a Coder deployment running v2.37.0 or later.
 - `allow_user_autostart` (Boolean) Whether users can autostart workspaces created from the template.
 - `allow_user_autostop` (Boolean) Whether users can customize autostop behavior for workspaces created from the template.
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel jobs in workspaces created from the template.

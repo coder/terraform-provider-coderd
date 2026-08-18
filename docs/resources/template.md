@@ -66,6 +66,7 @@ resource "coderd_template" "ubuntu-main" {
 
 - `acl` (Attributes) (Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform. (see [below for nested schema](#nestedatt--acl))
 - `activity_bump_ms` (Number) The activity bump duration for all workspaces created from this template, in milliseconds. Defaults to one hour.
+- `agents_allowed` (Boolean) Whether Coder Agents can create workspaces from this template. Defaults to true. Requires a Coder deployment running v2.37.0 or later.
 - `allow_user_auto_start` (Boolean) (Enterprise) Whether users can auto-start workspaces created from this template. Defaults to true.
 - `allow_user_auto_stop` (Boolean) (Enterprise) Whether users can auto-stop workspaces created from this template. Defaults to true.
 - `allow_user_cancel_workspace_jobs` (Boolean) Whether users can cancel in-progress workspace jobs using this template. Defaults to true.

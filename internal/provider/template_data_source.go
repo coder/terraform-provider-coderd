@@ -57,6 +57,7 @@ type TemplateDataSourceModel struct {
 	TimeTilDormantAutoDeleteMillis types.Int64 `tfsdk:"time_til_dormant_autodelete_ms"`
 
 	RequireActiveVersion types.Bool   `tfsdk:"require_active_version"`
+	AgentsAllowed        types.Bool   `tfsdk:"agents_allowed"`
 	MaxPortShareLevel    types.String `tfsdk:"max_port_share_level"`
 	CORSBehavior         types.String `tfsdk:"cors_behavior"`
 
@@ -183,6 +184,10 @@ func (d *TemplateDataSource) Schema(ctx context.Context, req datasource.SchemaRe
 			},
 			"require_active_version": schema.BoolAttribute{
 				MarkdownDescription: "Whether workspaces created from the template must be up-to-date on the latest active version.",
+				Computed:            true,
+			},
+			"agents_allowed": schema.BoolAttribute{
+				MarkdownDescription: "Whether Coder Agents can create workspaces from the template. Requires a Coder deployment running v2.37.0 or later.",
 				Computed:            true,
 			},
 			"max_port_share_level": schema.StringAttribute{
@@ -334,6 +339,7 @@ func (d *TemplateDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.TimeTilDormantMillis = types.Int64Value(template.TimeTilDormantMillis)
 	data.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	data.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
+	data.AgentsAllowed = types.BoolValue(template.AgentsAllowed)
 	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 	data.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
 	data.CreatedByUserID = UUIDValue(template.CreatedByID)

@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/semver"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -260,7 +261,7 @@ func TestAccTemplateResource(t *testing.T) {
 						testAccCheckNumTemplateVersions(ctx, client, 4),
 					),
 				},
-				// Append version. Creates a fifth version
+				// Append version. Creates a fifth version.
 				{
 					Config: cfg3.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
@@ -274,7 +275,7 @@ func TestAccTemplateResource(t *testing.T) {
 						testAccCheckNumTemplateVersions(ctx, client, 5),
 					),
 				},
-				// Change active version
+				// Change the active version and omit agents_allowed.
 				{
 					Config: cfg4.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
@@ -748,6 +749,68 @@ func TestAccTemplateResource(t *testing.T) {
 				},
 			},
 		})
+	})
+}
+
+func TestAccTemplateResourceAgentsAllowed(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_agents_allowed_acc")
+	buildInfo, err := client.BuildInfo(ctx)
+	require.NoError(t, err, "fetch buildinfo")
+	if semver.Compare(buildInfo.CanonicalVersion(), "v2.37.0") < 0 {
+		t.Skipf("test requires Coder v2.37.0 or later, deployment is %s", buildInfo.CanonicalVersion())
+	}
+
+	directory := t.TempDir()
+	err = cp.Copy("../../integration/template-test/example-template", directory)
+	require.NoError(t, err)
+
+	cfgOmitted := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  ptr.Ref("agents-allowed-template"),
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			{
+				Directory: &directory,
+				Active:    ptr.Ref(true),
+			},
+		}),
+		ACL: testAccTemplateACLConfig{null: true},
+	}
+	cfgFalse := cfgOmitted
+	cfgFalse.AgentsAllowed = ptr.Ref(false)
+	cfgTrue := cfgFalse
+	cfgTrue.AgentsAllowed = ptr.Ref(true)
+	cfgUnmanaged := cfgTrue
+	cfgUnmanaged.AgentsAllowed = nil
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfgOmitted.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "true"),
+			},
+			{
+				Config: cfgFalse.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "false"),
+			},
+			{
+				Config: cfgTrue.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "true"),
+			},
+			{
+				Config:             cfgUnmanaged.String(t),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+		},
 	})
 }
 
@@ -1606,6 +1669,7 @@ type testAccTemplateResourceConfig struct {
 	MaxPortShareLevel            *string
 	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
+	AgentsAllowed                *bool
 
 	// Versions is a pointer so that a nil value renders `versions = null`
 	// (matching AutostartRequirement above), letting tests exercise
@@ -1757,6 +1821,7 @@ resource "coderd_template" "test" {
 	max_port_share_level              = {{orNull .MaxPortShareLevel}}
 	cors_behavior                     = {{orNull .CORSBehavior}}
 	use_classic_parameter_flow        = {{orNull .UseClassicParameterFlow}}
+	agents_allowed                    = {{orNull .AgentsAllowed}}
 
 	acl = ` + c.ACL.String(t) + `
 

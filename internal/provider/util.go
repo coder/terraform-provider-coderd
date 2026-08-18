@@ -144,6 +144,15 @@ func stringPtrOrNil(v types.String) *string {
 	return v.ValueStringPointer()
 }
 
+// boolPtrOrNil returns nil for null or unknown booleans.
+// ValueBoolPointer returns false for unknown, which can accidentally send a value.
+func boolPtrOrNil(v types.Bool) *bool {
+	if v.IsNull() || v.IsUnknown() {
+		return nil
+	}
+	return v.ValueBoolPointer()
+}
+
 // corsPtr returns a pointer to a CORSBehavior if the value is known and not empty,
 // otherwise returns nil (which will use the server default).
 func corsPtr(v types.String) *codersdk.CORSBehavior {

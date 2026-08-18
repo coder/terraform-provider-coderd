@@ -79,6 +79,7 @@ type TemplateResourceModel struct {
 	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
 	CORSBehavior                   types.String `tfsdk:"cors_behavior"`
 	UseClassicParameterFlow        types.Bool   `tfsdk:"use_classic_parameter_flow"`
+	AgentsAllowed                  types.Bool   `tfsdk:"agents_allowed"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
@@ -106,7 +107,8 @@ func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceMod
 		m.DeprecationMessage.Equal(other.DeprecationMessage) &&
 		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel) &&
 		m.CORSBehavior.Equal(other.CORSBehavior) &&
-		m.UseClassicParameterFlow.Equal(other.UseClassicParameterFlow)
+		m.UseClassicParameterFlow.Equal(other.UseClassicParameterFlow) &&
+		m.AgentsAllowed.Equal(other.AgentsAllowed)
 }
 
 func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
@@ -461,6 +463,14 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"use_classic_parameter_flow": schema.BoolAttribute{
 				MarkdownDescription: "If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.",
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"agents_allowed": schema.BoolAttribute{
+				MarkdownDescription: "Whether Coder Agents can create workspaces from this template. Defaults to true. Requires a Coder deployment running v2.37.0 or later.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.Bool{
@@ -1444,6 +1454,7 @@ func (r *TemplateResourceModel) readResponse(ctx context.Context, template *code
 	r.TimeTilDormantMillis = types.Int64Value(template.TimeTilDormantMillis)
 	r.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	r.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
+	r.AgentsAllowed = types.BoolValue(template.AgentsAllowed)
 	r.DeprecationMessage = types.StringValue(template.DeprecationMessage)
 	// TODO(ethanndickson): MaxPortShareLevel deliberately omitted, as it can't
 	// be set during a create request, and we call this during `Create`.
@@ -1492,6 +1503,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
 		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		// If we're managing ACL, we want to delete the everyone group.
 		DisableEveryoneGroupAccess: ptr.Ref(!r.ACL.IsNull()),
 	}
@@ -1537,6 +1549,7 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
 		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}
