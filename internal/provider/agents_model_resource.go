@@ -141,7 +141,7 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 			// JSON, not typed attributes: ChatModelCallConfig is large, evolving,
 			// and its provider_options is a tagged union Terraform can't express.
 			"model_config": schema.StringAttribute{
-				MarkdownDescription: "Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, `cost`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
+				MarkdownDescription: "Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.",
 				CustomType:          agentsModelConfigType{},
 				Optional:            true,
 				Validators: []validator.String{

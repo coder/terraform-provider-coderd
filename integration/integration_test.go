@@ -220,12 +220,6 @@ func TestIntegration(t *testing.T) {
 				want := map[string]struct{ provider, config string }{
 					"claude-opus-4-8": {"anthropic", `{
 						"max_output_tokens": 128000,
-						"cost": {
-							"input_price_per_million_tokens": "5",
-							"output_price_per_million_tokens": "25",
-							"cache_read_price_per_million_tokens": "0.5",
-							"cache_write_price_per_million_tokens": "6.25"
-						},
 						"reasoning_effort": {
 							"default": "high",
 								"max": "high"
@@ -237,10 +231,6 @@ func TestIntegration(t *testing.T) {
 						}
 						}`},
 					"claude-sonnet-4-6": {"anthropic", `{
-						"cost": {
-								"input_price_per_million_tokens": "3",
-							"output_price_per_million_tokens": "15"
-							},
 							"reasoning_effort": {
 								"default": "max",
 								"max": "max"
@@ -256,11 +246,6 @@ func TestIntegration(t *testing.T) {
 							}
 						}`},
 					"gpt-5.5": {"openai", `{
-							"cost": {
-								"input_price_per_million_tokens": "2.5",
-								"output_price_per_million_tokens": "15",
-								"cache_read_price_per_million_tokens": "0.25"
-							},
 							"reasoning_effort": {
 								"default": "xhigh",
 							"max": "xhigh"

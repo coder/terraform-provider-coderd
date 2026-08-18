@@ -40,7 +40,7 @@ func TestAgentsModelCreateRequest(t *testing.T) {
 		Enabled:              types.BoolValue(true),
 		ContextLimit:         types.Int64Value(200000),
 		CompressionThreshold: types.Int64Value(70),
-		ModelConfig:          newAgentsModelConfigValue(`{"max_output_tokens":8192,"temperature":0.7,"cost":{"input_price_per_million_tokens":"3"}}`),
+		ModelConfig:          newAgentsModelConfigValue(`{"max_output_tokens":8192,"temperature":0.7}`),
 	}
 
 	var diags diag.Diagnostics
@@ -59,9 +59,6 @@ func TestAgentsModelCreateRequest(t *testing.T) {
 	require.NotNil(t, req.ModelConfig)
 	require.NotNil(t, req.ModelConfig.MaxOutputTokens)
 	require.EqualValues(t, 8192, *req.ModelConfig.MaxOutputTokens)
-	require.NotNil(t, req.ModelConfig.Cost)
-	require.NotNil(t, req.ModelConfig.Cost.InputPricePerMillionTokens)
-	require.Equal(t, "3", req.ModelConfig.Cost.InputPricePerMillionTokens.String())
 }
 
 func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
@@ -127,7 +124,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	// as a float64, so if the key-sorting step ever decoded numbers into float64
 	// (instead of json.Number) it would corrupt this to ...808 and fail the
 	// exact-bytes assertion below. This is the numeric-no-regression guard.
-	remote := decodeAgentsModelConfigForTest(t, `{"max_output_tokens":9223372036854775807,"cost":{"input_price_per_million_tokens":"3"}}`)
+	remote := decodeAgentsModelConfigForTest(t, `{"top_p":0.9,"max_output_tokens":9223372036854775807,"top_k":40}`)
 
 	var diags diag.Diagnostics
 	state := stateFromModelConfig(codersdk.ChatModelConfig{
@@ -154,13 +151,12 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	require.Equal(t, createdAt.Unix(), state.CreatedAt.ValueInt64())
 	require.Equal(t, updatedAt.Unix(), state.UpdatedAt.ValueInt64())
 
-	// State must store model_config with alphabetically-sorted keys (cost before
-	// max_output_tokens, recursively) so it byte-matches the user's jsonencode
-	// config; the SDK struct order would emit max_output_tokens first. Without
-	// the byte match, every post-import plan spuriously flips updated_at to
-	// "known after apply".
+	// State must store model_config with alphabetically-sorted keys so it
+	// byte-matches the user's jsonencode config. The SDK struct order would emit
+	// top_p before top_k. Without the byte match, every post-import plan
+	// spuriously flips updated_at to "known after apply".
 	require.Equal(t,
-		`{"cost":{"input_price_per_million_tokens":"3"},"max_output_tokens":9223372036854775807}`,
+		`{"max_output_tokens":9223372036854775807,"top_k":40,"top_p":0.9}`,
 		state.ModelConfig.ValueString(),
 		"state stores model_config with sorted keys and exact number tokens to match jsonencode byte-for-byte")
 }
@@ -176,20 +172,14 @@ func TestAgentsModelConfigSemanticEquals(t *testing.T) {
 	}{
 		{
 			name:  "decimal trailing zeros",
-			prior: `{"cost":{"input_price_per_million_tokens":"3"}}`,
-			next:  `{"cost":{"input_price_per_million_tokens":"3.00"}}`,
+			prior: `{"temperature":0.7}`,
+			next:  `{"temperature":0.70}`,
 			equal: true,
 		},
 		{
 			name:  "whitespace and key order",
 			prior: `{"max_output_tokens":8192,"temperature":0.7}`,
 			next:  "{\n  \"temperature\": 0.7,\n  \"max_output_tokens\": 8192\n}",
-			equal: true,
-		},
-		{
-			name:  "legacy top-level pricing keys fold into cost",
-			prior: `{"cost":{"input_price_per_million_tokens":"3"}}`,
-			next:  `{"input_price_per_million_tokens":"3"}`,
 			equal: true,
 		},
 		{
@@ -547,7 +537,7 @@ func TestAccAgentsModelResource(t *testing.T) {
 }
 
 // TestAccAgentsModelResourceModelConfigNoDrift proves the custom type prevents a
-// perpetual diff when Coder re-serializes the value (e.g. "3.00" comes back "3").
+// perpetual diff when Coder re-serializes a decimal value.
 func TestAccAgentsModelResourceModelConfigNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -570,10 +560,6 @@ resource "coderd_agents_model" "sonnet" {
 
   model_config = jsonencode({
     temperature = 0.70
-    cost = {
-      input_price_per_million_tokens  = "3.00"
-      output_price_per_million_tokens = "15.00"
-    }
   })
 }
 `, client.URL.String(), client.SessionToken(), aiProvider.ID.String())
@@ -748,10 +734,6 @@ resource "coderd_agents_model" "sonnet" {
   model_config = jsonencode({
     max_output_tokens = {{.MaxOutputTokens}}
     temperature       = {{.Temperature}}
-    cost = {
-      input_price_per_million_tokens  = "3"
-      output_price_per_million_tokens = "15"
-    }
   })
 }
 `
