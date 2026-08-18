@@ -6,7 +6,7 @@ description: |-
   ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
   The deployment-wide chat system prompt for Coder Agents (Settings → Instructions in the dashboard).
   This is a deployment-wide singleton. Declare it once; duplicate resources silently overwrite each other.
-  Coder sanitizes the stored prompt (strips invisible Unicode characters, normalizes line endings, collapses runs of blank lines, and trims surrounding whitespace), and this resource compares values the same way, so a trailing newline from file(...) does not cause drift.
+  Coder sanitizes the stored prompt (strips invisible Unicode characters, normalizes line endings, collapses runs of blank lines, and trims surrounding whitespace), and this resource compares values the same way, so a trailing newline from file(...) does not cause drift after apply. On the first plan after an import, a configured value that differs from the live one only by sanitization shows a single in-place normalization update and then converges; use trimspace(file(...)) to avoid even that.
   ~> Warning
   If a system prompt was configured out of band, terraform import this resource before the first apply. Otherwise Terraform overwrites the live value; a plan-time warning is emitted when this is about to happen.
   ~> Warning
@@ -23,7 +23,7 @@ The deployment-wide chat system prompt for Coder Agents (`Settings → Instructi
 
 This is a deployment-wide singleton. Declare it once; duplicate resources silently overwrite each other.
 
-Coder sanitizes the stored prompt (strips invisible Unicode characters, normalizes line endings, collapses runs of blank lines, and trims surrounding whitespace), and this resource compares values the same way, so a trailing newline from `file(...)` does not cause drift.
+Coder sanitizes the stored prompt (strips invisible Unicode characters, normalizes line endings, collapses runs of blank lines, and trims surrounding whitespace), and this resource compares values the same way, so a trailing newline from `file(...)` does not cause drift after apply. On the first plan after an import, a configured value that differs from the live one only by sanitization shows a single in-place normalization update and then converges; use `trimspace(file(...))` to avoid even that.
 
 ~> **Warning**
 If a system prompt was configured out of band, `terraform import` this resource before the first apply. Otherwise Terraform overwrites the live value; a plan-time warning is emitted when this is about to happen.

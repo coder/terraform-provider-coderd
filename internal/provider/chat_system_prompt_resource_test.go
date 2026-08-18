@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -189,26 +193,33 @@ func TestChatSystemPromptSemanticEquals(t *testing.T) {
 func TestChatSystemPromptLengthValidator(t *testing.T) {
 	t.Parallel()
 
-	f := newFakeChatCoderd(t)
+	ctx := t.Context()
 
 	// The sanitized form is what the server measures, so padding that
 	// sanitizes away must not trip the validator.
 	okPrompt := strings.Repeat("a", maxChatSystemPromptBytes) + "\n\n\n"
 	tooLong := strings.Repeat("a", maxChatSystemPromptBytes+1)
 
-	resource.Test(t, resource.TestCase{
-		IsUnitTest:               true,
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config:      chatSystemPromptConfig(f.URL, tooLong, nil),
-				ExpectError: regexp.MustCompile("System Prompt Too Long"),
-			},
-			{
-				Config: chatSystemPromptConfig(f.URL, okPrompt, nil),
-			},
-		},
-	})
+	for _, tc := range []struct {
+		name    string
+		value   basetypes.StringValue
+		wantErr bool
+	}{
+		{"at limit after sanitization", basetypes.NewStringValue(okPrompt), false},
+		{"over limit", basetypes.NewStringValue(tooLong), true},
+		{"null", basetypes.NewStringNull(), false},
+		{"unknown", basetypes.NewStringUnknown(), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp := &validator.StringResponse{}
+			chatSystemPromptLengthValidator{}.ValidateString(ctx, validator.StringRequest{
+				Path:        pathSystemPrompt,
+				ConfigValue: tc.value,
+			}, resp)
+			require.Equal(t, tc.wantErr, resp.Diagnostics.HasError())
+		})
+	}
 }
 
 // TestAccChatSystemPromptResource exercises the full lifecycle against the
@@ -216,12 +227,16 @@ func TestChatSystemPromptLengthValidator(t *testing.T) {
 // update, and destroy resetting the deployment defaults.
 func TestAccChatSystemPromptResource(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	f := newFakeChatCoderd(t)
 	includeFalse := false
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with a trailing newline, the `file()` everyday case. The
@@ -272,6 +287,9 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 // issuing any PUT.
 func TestAccChatSystemPromptImport(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	f := newFakeChatCoderd(t)
 	f.mu.Lock()
@@ -280,6 +298,7 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -315,6 +334,9 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 // mapping: an old deployment produces one actionable error.
 func TestAccChatSystemPromptUnsupportedVersion(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	f := newFakeChatCoderd(t)
 	f.mu.Lock()
@@ -324,12 +346,150 @@ func TestAccChatSystemPromptUnsupportedVersion(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: chatSystemPromptConfig(f.URL, "prompt", nil),
 				// Terraform wraps error text, so match the summary line only.
 				ExpectError: regexp.MustCompile("Unsupported Coder Version"),
+			},
+		},
+	})
+}
+
+// TestAccChatSystemPromptRealCoderNoDrift runs the lifecycle against a real
+// Coder instance. This is the live proof that the local sanitizer port
+// matches the server's: the configured prompt deliberately carries a CRLF, a
+// zero-width space, a run of blank lines, and a trailing newline, so if
+// coderd's sanitization ever diverges from sanitizePromptText, the re-plan
+// stops being empty.
+func TestAccChatSystemPromptRealCoderNoDrift(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "chat_system_prompt_acc")
+	experimental := codersdk.NewExperimentalClient(client)
+
+	messyPrompt := "You are a helpful agent.\r\nBe concise.\u200b\n\n\n\nAlways cite sources.\n"
+
+	cfg := fmt.Sprintf(`
+provider "coderd" {
+  url   = %[1]q
+  token = %[2]q
+}
+
+resource "coderd_chat_system_prompt" "test" {
+  system_prompt = %[3]q
+}
+`, client.URL.String(), client.SessionToken(), messyPrompt)
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(
+						chatSystemPromptResourceAddr,
+						tfjsonpath.New("include_default_system_prompt"),
+						knownvalue.Bool(true),
+					),
+				},
+			},
+			// Re-planning the identical config must yield an empty plan: the
+			// live value is whatever the real server sanitized and stored.
+			{
+				Config:   cfg,
+				PlanOnly: true,
+			},
+		},
+	})
+
+	// The server must have stored the sanitized form, and the test-framework
+	// destroy after the last step must have reset the deployment defaults.
+	live, err := experimental.GetChatSystemPrompt(ctx)
+	require.NoError(t, err)
+	require.Empty(t, live.SystemPrompt)
+	require.True(t, live.IncludeDefaultSystemPrompt)
+}
+
+// TestAccChatSystemPromptRealCoderImportNoDrift proves that adopting a prompt
+// configured out of band (via the API, as the dashboard would) and re-planning
+// the matching config is a clean, empty plan.
+//
+// The empty plan requires the config to byte-match the stored (sanitized)
+// value: semantic equality preserves prior state on Read and Apply, but a
+// Required attribute's planned value must equal config, so a config that
+// differs only by sanitization shows one in-place normalization update after
+// import and then converges. Both behaviors are pinned here.
+func TestAccChatSystemPromptRealCoderImportNoDrift(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "chat_system_prompt_import_acc")
+	experimental := codersdk.NewExperimentalClient(client)
+
+	// Configured out of band, so import (not a prior apply) seeds state.
+	includeDefault := true
+	require.NoError(t, experimental.UpdateChatSystemPrompt(ctx, codersdk.UpdateChatSystemPromptRequest{
+		SystemPrompt:               "configured in the dashboard",
+		IncludeDefaultSystemPrompt: &includeDefault,
+	}))
+
+	providerBlock := fmt.Sprintf(`
+provider "coderd" {
+  url   = %[1]q
+  token = %[2]q
+}
+`, client.URL.String(), client.SessionToken())
+
+	// Byte-matches the stored value, like trimspace(file(...)) would.
+	cfgExact := providerBlock + `
+resource "coderd_chat_system_prompt" "test" {
+  system_prompt = "configured in the dashboard"
+}
+`
+	// Differs only by a trailing newline, like a bare file(...) would.
+	cfgTrailingNewline := providerBlock + `
+resource "coderd_chat_system_prompt" "test" {
+  system_prompt = "configured in the dashboard\n"
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             cfgExact,
+				ResourceName:       chatSystemPromptResourceAddr,
+				ImportState:        true,
+				ImportStatePersist: true,
+				ImportStateId:      "chat_system_prompt",
+			},
+			// A config that byte-matches the stored value plans clean.
+			{
+				Config:   cfgExact,
+				PlanOnly: true,
+			},
+			// A config that differs only by sanitization applies one
+			// normalization update...
+			{
+				Config: cfgTrailingNewline,
+			},
+			// ...and then converges: refreshes keep the configured value via
+			// semantic equality, so the re-plan is empty.
+			{
+				Config:   cfgTrailingNewline,
+				PlanOnly: true,
 			},
 		},
 	})
