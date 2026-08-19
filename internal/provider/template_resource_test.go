@@ -41,7 +41,7 @@ func mustVariablesToSet(vars []Variable) types.Set {
 func TestTemplateResourceReconcileVersionedMetadata(t *testing.T) {
 	t.Parallel()
 
-	t.Run("values", func(t *testing.T) {
+	t.Run("overwrites all versioned fields", func(t *testing.T) {
 		t.Parallel()
 
 		state := TemplateResourceModel{
@@ -77,14 +77,36 @@ func TestTemplateResourceBoolRequests(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name  string
-		value types.Bool
-		want  *bool
+		name                    string
+		useClassicParameterFlow types.Bool
+		agentsAllowed           types.Bool
+		wantClassic             *bool
+		wantAgents              *bool
 	}{
-		{name: "null", value: types.BoolNull()},
-		{name: "unknown", value: types.BoolUnknown()},
-		{name: "false", value: types.BoolValue(false), want: ptr.Ref(false)},
-		{name: "true", value: types.BoolValue(true), want: ptr.Ref(true)},
+		{
+			name:                    "unknown and true",
+			useClassicParameterFlow: types.BoolUnknown(),
+			agentsAllowed:           types.BoolValue(true),
+			wantAgents:              ptr.Ref(true),
+		},
+		{
+			name:                    "true and unknown",
+			useClassicParameterFlow: types.BoolValue(true),
+			agentsAllowed:           types.BoolUnknown(),
+			wantClassic:             ptr.Ref(true),
+		},
+		{
+			name:                    "null and false",
+			useClassicParameterFlow: types.BoolNull(),
+			agentsAllowed:           types.BoolValue(false),
+			wantAgents:              ptr.Ref(false),
+		},
+		{
+			name:                    "false and null",
+			useClassicParameterFlow: types.BoolValue(false),
+			agentsAllowed:           types.BoolNull(),
+			wantClassic:             ptr.Ref(false),
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,22 +118,22 @@ func TestTemplateResourceBoolRequests(t *testing.T) {
 					"weeks":        types.Int64Value(1),
 				}),
 				AutostartPermittedDaysOfWeek: types.SetValueMust(types.StringType, []attr.Value{}),
-				UseClassicParameterFlow:      tc.value,
-				AgentsAllowed:                tc.value,
+				UseClassicParameterFlow:      tc.useClassicParameterFlow,
+				AgentsAllowed:                tc.agentsAllowed,
 				ACL:                          types.ObjectNull(aclTypeAttr),
 			}
 
 			var updateDiags diag.Diagnostics
 			updateReq := model.toUpdateRequest(t.Context(), &updateDiags)
 			require.False(t, updateDiags.HasError(), updateDiags.Errors())
-			require.Equal(t, tc.want, updateReq.UseClassicParameterFlow)
-			require.Equal(t, tc.want, updateReq.AgentsAllowed)
+			require.Equal(t, tc.wantClassic, updateReq.UseClassicParameterFlow)
+			require.Equal(t, tc.wantAgents, updateReq.AgentsAllowed)
 
 			createResp := frameworkresource.CreateResponse{}
 			createReq := model.toCreateRequest(t.Context(), &createResp, uuid.New())
 			require.False(t, createResp.Diagnostics.HasError(), createResp.Diagnostics.Errors())
-			require.Equal(t, tc.want, createReq.UseClassicParameterFlow)
-			require.Equal(t, tc.want, createReq.AgentsAllowed)
+			require.Equal(t, tc.wantClassic, createReq.UseClassicParameterFlow)
+			require.Equal(t, tc.wantAgents, createReq.AgentsAllowed)
 		})
 	}
 }
@@ -341,7 +363,7 @@ func TestAccTemplateResource(t *testing.T) {
 						testAccCheckNumTemplateVersions(ctx, client, 4),
 					),
 				},
-				// Append version. Creates a fifth version.
+				// Append version. Creates a fifth version
 				{
 					Config: cfg3.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
@@ -355,7 +377,7 @@ func TestAccTemplateResource(t *testing.T) {
 						testAccCheckNumTemplateVersions(ctx, client, 5),
 					),
 				},
-				// Change the active version.
+				// Change active version
 				{
 					Config: cfg4.String(t),
 					Check: resource.ComposeAggregateTestCheckFunc(
