@@ -702,6 +702,14 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.UseClassicParameterFlow = types.BoolValue(ucpfResp.UseClassicParameterFlow)
 	}
 
+	// Fetch the authoritative values after the compatibility updates.
+	authoritativeTemplate, err := client.Template(ctx, data.ID.ValueUUID())
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
+		return
+	}
+	data.reconcileVersionedMetadata(&authoritativeTemplate)
+
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -740,9 +748,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.Append(diag...)
 		return
 	}
-	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
-	data.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
-	data.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
+	data.reconcileVersionedMetadata(&template)
 
 	if !data.ACL.IsNull() {
 		tflog.Info(ctx, "reading template ACL")
@@ -1427,6 +1433,9 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	}
 }
 
+// reconcileVersionedMetadata overwrites metadata fields that older Coder
+// servers can omit from mutation responses. Call it with an authoritative
+// template response before writing state.
 func (r *TemplateResourceModel) reconcileVersionedMetadata(template *codersdk.Template) {
 	r.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 	r.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
@@ -1462,7 +1471,6 @@ func (r *TemplateResourceModel) readResponse(ctx context.Context, template *code
 	r.TimeTilDormantMillis = types.Int64Value(template.TimeTilDormantMillis)
 	r.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	r.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
-	r.AgentsAllowed = types.BoolValue(template.AgentsAllowed)
 	r.DeprecationMessage = types.StringValue(template.DeprecationMessage)
 	// TODO(ethanndickson): MaxPortShareLevel deliberately omitted, as it can't
 	// be set during a create request, and we call this during `Create`.

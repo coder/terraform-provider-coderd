@@ -84,25 +84,25 @@ func TestTemplateResourceBoolRequests(t *testing.T) {
 		wantAgents              *bool
 	}{
 		{
-			name:                    "unknown and true",
+			name:                    "classic unknown, agents true",
 			useClassicParameterFlow: types.BoolUnknown(),
 			agentsAllowed:           types.BoolValue(true),
 			wantAgents:              ptr.Ref(true),
 		},
 		{
-			name:                    "true and unknown",
+			name:                    "classic true, agents unknown",
 			useClassicParameterFlow: types.BoolValue(true),
 			agentsAllowed:           types.BoolUnknown(),
 			wantClassic:             ptr.Ref(true),
 		},
 		{
-			name:                    "null and false",
+			name:                    "classic null, agents false",
 			useClassicParameterFlow: types.BoolNull(),
 			agentsAllowed:           types.BoolValue(false),
 			wantAgents:              ptr.Ref(false),
 		},
 		{
-			name:                    "false and null",
+			name:                    "classic false, agents null",
 			useClassicParameterFlow: types.BoolValue(false),
 			agentsAllowed:           types.BoolNull(),
 			wantClassic:             ptr.Ref(false),
