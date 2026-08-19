@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // useStateForUnknownUnlessChanged copies prior state into an unknown Computed value,
@@ -58,4 +59,36 @@ func (m useStateForUnknownUnlessChangedModifier) PlanModifyString(ctx context.Co
 	}
 
 	resp.PlanValue = req.StateValue
+}
+
+func unknownIfChanged(triggerAttr string) planmodifier.String {
+	return unknownIfChangedModifier{triggerAttr: triggerAttr}
+}
+
+type unknownIfChangedModifier struct {
+	triggerAttr string
+}
+
+func (m unknownIfChangedModifier) Description(_ context.Context) string {
+	return fmt.Sprintf("Marks the value unknown when %q changes and the value is not configured.", m.triggerAttr)
+}
+
+func (m unknownIfChangedModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m unknownIfChangedModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
+		return
+	}
+
+	triggerPath := path.Root(m.triggerAttr)
+	var planTrigger, stateTrigger attr.Value
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, triggerPath, &planTrigger)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, triggerPath, &stateTrigger)...)
+	if resp.Diagnostics.HasError() || planTrigger.Equal(stateTrigger) {
+		return
+	}
+
+	resp.PlanValue = types.StringUnknown()
 }

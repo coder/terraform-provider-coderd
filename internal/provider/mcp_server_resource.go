@@ -164,6 +164,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset to use OAuth discovery and dynamic client registration. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					unknownIfChanged("auth_type"),
+				},
 			},
 			"oauth2_client_secret_wo": schema.StringAttribute{
 				MarkdownDescription: "OAuth2 client secret. Bump `oauth2_client_secret_wo_version` to rotate it.",
@@ -182,16 +185,25 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "OAuth2 authorization URL. It can be populated by server-side discovery.",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					unknownIfChanged("auth_type"),
+				},
 			},
 			"oauth2_token_url": schema.StringAttribute{
 				MarkdownDescription: "OAuth2 token URL. It can be populated by server-side discovery. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					unknownIfChanged("auth_type"),
+				},
 			},
 			"oauth2_revocation_url": schema.StringAttribute{
 				MarkdownDescription: "OAuth2 token revocation URL. It can be populated by server-side discovery. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					unknownIfChanged("auth_type"),
+				},
 			},
 			"oauth2_scopes": schema.StringAttribute{
 				MarkdownDescription: "Space-separated OAuth2 scopes.",
@@ -203,6 +215,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "HTTP header used for API key authentication. The server may populate a default.",
 				Optional:            true,
 				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					unknownIfChanged("auth_type"),
+				},
 			},
 			"api_key_value_wo": schema.StringAttribute{
 				MarkdownDescription: "API key value. Bump `api_key_value_wo_version` to rotate it.",
@@ -508,29 +523,40 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 		AllowInPlanMode:     boolPointer(m.AllowInPlanMode.ValueBool()),
 		ForwardCoderHeaders: boolPointer(m.ForwardCoderHeaders.ValueBool()),
 	}
+	authTypeChanged := !m.AuthType.Equal(state.AuthType)
+	// The server clears other auth types' secrets when auth_type changes, so
+	// resend the configured secret even when its Terraform version is unchanged.
+	oauth2Secret := writeOnlyString(config.OAuth2ClientSecretWO)
 	if writeOnlyVersionChanged(m.OAuth2ClientSecretWOVersion, state.OAuth2ClientSecretWOVersion) {
-		secret := writeOnlyString(config.OAuth2ClientSecretWO)
-		if secret == "" {
+		if oauth2Secret == "" {
 			diags.AddAttributeError(path.Root("oauth2_client_secret_wo"), "Missing OAuth2 Client Secret", "`oauth2_client_secret_wo` must be configured when `oauth2_client_secret_wo_version` changes.")
 		} else {
-			req.OAuth2ClientSecret = &secret
+			req.OAuth2ClientSecret = &oauth2Secret
 		}
+	} else if authTypeChanged && oauth2Secret != "" {
+		req.OAuth2ClientSecret = &oauth2Secret
 	}
+
+	apiKeyValue := writeOnlyString(config.APIKeyValueWO)
 	if writeOnlyVersionChanged(m.APIKeyValueWOVersion, state.APIKeyValueWOVersion) {
-		secret := writeOnlyString(config.APIKeyValueWO)
-		if secret == "" {
+		if apiKeyValue == "" {
 			diags.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when `api_key_value_wo_version` changes.")
 		} else {
-			req.APIKeyValue = &secret
+			req.APIKeyValue = &apiKeyValue
 		}
+	} else if authTypeChanged && apiKeyValue != "" {
+		req.APIKeyValue = &apiKeyValue
 	}
+
+	customHeaders := writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)
 	if writeOnlyVersionChanged(m.CustomHeadersWOVersion, state.CustomHeadersWOVersion) {
-		headers := writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)
-		if len(headers) == 0 {
+		if len(customHeaders) == 0 {
 			diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`custom_headers_wo` must be configured when `custom_headers_wo_version` changes.")
 		} else {
-			req.CustomHeaders = &headers
+			req.CustomHeaders = &customHeaders
 		}
+	} else if authTypeChanged && len(customHeaders) > 0 {
+		req.CustomHeaders = &customHeaders
 	}
 	return req
 }

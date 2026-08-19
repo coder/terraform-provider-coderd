@@ -78,6 +78,9 @@ func TestAccMCPServerResource(t *testing.T) {
 	rotated.APIKeyValue = "secret-two"
 	rotated.APIKeyValueVersion = 2
 
+	noAuth := renamed
+	noAuth.APIKeyValueVersion = 2
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -135,14 +138,31 @@ func TestAccMCPServerResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", apiKey.APIKeyHeader),
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "1"),
 					resource.TestCheckNoResourceAttr("coderd_mcp_server.test", "api_key_value_wo"),
-					checkMCPServerHasAPIKey(ctx, t, client),
+					checkMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
 			{
 				Config: rotated.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "2"),
-					checkMCPServerHasAPIKey(ctx, t, client),
+					checkMCPServerAPIKey(ctx, t, client, true),
+				),
+			},
+			{
+				Config: noAuth.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "none"),
+					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", ""),
+					checkMCPServerAPIKey(ctx, t, client, false),
+				),
+			},
+			{
+				Config: rotated.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
+					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", rotated.APIKeyHeader),
+					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "2"),
+					checkMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
 			{
@@ -220,7 +240,9 @@ resource "coderd_mcp_server" "test" {
   api_key_header = "{{.APIKeyHeader}}"
 {{- end }}
 {{- if .APIKeyValue }}
-  api_key_value_wo         = "{{.APIKeyValue}}"
+  api_key_value_wo = "{{.APIKeyValue}}"
+{{- end }}
+{{- if .APIKeyValueVersion }}
   api_key_value_wo_version = {{.APIKeyValueVersion}}
 {{- end }}
 }
@@ -230,7 +252,7 @@ resource "coderd_mcp_server" "test" {
 	return out.String()
 }
 
-func checkMCPServerHasAPIKey(ctx context.Context, t *testing.T, client *codersdk.Client) resource.TestCheckFunc {
+func checkMCPServerAPIKey(ctx context.Context, t *testing.T, client *codersdk.Client, want bool) resource.TestCheckFunc {
 	t.Helper()
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources["coderd_mcp_server.test"]
@@ -249,8 +271,8 @@ func checkMCPServerHasAPIKey(ctx context.Context, t *testing.T, client *codersdk
 		if err != nil {
 			return err
 		}
-		if !server.HasAPIKey {
-			return fmt.Errorf("MCP server %s does not have an API key", server.ID)
+		if server.HasAPIKey != want {
+			return fmt.Errorf("MCP server %s HasAPIKey = %t, want %t", server.ID, server.HasAPIKey, want)
 		}
 		return nil
 	}
