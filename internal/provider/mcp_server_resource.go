@@ -128,6 +128,32 @@ func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyP
 	// clears the previous ones. Reject such plans now instead of failing at
 	// apply time; unknown values are deferred to the apply-time checks.
 	switch plan.AuthType.ValueString() {
+	case "oauth2":
+		if !hasState {
+			// Creation with the manual trio omitted uses server-side
+			// discovery, and ValidateConfig already rejects partial sets.
+			return
+		}
+		// Discovery only runs at creation, so a transition into oauth2 on an
+		// existing server must supply the full manual configuration.
+		fields := []struct {
+			path  path.Path
+			value types.String
+		}{
+			{path.Root("oauth2_client_id"), config.OAuth2ClientID},
+			{path.Root("oauth2_auth_url"), config.OAuth2AuthURL},
+			{path.Root("oauth2_token_url"), config.OAuth2TokenURL},
+		}
+		for _, field := range fields {
+			if field.value.IsUnknown() {
+				return
+			}
+		}
+		for _, field := range fields {
+			if field.value.IsNull() {
+				resp.Diagnostics.AddAttributeError(field.path, "Missing OAuth2 Configuration", "Changing `auth_type` to \"oauth2\" on an existing server requires `oauth2_client_id`, `oauth2_auth_url`, and `oauth2_token_url`, because OAuth2 discovery only runs at creation. To use discovery instead, replace the resource.")
+			}
+		}
 	case "api_key":
 		if config.APIKeyHeader.IsNull() || (!config.APIKeyHeader.IsUnknown() && config.APIKeyHeader.ValueString() == "") {
 			resp.Diagnostics.AddAttributeError(path.Root("api_key_header"), "Missing API Key Header", "`api_key_header` must be configured when creating a server with `auth_type = \"api_key\"` or changing its auth type to it.")

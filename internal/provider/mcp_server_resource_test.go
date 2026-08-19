@@ -357,6 +357,9 @@ func TestAccMCPServerResource(t *testing.T) {
 	transitionMissingHeader.APIKeyValue = "secret-three"
 	transitionMissingHeader.APIKeyValueVersion = 3
 
+	transitionOAuth2Discovery := noAuth
+	transitionOAuth2Discovery.AuthType = "oauth2"
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -447,6 +450,10 @@ func TestAccMCPServerResource(t *testing.T) {
 			{
 				Config:      transitionMissingHeader.String(t),
 				ExpectError: regexp.MustCompile("Missing API Key Header"),
+			},
+			{
+				Config:      transitionOAuth2Discovery.String(t),
+				ExpectError: regexp.MustCompile("Missing OAuth2 Configuration"),
 			},
 			{
 				Config: rotated.String(t),
