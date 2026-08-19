@@ -165,7 +165,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					unknownIfChanged("auth_type"),
+					unknownWhenAuthTypeChanges(),
 				},
 			},
 			"oauth2_client_secret_wo": schema.StringAttribute{
@@ -186,7 +186,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					unknownIfChanged("auth_type"),
+					unknownWhenAuthTypeChanges(),
 				},
 			},
 			"oauth2_token_url": schema.StringAttribute{
@@ -194,7 +194,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					unknownIfChanged("auth_type"),
+					unknownWhenAuthTypeChanges(),
 				},
 			},
 			"oauth2_revocation_url": schema.StringAttribute{
@@ -202,7 +202,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					unknownIfChanged("auth_type"),
+					unknownWhenAuthTypeChanges(),
 				},
 			},
 			"oauth2_scopes": schema.StringAttribute{
@@ -216,7 +216,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					unknownIfChanged("auth_type"),
+					unknownWhenAuthTypeChanges(),
 				},
 			},
 			"api_key_value_wo": schema.StringAttribute{
@@ -383,7 +383,7 @@ func (r *MCPServerResource) Create(ctx context.Context, req resource.CreateReque
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create MCP server, got error: %s", err))
 		return
 	}
-	state := plan.stateFromServer(ctx, server, &resp.Diagnostics)
+	state := plan.stateFromServer(server)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -406,7 +406,7 @@ func (r *MCPServerResource) Read(ctx context.Context, req resource.ReadRequest, 
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read MCP server, got error: %s", err))
 		return
 	}
-	refreshed := state.stateFromServer(ctx, server, &resp.Diagnostics)
+	refreshed := state.stateFromServer(server)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -431,7 +431,7 @@ func (r *MCPServerResource) Update(ctx context.Context, req resource.UpdateReque
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update MCP server, got error: %s", err))
 		return
 	}
-	updated := plan.stateFromServer(ctx, server, &resp.Diagnostics)
+	updated := plan.stateFromServer(server)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -561,7 +561,7 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 	return req
 }
 
-func (m MCPServerResourceModel) stateFromServer(ctx context.Context, server codersdk.MCPServerConfig, diags *diag.Diagnostics) MCPServerResourceModel {
+func (m MCPServerResourceModel) stateFromServer(server codersdk.MCPServerConfig) MCPServerResourceModel {
 	return MCPServerResourceModel{
 		ID:                          UUIDValue(server.ID),
 		OrganizationID:              UUIDValue(server.OrganizationID),

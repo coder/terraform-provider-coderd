@@ -61,8 +61,8 @@ func (m useStateForUnknownUnlessChangedModifier) PlanModifyString(ctx context.Co
 	resp.PlanValue = req.StateValue
 }
 
-func unknownIfChanged(triggerAttr string) planmodifier.String {
-	return unknownIfChangedModifier{triggerAttr: triggerAttr}
+func unknownWhenAuthTypeChanges() planmodifier.String {
+	return unknownIfChangedModifier{triggerAttr: "auth_type"}
 }
 
 type unknownIfChangedModifier struct {
