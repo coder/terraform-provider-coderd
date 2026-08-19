@@ -83,6 +83,45 @@ func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyP
 		"Experimental Resource",
 		"coderd_mcp_server is experimental. Changes are expected, and it is not recommended for production use.",
 	)
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan, config MCPServerResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() || plan.AuthType.IsUnknown() {
+		return
+	}
+	entering := true
+	if !req.State.Raw.IsNull() {
+		var state MCPServerResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		entering = !plan.AuthType.Equal(state.AuthType)
+	}
+	if !entering {
+		return
+	}
+
+	// Creating a server with an auth type, or transitioning an existing one
+	// into it, requires that type's credentials because the server rejects or
+	// clears the previous ones. Reject such plans now instead of failing at
+	// apply time; unknown values are deferred to the apply-time checks.
+	switch plan.AuthType.ValueString() {
+	case "api_key":
+		if config.APIKeyHeader.IsNull() || (!config.APIKeyHeader.IsUnknown() && config.APIKeyHeader.ValueString() == "") {
+			resp.Diagnostics.AddAttributeError(path.Root("api_key_header"), "Missing API Key Header", "`api_key_header` must be configured when creating a server with `auth_type = \"api_key\"` or changing its auth type to it.")
+		}
+		if config.APIKeyValueWO.IsNull() {
+			resp.Diagnostics.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when creating a server with `auth_type = \"api_key\"` or changing its auth type to it.")
+		}
+	case "custom_headers":
+		if config.CustomHeadersWO.IsNull() || (!config.CustomHeadersWO.IsUnknown() && len(config.CustomHeadersWO.Elements()) == 0) {
+			resp.Diagnostics.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "A non-empty `custom_headers_wo` map must be configured when creating a server with `auth_type = \"custom_headers\"` or changing its auth type to it.")
+		}
+	}
 }
 
 func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -526,51 +565,48 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 		AllowInPlanMode:     boolPointer(m.AllowInPlanMode.ValueBool()),
 		ForwardCoderHeaders: boolPointer(m.ForwardCoderHeaders.ValueBool()),
 	}
-	// The server clears the previous auth type's secrets when auth_type
-	// changes, so a transition into a type must resend that type's configured
-	// secret even when its Terraform version is unchanged. Transitions away
-	// from a type never resend its now-stale secret.
+	// A secret is sent only when its auth type is the destination: on a
+	// version bump for rotation, or on a transition into the type because the
+	// server clears the previous type's secrets. Version bumps for other auth
+	// types are ignored rather than resending a stale secret.
 	newAuthType := m.AuthType.ValueString()
 	authTypeChanged := !m.AuthType.Equal(state.AuthType)
 
-	oauth2Secret := writeOnlyString(config.OAuth2ClientSecretWO)
-	if writeOnlyVersionChanged(m.OAuth2ClientSecretWOVersion, state.OAuth2ClientSecretWOVersion) {
-		if oauth2Secret == "" {
-			diags.AddAttributeError(path.Root("oauth2_client_secret_wo"), "Missing OAuth2 Client Secret", "`oauth2_client_secret_wo` must be configured when `oauth2_client_secret_wo_version` changes.")
-		} else {
+	if newAuthType == "oauth2" {
+		oauth2Secret := writeOnlyString(config.OAuth2ClientSecretWO)
+		if writeOnlyVersionChanged(m.OAuth2ClientSecretWOVersion, state.OAuth2ClientSecretWOVersion) {
+			if oauth2Secret == "" {
+				diags.AddAttributeError(path.Root("oauth2_client_secret_wo"), "Missing OAuth2 Client Secret", "`oauth2_client_secret_wo` must be configured when `oauth2_client_secret_wo_version` changes.")
+			} else {
+				req.OAuth2ClientSecret = &oauth2Secret
+			}
+		} else if authTypeChanged && oauth2Secret != "" {
 			req.OAuth2ClientSecret = &oauth2Secret
 		}
-	} else if authTypeChanged && newAuthType == "oauth2" && oauth2Secret != "" {
-		req.OAuth2ClientSecret = &oauth2Secret
 	}
 
-	apiKeyValue := writeOnlyString(config.APIKeyValueWO)
-	if writeOnlyVersionChanged(m.APIKeyValueWOVersion, state.APIKeyValueWOVersion) {
-		if apiKeyValue == "" {
-			diags.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when `api_key_value_wo_version` changes.")
-		} else {
-			req.APIKeyValue = &apiKeyValue
+	if newAuthType == "api_key" {
+		if authTypeChanged && m.APIKeyHeader.ValueString() == "" {
+			diags.AddAttributeError(path.Root("api_key_header"), "Missing API Key Header", "`api_key_header` must be configured when `auth_type` changes to \"api_key\".")
 		}
-	} else if authTypeChanged && newAuthType == "api_key" {
-		if apiKeyValue == "" {
-			diags.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when `auth_type` changes to \"api_key\".")
-		} else {
-			req.APIKeyValue = &apiKeyValue
+		apiKeyValue := writeOnlyString(config.APIKeyValueWO)
+		if writeOnlyVersionChanged(m.APIKeyValueWOVersion, state.APIKeyValueWOVersion) || authTypeChanged {
+			if apiKeyValue == "" {
+				diags.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when `api_key_value_wo_version` changes or `auth_type` changes to \"api_key\".")
+			} else {
+				req.APIKeyValue = &apiKeyValue
+			}
 		}
 	}
 
-	customHeaders := writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)
-	if writeOnlyVersionChanged(m.CustomHeadersWOVersion, state.CustomHeadersWOVersion) {
-		if len(customHeaders) == 0 {
-			diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`custom_headers_wo` must be configured when `custom_headers_wo_version` changes.")
-		} else {
-			req.CustomHeaders = &customHeaders
-		}
-	} else if authTypeChanged && newAuthType == "custom_headers" {
-		if len(customHeaders) == 0 {
-			diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`custom_headers_wo` must be configured when `auth_type` changes to \"custom_headers\".")
-		} else {
-			req.CustomHeaders = &customHeaders
+	if newAuthType == "custom_headers" {
+		customHeaders := writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)
+		if writeOnlyVersionChanged(m.CustomHeadersWOVersion, state.CustomHeadersWOVersion) || authTypeChanged {
+			if len(customHeaders) == 0 {
+				diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`custom_headers_wo` must be configured when `custom_headers_wo_version` changes or `auth_type` changes to \"custom_headers\".")
+			} else {
+				req.CustomHeaders = &customHeaders
+			}
 		}
 	}
 	return req

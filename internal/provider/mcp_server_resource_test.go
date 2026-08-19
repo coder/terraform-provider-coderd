@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"testing"
 	"text/template"
 
@@ -88,12 +89,25 @@ func TestAccMCPServerResource(t *testing.T) {
 	adopted.APIKeyValue = ""
 	adopted.APIKeyValueVersion = 0
 
+	createMissingSecret := minimal
+	createMissingSecret.AuthType = "api_key"
+	createMissingSecret.APIKeyHeader = "Authorization"
+
+	transitionMissingHeader := noAuth
+	transitionMissingHeader.AuthType = "api_key"
+	transitionMissingHeader.APIKeyValue = "secret-three"
+	transitionMissingHeader.APIKeyValueVersion = 3
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
 		TerraformVersionChecks:   testMCPServerTerraformVersionChecks(),
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
+			{
+				Config:      createMissingSecret.String(t),
+				ExpectError: regexp.MustCompile("Missing API Key Value"),
+			},
 			{
 				Config: minimal.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -162,6 +176,10 @@ func TestAccMCPServerResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", ""),
 					checkMCPServerAPIKey(ctx, t, client, false),
 				),
+			},
+			{
+				Config:      transitionMissingHeader.String(t),
+				ExpectError: regexp.MustCompile("Missing API Key Header"),
 			},
 			{
 				Config: rotated.String(t),
