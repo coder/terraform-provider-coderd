@@ -30,8 +30,11 @@ func testMCPServerTerraformVersionChecks() []tfversion.TerraformVersionCheck {
 	}
 }
 
-func TestMCPServerResourceSchemaValidation(t *testing.T) {
+func TestAccMCPServerResourceSchemaValidation(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	for name, tc := range map[string]struct {
 		body      string
@@ -128,10 +131,13 @@ resource "coderd_mcp_server" "test" {
 `
 }
 
-// TestMCPServerRequiredStringsRejectEmpty guards that the required strings
+// TestAccMCPServerRequiredStringsRejectEmpty guards that the required strings
 // reject a configured "", which Terraform otherwise treats as present.
-func TestMCPServerRequiredStringsRejectEmpty(t *testing.T) {
+func TestAccMCPServerRequiredStringsRejectEmpty(t *testing.T) {
 	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
 
 	for _, attr := range []string{"display_name", "slug", "url"} {
 		t.Run(attr, func(t *testing.T) {
