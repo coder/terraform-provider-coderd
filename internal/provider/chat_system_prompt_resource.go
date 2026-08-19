@@ -283,7 +283,7 @@ func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.
 	}
 
 	if live.SystemPrompt != "" &&
-		sanitizePromptText(live.SystemPrompt) != sanitizePromptText(data.SystemPrompt.ValueString()) {
+		codersdk.SanitizePromptText(live.SystemPrompt) != codersdk.SanitizePromptText(data.SystemPrompt.ValueString()) {
 		resp.Diagnostics.AddAttributeWarning(
 			pathSystemPrompt,
 			"Overwriting an out-of-band value",
@@ -371,7 +371,7 @@ func (v chatSystemPromptLengthValidator) ValidateString(ctx context.Context, req
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
 		return
 	}
-	if got := len(sanitizePromptText(req.ConfigValue.ValueString())); got > maxChatSystemPromptBytes {
+	if got := len(codersdk.SanitizePromptText(req.ConfigValue.ValueString())); got > maxChatSystemPromptBytes {
 		resp.Diagnostics.AddAttributeError(
 			req.Path,
 			"System Prompt Too Long",
@@ -461,5 +461,5 @@ func (v chatSystemPromptTextValue) StringSemanticEquals(ctx context.Context, new
 		)
 		return false, diags
 	}
-	return sanitizePromptText(v.ValueString()) == sanitizePromptText(newValue.ValueString()), diags
+	return codersdk.SanitizePromptText(v.ValueString()) == codersdk.SanitizePromptText(newValue.ValueString()), diags
 }

@@ -111,7 +111,7 @@ func (f *fakeChatCoderd) handle(w http.ResponseWriter, r *http.Request) {
 		f.prompt = req.SystemPrompt
 		if f.sanitizeOnPut {
 			// Match coderd: the stored value is the sanitized value.
-			f.prompt = sanitizePromptText(req.SystemPrompt)
+			f.prompt = codersdk.SanitizePromptText(req.SystemPrompt)
 		}
 		if req.IncludeDefaultSystemPrompt != nil {
 			f.includeDflt = *req.IncludeDefaultSystemPrompt
@@ -133,39 +133,6 @@ resource "coderd_chat_system_prompt" "test" {
 	system_prompt = %q%s
 }
 `, prompt, include)
-}
-
-// TestSanitizePromptText pins the local port of coderd's sanitizer to the
-// upstream behavior it must mirror for semantic equality to be correct.
-func TestSanitizePromptText(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"trailing newline", "prompt\n", "prompt"},
-		{"crlf", "a\r\nb\rc", "a\nb\nc"},
-		{"zero-width space", "a\u200bb", "ab"},
-		{"zwj stripped", "a\u200db", "ab"},
-		{"zwnj preserved", "a\u200cb", "a\u200cb"},
-		{"bom", "\ufeffprompt", "prompt"},
-		{"collapse blank lines", "a\n\n\n\nb", "a\n\nb"},
-		{"trailing line whitespace", "a  \nb", "a\nb"},
-		{"leading indentation preserved", "a\n  b", "a\n  b"},
-		{"idempotent", "  a\u200b\n\n\n\nb  \n", "a\n\nb"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := sanitizePromptText(tc.in)
-			require.Equal(t, tc.want, got)
-			// Sanitization must be idempotent: the server stores the
-			// sanitized form, and Read compares it against the config's
-			// sanitized form.
-			require.Equal(t, got, sanitizePromptText(got))
-		})
-	}
 }
 
 // TestChatSystemPromptSemanticEquals covers the custom type directly: two
@@ -364,11 +331,11 @@ func TestAccChatSystemPromptUnsupportedVersion(t *testing.T) {
 }
 
 // TestAccChatSystemPromptRealCoderNoDrift runs the lifecycle against a real
-// Coder instance. This is the live proof that the local sanitizer port
-// matches the server's: the configured prompt deliberately carries a CRLF, a
-// zero-width space, a run of blank lines, and a trailing newline, so if
-// coderd's sanitization ever diverges from sanitizePromptText, the re-plan
-// stops being empty.
+// Coder instance. This is the live proof that the pinned SDK's sanitizer
+// matches the deployed server's: the configured prompt deliberately carries a
+// CRLF, a zero-width space, a run of blank lines, and a trailing newline, so
+// if the deployment's sanitization ever diverges from the pinned
+// codersdk.SanitizePromptText, the re-plan stops being empty.
 func TestAccChatSystemPromptRealCoderNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
