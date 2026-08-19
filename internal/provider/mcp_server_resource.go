@@ -92,16 +92,34 @@ func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyP
 	if resp.Diagnostics.HasError() || plan.AuthType.IsUnknown() {
 		return
 	}
-	entering := true
-	if !req.State.Raw.IsNull() {
-		var state MCPServerResourceModel
+	var state MCPServerResourceModel
+	hasState := !req.State.Raw.IsNull()
+	if hasState {
 		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		entering = !plan.AuthType.Equal(state.AuthType)
 	}
+	entering := !hasState || !plan.AuthType.Equal(state.AuthType)
+
 	if !entering {
+		// A version bump rotates the active auth type's secret in place, so
+		// the write-only value must accompany it or the apply is guaranteed
+		// to fail.
+		switch plan.AuthType.ValueString() {
+		case "oauth2":
+			if writeOnlyVersionChanged(plan.OAuth2ClientSecretWOVersion, state.OAuth2ClientSecretWOVersion) && config.OAuth2ClientSecretWO.IsNull() {
+				resp.Diagnostics.AddAttributeError(path.Root("oauth2_client_secret_wo"), "Missing OAuth2 Client Secret", "`oauth2_client_secret_wo` must be configured when `oauth2_client_secret_wo_version` changes.")
+			}
+		case "api_key":
+			if writeOnlyVersionChanged(plan.APIKeyValueWOVersion, state.APIKeyValueWOVersion) && config.APIKeyValueWO.IsNull() {
+				resp.Diagnostics.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when `api_key_value_wo_version` changes.")
+			}
+		case "custom_headers":
+			if writeOnlyVersionChanged(plan.CustomHeadersWOVersion, state.CustomHeadersWOVersion) && config.CustomHeadersWO.IsNull() {
+				resp.Diagnostics.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`custom_headers_wo` must be configured when `custom_headers_wo_version` changes.")
+			}
+		}
 		return
 	}
 
@@ -213,6 +231,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Sensitive:           true,
 				WriteOnly:           true,
 				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
 					stringvalidator.AlsoRequires(path.MatchRoot("oauth2_client_secret_wo_version")),
 				},
 			},
@@ -264,6 +283,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Sensitive:           true,
 				WriteOnly:           true,
 				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
 					stringvalidator.AlsoRequires(path.MatchRoot("api_key_value_wo_version")),
 				},
 			},
@@ -278,6 +298,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				Sensitive:           true,
 				WriteOnly:           true,
 				Validators: []validator.Map{
+					mapvalidator.SizeAtLeast(1),
 					mapvalidator.AlsoRequires(path.MatchRoot("custom_headers_wo_version")),
 				},
 			},

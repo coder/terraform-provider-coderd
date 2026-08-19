@@ -93,6 +93,14 @@ func TestAccMCPServerResource(t *testing.T) {
 	createMissingSecret.AuthType = "api_key"
 	createMissingSecret.APIKeyHeader = "Authorization"
 
+	createEmptySecret := createMissingSecret
+	createEmptySecret.EmptyAPIKeyValue = true
+	createEmptySecret.APIKeyValueVersion = 1
+
+	rotationMissingSecret := rotated
+	rotationMissingSecret.APIKeyValue = ""
+	rotationMissingSecret.APIKeyValueVersion = 3
+
 	transitionMissingHeader := noAuth
 	transitionMissingHeader.AuthType = "api_key"
 	transitionMissingHeader.APIKeyValue = "secret-three"
@@ -107,6 +115,10 @@ func TestAccMCPServerResource(t *testing.T) {
 			{
 				Config:      createMissingSecret.String(t),
 				ExpectError: regexp.MustCompile("Missing API Key Value"),
+			},
+			{
+				Config:      createEmptySecret.String(t),
+				ExpectError: regexp.MustCompile("Invalid Attribute Value"),
 			},
 			{
 				Config: minimal.String(t),
@@ -168,6 +180,10 @@ func TestAccMCPServerResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "2"),
 					checkMCPServerAPIKey(ctx, t, client, true),
 				),
+			},
+			{
+				Config:      rotationMissingSecret.String(t),
+				ExpectError: regexp.MustCompile("Missing API Key Value"),
 			},
 			{
 				Config: noAuth.String(t),
@@ -236,6 +252,7 @@ type testAccMCPServerResourceConfig struct {
 	AuthType           string
 	APIKeyHeader       string
 	APIKeyValue        string
+	EmptyAPIKeyValue   bool
 	APIKeyValueVersion int
 }
 
@@ -274,6 +291,9 @@ resource "coderd_mcp_server" "test" {
 {{- end }}
 {{- if .APIKeyValue }}
   api_key_value_wo = "{{.APIKeyValue}}"
+{{- end }}
+{{- if .EmptyAPIKeyValue }}
+  api_key_value_wo = ""
 {{- end }}
 {{- if .APIKeyValueVersion }}
   api_key_value_wo_version = {{.APIKeyValueVersion}}
