@@ -154,6 +154,11 @@ func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyP
 				resp.Diagnostics.AddAttributeError(field.path, "Missing OAuth2 Configuration", "Changing `auth_type` to \"oauth2\" on an existing server requires `oauth2_client_id`, `oauth2_auth_url`, and `oauth2_token_url`, because OAuth2 discovery only runs at creation. To use discovery instead, replace the resource.")
 			}
 		}
+		// The secret itself stays optional for manual configuration, but a
+		// version bump during the transition is a rotation and must carry it.
+		if writeOnlyVersionChanged(plan.OAuth2ClientSecretWOVersion, state.OAuth2ClientSecretWOVersion) && config.OAuth2ClientSecretWO.IsNull() {
+			resp.Diagnostics.AddAttributeError(path.Root("oauth2_client_secret_wo"), "Missing OAuth2 Client Secret", "`oauth2_client_secret_wo` must be configured when `oauth2_client_secret_wo_version` changes.")
+		}
 	case "api_key":
 		if config.APIKeyHeader.IsNull() || (!config.APIKeyHeader.IsUnknown() && config.APIKeyHeader.ValueString() == "") {
 			resp.Diagnostics.AddAttributeError(path.Root("api_key_header"), "Missing API Key Header", "`api_key_header` must be configured when creating a server with `auth_type = \"api_key\"` or changing its auth type to it.")

@@ -403,6 +403,13 @@ func TestAccMCPServerResource(t *testing.T) {
 	transitionOAuth2Discovery := noAuth
 	transitionOAuth2Discovery.AuthType = "oauth2"
 
+	transitionOAuth2MissingSecret := noAuth
+	transitionOAuth2MissingSecret.AuthType = "oauth2"
+	transitionOAuth2MissingSecret.RawConfig = `  oauth2_client_id                = "client-id"
+  oauth2_auth_url                 = "https://issuer.example.com/authorize"
+  oauth2_token_url                = "https://issuer.example.com/token"
+  oauth2_client_secret_wo_version = 1`
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -499,6 +506,10 @@ func TestAccMCPServerResource(t *testing.T) {
 				ExpectError: regexp.MustCompile("Missing OAuth2 Configuration"),
 			},
 			{
+				Config:      transitionOAuth2MissingSecret.String(t),
+				ExpectError: regexp.MustCompile("Missing OAuth2 Client Secret"),
+			},
+			{
 				Config: rotated.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
@@ -555,6 +566,7 @@ type testAccMCPServerResourceConfig struct {
 	APIKeyValue        string
 	EmptyAPIKeyValue   bool
 	APIKeyValueVersion int
+	RawConfig          string
 }
 
 func (c testAccMCPServerResourceConfig) String(t *testing.T) string {
@@ -598,6 +610,9 @@ resource "coderd_mcp_server" "test" {
 {{- end }}
 {{- if .APIKeyValueVersion }}
   api_key_value_wo_version = {{.APIKeyValueVersion}}
+{{- end }}
+{{- if .RawConfig }}
+{{.RawConfig}}
 {{- end }}
 }
 `
