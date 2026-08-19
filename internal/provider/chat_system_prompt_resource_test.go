@@ -28,20 +28,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// chatSystemPromptPath is the experimental endpoint backing the resource.
 const chatSystemPromptPath = "/api/experimental/chats/config/system-prompt"
 
 const chatSystemPromptResourceAddr = "coderd_chat_system_prompt.test"
 
-// fakeChatCoderd is a minimal stand-in for a Coder deployment, serving just
-// the endpoints the provider touches: the two Configure() calls plus the chat
-// system prompt singleton.
-//
-// A fake rather than `integration.StartCoder` for the same reason as the
-// OAuth2 settings tests: most of the matrix is about what the *provider* does
-// with a given API response, including that the server-side sanitization of
-// the stored prompt does not surface as drift. The fake sanitizes on PUT
-// exactly like coderd does, which is the behavior under test.
 type fakeChatCoderd struct {
 	*httptest.Server
 
@@ -110,7 +100,6 @@ func (f *fakeChatCoderd) handle(w http.ResponseWriter, r *http.Request) {
 		f.putPrompts = append(f.putPrompts, req.SystemPrompt)
 		f.prompt = req.SystemPrompt
 		if f.sanitizeOnPut {
-			// Match coderd: the stored value is the sanitized value.
 			f.prompt = codersdk.SanitizePromptText(req.SystemPrompt)
 		}
 		if req.IncludeDefaultSystemPrompt != nil {
@@ -135,8 +124,6 @@ resource "coderd_chat_system_prompt" "test" {
 `, prompt, include)
 }
 
-// TestChatSystemPromptSemanticEquals covers the custom type directly: two
-// prompts are the same setting iff they sanitize to the same string.
 func TestChatSystemPromptSemanticEquals(t *testing.T) {
 	t.Parallel()
 
@@ -167,8 +154,6 @@ func TestChatSystemPromptLengthValidator(t *testing.T) {
 
 	ctx := t.Context()
 
-	// The sanitized form is what the server measures, so padding that
-	// sanitizes away must not trip the validator.
 	okPrompt := strings.Repeat("a", maxChatSystemPromptBytes) + "\n\n\n"
 	tooLong := strings.Repeat("a", maxChatSystemPromptBytes+1)
 
@@ -194,9 +179,6 @@ func TestChatSystemPromptLengthValidator(t *testing.T) {
 	}
 }
 
-// TestAccChatSystemPromptResource exercises the full lifecycle against the
-// fake: create, refresh without drift despite server-side sanitization,
-// update, and destroy resetting the deployment defaults.
 func TestAccChatSystemPromptResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -211,8 +193,6 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create with a trailing newline, the `file()` everyday case. The
-			// fake stores the sanitized (trimmed) form, like coderd does.
 			{
 				Config: chatSystemPromptConfig(f.URL, "You are a helpful agent.\n", nil),
 				ConfigStateChecks: []statecheck.StateCheck{
@@ -223,8 +203,6 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 					),
 				},
 			},
-			// Re-planning the same config must be empty: the live value is
-			// the sanitized form, which is semantically equal.
 			{
 				Config: chatSystemPromptConfig(f.URL, "You are a helpful agent.\n", nil),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -233,7 +211,6 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 					},
 				},
 			},
-			// A real edit must show up and apply.
 			{
 				Config: chatSystemPromptConfig(f.URL, "You are a very helpful agent.\n", &includeFalse),
 				ConfigStateChecks: []statecheck.StateCheck{
@@ -247,16 +224,12 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 		},
 	})
 
-	// Destroy (run by resource.Test after the last step) resets the
-	// deployment defaults rather than stranding the last-applied value.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	require.Empty(t, f.prompt)
 	require.True(t, f.includeDflt)
 }
 
-// TestAccChatSystemPromptImport adopts a live out-of-band prompt without
-// issuing any PUT.
 func TestAccChatSystemPromptImport(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -278,11 +251,8 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 				ResourceName:       chatSystemPromptResourceAddr,
 				ImportState:        true,
 				ImportStatePersist: true,
-				// The ID is required by the CLI syntax but unused.
-				ImportStateId: "chat_system_prompt",
+				ImportStateId:      "chat_system_prompt",
 			},
-			// After import, the matching config plans clean: nothing to
-			// overwrite, nothing to PUT.
 			{
 				Config: chatSystemPromptConfig(f.URL, "configured in the dashboard", nil),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -294,16 +264,11 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 		},
 	})
 
-	// Adopting an existing value must never write it back. The only PUT in
-	// the whole test is the framework's final `terraform destroy`, which
-	// resets the prompt to empty.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	require.Equal(t, []string{""}, f.putPrompts)
 }
 
-// TestAccChatSystemPromptEndpointUnavailable pins the 404 diagnostic used for
-// both old deployments and tokens without site-wide permissions.
 func TestAccChatSystemPromptEndpointUnavailable(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -322,20 +287,13 @@ func TestAccChatSystemPromptEndpointUnavailable(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: chatSystemPromptConfig(f.URL, "prompt", nil),
-				// Terraform wraps error text, so match the summary line only.
+				Config:      chatSystemPromptConfig(f.URL, "prompt", nil),
 				ExpectError: regexp.MustCompile("Chat System Prompt Endpoint Unavailable"),
 			},
 		},
 	})
 }
 
-// TestAccChatSystemPromptRealCoderNoDrift runs the lifecycle against a real
-// Coder instance. This is the live proof that the pinned SDK's sanitizer
-// matches the deployed server's: the configured prompt deliberately carries a
-// CRLF, a zero-width space, a run of blank lines, and a trailing newline, so
-// if the deployment's sanitization ever diverges from the pinned
-// codersdk.SanitizePromptText, the re-plan stops being empty.
 func TestAccChatSystemPromptRealCoderNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -373,8 +331,6 @@ resource "coderd_chat_system_prompt" "test" {
 					),
 				},
 			},
-			// Re-planning the identical config must yield an empty plan: the
-			// live value is whatever the real server sanitized and stored.
 			{
 				Config:   cfg,
 				PlanOnly: true,
@@ -382,23 +338,12 @@ resource "coderd_chat_system_prompt" "test" {
 		},
 	})
 
-	// The server must have stored the sanitized form, and the test-framework
-	// destroy after the last step must have reset the deployment defaults.
 	live, err := experimental.GetChatSystemPrompt(ctx)
 	require.NoError(t, err)
 	require.Empty(t, live.SystemPrompt)
 	require.True(t, live.IncludeDefaultSystemPrompt)
 }
 
-// TestAccChatSystemPromptRealCoderImportNoDrift proves that adopting a prompt
-// configured out of band (via the API, as the dashboard would) and re-planning
-// the matching config is a clean, empty plan.
-//
-// The empty plan requires the config to byte-match the stored (sanitized)
-// value: semantic equality preserves prior state on Read and Apply, but a
-// Required attribute's planned value must equal config, so a config that
-// differs only by sanitization shows one in-place normalization update after
-// import and then converges. Both behaviors are pinned here.
 func TestAccChatSystemPromptRealCoderImportNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -408,7 +353,6 @@ func TestAccChatSystemPromptRealCoderImportNoDrift(t *testing.T) {
 	client := integration.StartCoder(ctx, t, "chat_system_prompt_import_acc")
 	experimental := codersdk.NewExperimentalClient(client)
 
-	// Configured out of band, so import (not a prior apply) seeds state.
 	includeDefault := true
 	require.NoError(t, experimental.UpdateChatSystemPrompt(ctx, codersdk.UpdateChatSystemPromptRequest{
 		SystemPrompt:               "configured in the dashboard",
@@ -422,13 +366,11 @@ provider "coderd" {
 }
 `, client.URL.String(), client.SessionToken())
 
-	// Byte-matches the stored value, like trimspace(file(...)) would.
 	cfgExact := providerBlock + `
 resource "coderd_chat_system_prompt" "test" {
   system_prompt = "configured in the dashboard"
 }
 `
-	// Differs only by a trailing newline, like a bare file(...) would.
 	cfgTrailingNewline := providerBlock + `
 resource "coderd_chat_system_prompt" "test" {
   system_prompt = "configured in the dashboard\n"
@@ -447,18 +389,13 @@ resource "coderd_chat_system_prompt" "test" {
 				ImportStatePersist: true,
 				ImportStateId:      "chat_system_prompt",
 			},
-			// A config that byte-matches the stored value plans clean.
 			{
 				Config:   cfgExact,
 				PlanOnly: true,
 			},
-			// A config that differs only by sanitization applies one
-			// normalization update...
 			{
 				Config: cfgTrailingNewline,
 			},
-			// ...and then converges: refreshes keep the configured value via
-			// semantic equality, so the re-plan is empty.
 			{
 				Config:   cfgTrailingNewline,
 				PlanOnly: true,
@@ -467,9 +404,6 @@ resource "coderd_chat_system_prompt" "test" {
 	})
 }
 
-// TestChatSystemPromptModifyPlan covers the create-time overwrite advisories
-// for both attributes. Every case carries the always-on experimental-resource
-// warning, so the baseline warning count is 1.
 func TestChatSystemPromptModifyPlan(t *testing.T) {
 	t.Parallel()
 
@@ -479,9 +413,6 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			"include_default_system_prompt": tftypes.Bool,
 		},
 	}
-	// promptObject builds a state/plan value. A nil prompt yields a null
-	// object, which is how the framework signals "no prior state" (a create)
-	// and "no plan" (a destroy).
 	promptObject := func(prompt any, include any) tftypes.Value {
 		if prompt == nil && include == nil {
 			return tftypes.NewValue(objType, nil)
@@ -494,11 +425,9 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 	nullObject := promptObject(nil, nil)
 
 	for _, tc := range []struct {
-		name string
-		// livePrompt and liveInclude are the deployment's current values.
-		livePrompt  string
-		liveInclude bool
-		// lookupStatus, when non-zero, makes the GET fail.
+		name         string
+		livePrompt   string
+		liveInclude  bool
 		lookupStatus int
 		plan         tftypes.Value
 		state        tftypes.Value
@@ -529,8 +458,6 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			wantWarnings: 3,
 		},
 		{
-			// A live prompt differing from the plan only by sanitization is
-			// the same setting, not an overwrite.
 			name:         "SilentWhenPromptMatchesModuloSanitization",
 			livePrompt:   "from terraform",
 			liveInclude:  true,
@@ -539,7 +466,6 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			// A never-configured deployment has nothing to lose.
 			name:         "SilentOnGreenfieldDeployment",
 			livePrompt:   "",
 			liveInclude:  true,
@@ -548,8 +474,6 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			// Not a create: an update already renders a real diff, and this
-			// is also the first plan after `terraform import`.
 			name:         "SilentWhenPriorStateExists",
 			livePrompt:   "configured in the dashboard",
 			liveInclude:  false,
@@ -566,8 +490,6 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			// A Required attribute is still unknown when it comes from an
-			// input variable or module output. Defer rather than guess.
 			name:         "SilentWhenPlannedPromptUnknown",
 			livePrompt:   "configured in the dashboard",
 			liveInclude:  false,
@@ -576,8 +498,6 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			wantWarnings: 1,
 		},
 		{
-			// Best-effort: a failed lookup must not turn into a plan error.
-			// Create() makes the same call and reports it properly.
 			name:         "SilentWhenLookupFails",
 			livePrompt:   "configured in the dashboard",
 			liveInclude:  false,

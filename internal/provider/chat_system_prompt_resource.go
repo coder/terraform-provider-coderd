@@ -20,24 +20,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &ChatSystemPromptResource{}
 var _ resource.ResourceWithImportState = &ChatSystemPromptResource{}
 var _ resource.ResourceWithModifyPlan = &ChatSystemPromptResource{}
 
-// chatSystemPromptMinVersion is the first Coder release serving
-// `/api/experimental/chats/config/system-prompt` (coder/coder#22857). It is
-// named in the error surfaced when the endpoint 404s so an admin pointed at an
-// older deployment gets an actionable message instead of a bare "not found".
+// First release with the chat system prompt endpoint (coder/coder#22857).
 const chatSystemPromptMinVersion = "2.32.0"
 
-// maxChatSystemPromptBytes mirrors coderd's maxSystemPromptLenBytes (128 KiB,
-// coderd/exp_chats.go). The server rejects longer prompts with a 400 at apply
-// time; validating here fails the same way at plan time instead.
+// Mirrors coderd/exp_chats.go.
 const maxChatSystemPromptBytes = 131072
 
-// pathSystemPrompt and pathIncludeDefaultSystemPrompt anchor plan-time
-// diagnostics to the attributes they are about.
 var (
 	pathSystemPrompt               = path.Root("system_prompt")
 	pathIncludeDefaultSystemPrompt = path.Root("include_default_system_prompt")
@@ -47,7 +39,6 @@ type ChatSystemPromptResource struct {
 	*CoderdProviderData
 }
 
-// ChatSystemPromptResourceModel describes the resource data model.
 type ChatSystemPromptResourceModel struct {
 	SystemPrompt               chatSystemPromptTextValue `tfsdk:"system_prompt"`
 	IncludeDefaultSystemPrompt types.Bool                `tfsdk:"include_default_system_prompt"`
@@ -102,7 +93,6 @@ This resource requires Coder version [` + chatSystemPromptMinVersion + `](https:
 }
 
 func (r *ChatSystemPromptResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	// Prevent panic if the provider has not been configured.
 	if req.ProviderData == nil {
 		return
 	}
@@ -132,16 +122,10 @@ func (r *ChatSystemPromptResource) Read(ctx context.Context, req resource.ReadRe
 
 	prompt, err := r.experimentalClient().GetChatSystemPrompt(ctx)
 	if err != nil {
-		// Deliberately not treated as "resource deleted": this setting is a
-		// deployment singleton that always exists. A 404 means either the
-		// endpoint is unavailable or the caller lacks permission, not that the
-		// resource was deleted.
 		resp.Diagnostics.Append(chatSystemPromptDiag("read", err)...)
 		return
 	}
 
-	// The custom type's semantic equality keeps the prior (configured) value
-	// when the live value differs only by sanitization.
 	data.SystemPrompt = newChatSystemPromptTextValue(prompt.SystemPrompt)
 	data.IncludeDefaultSystemPrompt = types.BoolValue(prompt.IncludeDefaultSystemPrompt)
 
@@ -157,8 +141,6 @@ func (r *ChatSystemPromptResource) Create(ctx context.Context, req resource.Crea
 
 	tflog.Trace(ctx, "creating chat system prompt")
 
-	// Create and Update use a shared implementation: the underlying API is a
-	// single idempotent PUT with no separate create semantics.
 	resp.Diagnostics.Append(r.put(ctx, "create", &data)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -188,11 +170,7 @@ func (r *ChatSystemPromptResource) Update(ctx context.Context, req resource.Upda
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-// put writes the planned prompt and include-default flag. The flag pointer is
-// always non-nil: the API treats an omitted field as "leave the current value
-// alone", which is the right default for a partial update but wrong for this
-// resource, which owns the value outright (the attribute has a schema default,
-// so the plan always carries a known value).
+// Always send include-default because an omitted field preserves the remote value.
 func (r *ChatSystemPromptResource) put(ctx context.Context, action string, data *ChatSystemPromptResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
@@ -206,23 +184,13 @@ func (r *ChatSystemPromptResource) put(ctx context.Context, action string, data 
 		return diags
 	}
 
-	// The PUT returns 204 with no body, so nothing to reconcile: state keeps
-	// the configured value and the custom type's semantic equality absorbs
-	// the server-side sanitization on the next Read.
 	return diags
 }
 
 func (r *ChatSystemPromptResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	tflog.Trace(ctx, "deleting chat system prompt")
 
-	// There is no DELETE endpoint for this setting: it is a `site_configs`
-	// upsert. Reset to the defaults of a never-configured deployment (empty
-	// prompt, include-default true) so `terraform destroy` leaves the
-	// deployment in a well-defined state.
-	//
-	// If this fails, the appended error keeps the resource in state, so a
-	// subsequent `terraform destroy` retries rather than the admin wrongly
-	// believing the prompt was reset.
+	// The API has no DELETE, so restore the deployment defaults.
 	includeDefault := true
 	err := r.experimentalClient().UpdateChatSystemPrompt(ctx, codersdk.UpdateChatSystemPromptRequest{
 		SystemPrompt:               "",
@@ -236,27 +204,19 @@ func (r *ChatSystemPromptResource) Delete(ctx context.Context, req resource.Dele
 	tflog.Trace(ctx, "successfully deleted chat system prompt")
 }
 
-// ModifyPlan emits the standard experimental-resource warning and, on a first
-// apply, warns when a non-empty out-of-band prompt or a differing
-// include-default flag is about to be overwritten, giving the admin a chance
-// to `terraform import` instead.
 func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	resp.Diagnostics.AddWarning(
 		"Experimental Resource",
 		"coderd_chat_system_prompt is experimental. Changes are expected, and it is not recommended for production use.",
 	)
 
-	// A destroy plan has a null plan. Nothing to advise on.
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	// Only a genuine create reaches the no-prior-state case this warns about.
-	// `terraform import` populates state without ever running Create(), so
-	// this correctly stays quiet on the first plan after an import.
+	// Import populates state without running Create, so only warn on true creates.
 	if !req.State.Raw.IsNull() {
 		return
 	}
-	// Configure() has not run during the validate walk.
 	if r.CoderdProviderData == nil {
 		return
 	}
@@ -266,17 +226,14 @@ func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// A Required attribute can still be unknown when it comes from an input
-	// variable or a module output. Defer rather than guess.
+	// Required values can still be unknown during planning.
 	if data.SystemPrompt.IsUnknown() || data.SystemPrompt.IsNull() {
 		return
 	}
 
 	live, err := r.experimentalClient().GetChatSystemPrompt(ctx)
 	if err != nil {
-		// Best-effort advisory only. Create() makes the same call for real
-		// moments later and reports the error there, with the right wording
-		// for the operation that actually failed.
+		// This lookup is advisory; CRUD reports endpoint failures.
 		tflog.Debug(ctx, "skipping chat system prompt plan-time check", map[string]any{
 			"error": err.Error(),
 		})
@@ -295,8 +252,6 @@ func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.
 		)
 	}
 
-	// The attribute has a schema default, so it is only unknown when it comes
-	// from an unresolved expression.
 	if !data.IncludeDefaultSystemPrompt.IsUnknown() && !data.IncludeDefaultSystemPrompt.IsNull() &&
 		data.IncludeDefaultSystemPrompt.ValueBool() != live.IncludeDefaultSystemPrompt {
 		resp.Diagnostics.AddAttributeWarning(
@@ -312,31 +267,16 @@ func (r *ChatSystemPromptResource) ModifyPlan(ctx context.Context, req resource.
 }
 
 func (r *ChatSystemPromptResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// No identifying attribute exists to extract from req.ID: this resource is
-	// a deployment-wide singleton and Read() takes no parameters. Terraform
-	// calls Read() immediately after this to populate both attributes from the
-	// live API; the import ID itself is required by Terraform's CLI syntax but
-	// otherwise unused.
-	//
-	// The framework requires at least one attribute be set for the import to
-	// produce a non-null state object for Read() to overwrite.
+	// The singleton has no ID, but Read needs a non-null placeholder state.
 	resp.Diagnostics.Append(resp.State.Set(ctx, ChatSystemPromptResourceModel{
 		SystemPrompt:               newChatSystemPromptTextValue(""),
 		IncludeDefaultSystemPrompt: types.BoolValue(true),
 	})...)
 }
 
-// chatSystemPromptDiag converts a codersdk error from the chat system prompt
-// endpoint into a diagnostic. Every CRUD path routes through here so an
-// unavailable endpoint produces the same actionable message whichever
-// operation hit it first.
 func chatSystemPromptDiag(action string, err error) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	// Not isNotFound: that helper also maps a 400 "must be an existing uuid or
-	// username" to not-found, which is meaningless for a parameterless
-	// endpoint and would mislabel an unrelated bad request as a version
-	// problem.
 	var sdkErr *codersdk.Error
 	if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
 		diags.AddError(
@@ -350,14 +290,10 @@ func chatSystemPromptDiag(action string, err error) diag.Diagnostics {
 		return diags
 	}
 
-	// Every other failure passes coderd's own message straight through.
 	diags.AddError("Client Error", fmt.Sprintf("unable to %s the chat system prompt, got error: %s", action, err))
 	return diags
 }
 
-// chatSystemPromptLengthValidator rejects prompts whose sanitized form exceeds
-// coderd's 128 KiB cap, failing at plan time with the same limit the server
-// would enforce with a 400 at apply time.
 type chatSystemPromptLengthValidator struct{}
 
 func (chatSystemPromptLengthValidator) Description(context.Context) string {
@@ -381,22 +317,17 @@ func (v chatSystemPromptLengthValidator) ValidateString(ctx context.Context, req
 	}
 }
 
-// chatSystemPromptTextType is a string type whose values compare equal when
-// their sanitized forms match, absorbing the server-side prompt sanitization
-// (trailing newlines from `file(...)`, CRLF line endings, invisible
-// characters) instead of reporting it as drift.
+// Compares sanitized values to absorb server-side prompt normalization.
 type chatSystemPromptTextType struct {
 	basetypes.StringType
 }
 
 var _ basetypes.StringTypable = chatSystemPromptTextType{}
 
-// String implements basetypes.StringTypable.
 func (t chatSystemPromptTextType) String() string {
 	return "chatSystemPromptTextType"
 }
 
-// Equal implements basetypes.StringTypable.
 func (t chatSystemPromptTextType) Equal(o attr.Type) bool {
 	if o, ok := o.(chatSystemPromptTextType); ok {
 		return t.StringType.Equal(o.StringType)
@@ -404,17 +335,14 @@ func (t chatSystemPromptTextType) Equal(o attr.Type) bool {
 	return false
 }
 
-// ValueType implements basetypes.StringTypable.
 func (t chatSystemPromptTextType) ValueType(ctx context.Context) attr.Value {
 	return chatSystemPromptTextValue{}
 }
 
-// ValueFromString implements basetypes.StringTypable.
 func (t chatSystemPromptTextType) ValueFromString(ctx context.Context, in basetypes.StringValue) (basetypes.StringValuable, diag.Diagnostics) {
 	return chatSystemPromptTextValue{StringValue: in}, nil
 }
 
-// ValueFromTerraform implements basetypes.StringTypable.
 func (t chatSystemPromptTextType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (attr.Value, error) {
 	attrValue, err := t.StringType.ValueFromTerraform(ctx, in)
 	if err != nil {
@@ -437,12 +365,10 @@ func newChatSystemPromptTextValue(value string) chatSystemPromptTextValue {
 	return chatSystemPromptTextValue{StringValue: basetypes.NewStringValue(value)}
 }
 
-// Type implements basetypes.StringValuable.
 func (v chatSystemPromptTextValue) Type(ctx context.Context) attr.Type {
 	return chatSystemPromptTextType{}
 }
 
-// Equal implements basetypes.StringValuable.
 func (v chatSystemPromptTextValue) Equal(o attr.Value) bool {
 	if o, ok := o.(chatSystemPromptTextValue); ok {
 		return v.StringValue.Equal(o.StringValue)
@@ -450,8 +376,6 @@ func (v chatSystemPromptTextValue) Equal(o attr.Value) bool {
 	return false
 }
 
-// StringSemanticEquals implements basetypes.StringValuableWithSemanticEquals:
-// two prompts are the same setting iff they sanitize to the same string.
 func (v chatSystemPromptTextValue) StringSemanticEquals(ctx context.Context, newValuable basetypes.StringValuable) (bool, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	newValue, ok := newValuable.(chatSystemPromptTextValue)
