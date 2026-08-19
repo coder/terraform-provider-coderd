@@ -133,8 +133,9 @@ func (r *ChatSystemPromptResource) Read(ctx context.Context, req resource.ReadRe
 	prompt, err := r.experimentalClient().GetChatSystemPrompt(ctx)
 	if err != nil {
 		// Deliberately not treated as "resource deleted": this setting is a
-		// deployment singleton that always exists on a supported deployment,
-		// so a 404 means the endpoint is missing, not the resource.
+		// deployment singleton that always exists. A 404 means either the
+		// endpoint is unavailable or the caller lacks permission, not that the
+		// resource was deleted.
 		resp.Diagnostics.Append(chatSystemPromptDiag("read", err)...)
 		return
 	}
@@ -326,9 +327,9 @@ func (r *ChatSystemPromptResource) ImportState(ctx context.Context, req resource
 }
 
 // chatSystemPromptDiag converts a codersdk error from the chat system prompt
-// endpoint into a diagnostic. Every CRUD path routes through here so a
-// deployment that predates the endpoint produces the same actionable message
-// whichever operation hit it first.
+// endpoint into a diagnostic. Every CRUD path routes through here so an
+// unavailable endpoint produces the same actionable message whichever
+// operation hit it first.
 func chatSystemPromptDiag(action string, err error) diag.Diagnostics {
 	var diags diag.Diagnostics
 
@@ -339,11 +340,11 @@ func chatSystemPromptDiag(action string, err error) diag.Diagnostics {
 	var sdkErr *codersdk.Error
 	if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
 		diags.AddError(
-			"Unsupported Coder Version",
+			"Chat System Prompt Endpoint Unavailable",
 			fmt.Sprintf("Unable to %s the chat system prompt: the deployment returned 404 for %s. "+
 				"This endpoint requires Coder version %s or later and a token with site-wide permissions; "+
-				"upgrade the deployment, or remove `coderd_chat_system_prompt` from your configuration. "+
-				"Original error: %s",
+				"upgrade the deployment or use a token with the required permissions. If neither is possible, "+
+				"remove `coderd_chat_system_prompt` from your configuration. Original error: %s",
 				action, "/api/experimental/chats/config/system-prompt", chatSystemPromptMinVersion, err),
 		)
 		return diags

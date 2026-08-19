@@ -302,9 +302,9 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 	require.Equal(t, []string{""}, f.putPrompts)
 }
 
-// TestAccChatSystemPromptUnsupportedVersion pins the 404-to-version-hint
-// mapping: an old deployment produces one actionable error.
-func TestAccChatSystemPromptUnsupportedVersion(t *testing.T) {
+// TestAccChatSystemPromptEndpointUnavailable pins the 404 diagnostic used for
+// both old deployments and tokens without site-wide permissions.
+func TestAccChatSystemPromptEndpointUnavailable(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
@@ -324,7 +324,7 @@ func TestAccChatSystemPromptUnsupportedVersion(t *testing.T) {
 			{
 				Config: chatSystemPromptConfig(f.URL, "prompt", nil),
 				// Terraform wraps error text, so match the summary line only.
-				ExpectError: regexp.MustCompile("Unsupported Coder Version"),
+				ExpectError: regexp.MustCompile("Chat System Prompt Endpoint Unavailable"),
 			},
 		},
 	})
