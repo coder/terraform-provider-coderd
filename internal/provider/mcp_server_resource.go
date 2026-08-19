@@ -321,21 +321,11 @@ func (r *MCPServerResource) ValidateConfig(ctx context.Context, req resource.Val
 		return
 	}
 
+	// Write-only secrets are only required at creation or on an auth type
+	// transition, so api_key and custom_headers completeness is checked in
+	// Create and updateRequest instead. Requiring them here would reject
+	// configs that adopt imported servers whose secrets cannot be read back.
 	switch data.AuthType.ValueString() {
-	case "api_key":
-		if isEmptyString(data.APIKeyHeader) {
-			resp.Diagnostics.AddAttributeError(path.Root("api_key_header"), "Missing API Key Header", "`auth_type = \"api_key\"` requires a non-empty `api_key_header`.")
-		}
-		if isEmptyString(data.APIKeyValueWO) {
-			resp.Diagnostics.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`auth_type = \"api_key\"` requires a non-empty `api_key_value_wo`.")
-		}
-	case "custom_headers":
-		if data.CustomHeadersWO.IsUnknown() {
-			return
-		}
-		if data.CustomHeadersWO.IsNull() || len(data.CustomHeadersWO.Elements()) == 0 {
-			resp.Diagnostics.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`auth_type = \"custom_headers\"` requires a non-empty `custom_headers_wo` map.")
-		}
 	case "oauth2":
 		fields := []struct {
 			path  path.Path
@@ -471,6 +461,19 @@ func (r *MCPServerResource) ImportState(ctx context.Context, req resource.Import
 }
 
 func (m MCPServerResourceModel) createRequest(ctx context.Context, config MCPServerResourceModel, diags *diag.Diagnostics) codersdk.CreateMCPServerConfigRequest {
+	switch m.AuthType.ValueString() {
+	case "api_key":
+		if m.APIKeyHeader.ValueString() == "" {
+			diags.AddAttributeError(path.Root("api_key_header"), "Missing API Key Header", "`auth_type = \"api_key\"` requires a non-empty `api_key_header`.")
+		}
+		if writeOnlyString(config.APIKeyValueWO) == "" {
+			diags.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "Creating a server with `auth_type = \"api_key\"` requires `api_key_value_wo`.")
+		}
+	case "custom_headers":
+		if len(writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)) == 0 {
+			diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "Creating a server with `auth_type = \"custom_headers\"` requires a non-empty `custom_headers_wo` map.")
+		}
+	}
 	return codersdk.CreateMCPServerConfigRequest{
 		DisplayName:         m.DisplayName.ValueString(),
 		Slug:                m.Slug.ValueString(),
@@ -523,9 +526,13 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 		AllowInPlanMode:     boolPointer(m.AllowInPlanMode.ValueBool()),
 		ForwardCoderHeaders: boolPointer(m.ForwardCoderHeaders.ValueBool()),
 	}
+	// The server clears the previous auth type's secrets when auth_type
+	// changes, so a transition into a type must resend that type's configured
+	// secret even when its Terraform version is unchanged. Transitions away
+	// from a type never resend its now-stale secret.
+	newAuthType := m.AuthType.ValueString()
 	authTypeChanged := !m.AuthType.Equal(state.AuthType)
-	// The server clears other auth types' secrets when auth_type changes, so
-	// resend the configured secret even when its Terraform version is unchanged.
+
 	oauth2Secret := writeOnlyString(config.OAuth2ClientSecretWO)
 	if writeOnlyVersionChanged(m.OAuth2ClientSecretWOVersion, state.OAuth2ClientSecretWOVersion) {
 		if oauth2Secret == "" {
@@ -533,7 +540,7 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 		} else {
 			req.OAuth2ClientSecret = &oauth2Secret
 		}
-	} else if authTypeChanged && oauth2Secret != "" {
+	} else if authTypeChanged && newAuthType == "oauth2" && oauth2Secret != "" {
 		req.OAuth2ClientSecret = &oauth2Secret
 	}
 
@@ -544,8 +551,12 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 		} else {
 			req.APIKeyValue = &apiKeyValue
 		}
-	} else if authTypeChanged && apiKeyValue != "" {
-		req.APIKeyValue = &apiKeyValue
+	} else if authTypeChanged && newAuthType == "api_key" {
+		if apiKeyValue == "" {
+			diags.AddAttributeError(path.Root("api_key_value_wo"), "Missing API Key Value", "`api_key_value_wo` must be configured when `auth_type` changes to \"api_key\".")
+		} else {
+			req.APIKeyValue = &apiKeyValue
+		}
 	}
 
 	customHeaders := writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)
@@ -555,8 +566,12 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 		} else {
 			req.CustomHeaders = &customHeaders
 		}
-	} else if authTypeChanged && len(customHeaders) > 0 {
-		req.CustomHeaders = &customHeaders
+	} else if authTypeChanged && newAuthType == "custom_headers" {
+		if len(customHeaders) == 0 {
+			diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "`custom_headers_wo` must be configured when `auth_type` changes to \"custom_headers\".")
+		} else {
+			req.CustomHeaders = &customHeaders
+		}
 	}
 	return req
 }
@@ -594,10 +609,6 @@ func (m MCPServerResourceModel) stateFromServer(server codersdk.MCPServerConfig)
 		CreatedAt:                   types.Int64Value(server.CreatedAt.Unix()),
 		UpdatedAt:                   types.Int64Value(server.UpdatedAt.Unix()),
 	}
-}
-
-func isEmptyString(value types.String) bool {
-	return !value.IsUnknown() && (value.IsNull() || value.ValueString() == "")
 }
 
 func writeOnlyString(value types.String) string {

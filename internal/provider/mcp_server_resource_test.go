@@ -81,6 +81,13 @@ func TestAccMCPServerResource(t *testing.T) {
 	noAuth := renamed
 	noAuth.APIKeyValueVersion = 2
 
+	// Mirrors adopting an imported server: the write-only secret cannot be
+	// read back, so a config omitting it must plan and apply cleanly while the
+	// server keeps the stored key.
+	adopted := rotated
+	adopted.APIKeyValue = ""
+	adopted.APIKeyValueVersion = 0
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -162,6 +169,14 @@ func TestAccMCPServerResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", rotated.APIKeyHeader),
 					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "2"),
+					checkMCPServerAPIKey(ctx, t, client, true),
+				),
+			},
+			{
+				Config: adopted.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
+					resource.TestCheckNoResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version"),
 					checkMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
