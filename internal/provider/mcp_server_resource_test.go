@@ -128,6 +128,49 @@ resource "coderd_mcp_server" "test" {
 `
 }
 
+// TestMCPServerRequiredStringsRejectEmpty guards that the required strings
+// reject a configured "", which Terraform otherwise treats as present.
+func TestMCPServerRequiredStringsRejectEmpty(t *testing.T) {
+	t.Parallel()
+
+	for _, attr := range []string{"display_name", "slug", "url"} {
+		t.Run(attr, func(t *testing.T) {
+			t.Parallel()
+
+			srv := newMockServer(nil)
+			defer srv.Close()
+
+			values := map[string]string{
+				"display_name": `"MCP Test"`,
+				"slug":         `"mcp-test"`,
+				"url":          `"https://mcp.example.com/v1"`,
+			}
+			values[attr] = `""`
+			config := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+
+resource "coderd_mcp_server" "test" {
+  display_name = ` + values["display_name"] + `
+  slug         = ` + values["slug"] + `
+  url          = ` + values["url"] + `
+}
+`
+			resource.Test(t, resource.TestCase{
+				IsUnitTest:               true,
+				TerraformVersionChecks:   testMCPServerTerraformVersionChecks(),
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{{
+					Config:      config,
+					PlanOnly:    true,
+					ExpectError: regexp.MustCompile("Invalid Attribute Value"),
+				}},
+			})
+		})
+	}
+}
+
 func TestMCPServerUpdateRequestSecrets(t *testing.T) {
 	t.Parallel()
 

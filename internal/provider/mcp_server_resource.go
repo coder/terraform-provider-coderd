@@ -196,14 +196,23 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 			"display_name": schema.StringAttribute{
 				MarkdownDescription: "Display name shown in Coder.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"slug": schema.StringAttribute{
 				MarkdownDescription: "Organization-unique slug for the MCP server. The slug can be updated in place.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"url": schema.StringAttribute{
 				MarkdownDescription: "MCP server URL. Changing this value invalidates users' stored OAuth tokens.",
 				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"description": schema.StringAttribute{
 				MarkdownDescription: "Description shown in Coder.",
