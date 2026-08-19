@@ -6,6 +6,7 @@ description: |-
   ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
   -> _wo attributes are write-only https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments: their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.
   Configures an organization-scoped MCP server for Coder Agents. Import IDs use <organization_id>/<id>. Changing url, auth_type, oauth2_token_url, oauth2_revocation_url, or oauth2_client_id invalidates users' stored OAuth tokens.
+  Coder runs OAuth2 discovery and dynamic client registration only when a server is created with auth_type = "oauth2" and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with terraform apply -replace). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.
 ---
 
 # coderd_mcp_server (Resource)
@@ -15,6 +16,8 @@ description: |-
 -> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.
 
 Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization_id>/<id>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.
+
+Coder runs OAuth2 discovery and dynamic client registration only when a server is created with `auth_type = "oauth2"` and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with `terraform apply -replace`). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.
 
 ## Example Usage
 
@@ -68,7 +71,7 @@ resource "coderd_mcp_server" "example" {
 - `icon_url` (String) Icon URL shown in Coder.
 - `model_intent` (Boolean) Whether the model may select this MCP server based on intent.
 - `oauth2_auth_url` (String) OAuth2 authorization URL. It can be populated by server-side discovery.
-- `oauth2_client_id` (String) OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset to use OAuth discovery and dynamic client registration. Changing it invalidates users' stored OAuth tokens.
+- `oauth2_client_id` (String) OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset at creation to use OAuth discovery and dynamic client registration; switching an existing server back to discovery requires replacing the resource. Changing it invalidates users' stored OAuth tokens.
 - `oauth2_client_secret_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) OAuth2 client secret. Bump `oauth2_client_secret_wo_version` to rotate it.
 - `oauth2_client_secret_wo_version` (Number) Version for the write-only OAuth2 client secret. Bump it whenever the secret changes.
 - `oauth2_revocation_url` (String) OAuth2 token revocation URL. It can be populated by server-side discovery. Changing it invalidates users' stored OAuth tokens.

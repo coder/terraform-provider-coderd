@@ -147,7 +147,8 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"-> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.\n\n" +
-			"Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization_id>/<id>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.",
+			"Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization_id>/<id>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.\n\n" +
+			"Coder runs OAuth2 discovery and dynamic client registration only when a server is created with `auth_type = \"oauth2\"` and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with `terraform apply -replace`). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "MCP server configuration ID.",
@@ -218,7 +219,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				},
 			},
 			"oauth2_client_id": schema.StringAttribute{
-				MarkdownDescription: "OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset to use OAuth discovery and dynamic client registration. Changing it invalidates users' stored OAuth tokens.",
+				MarkdownDescription: "OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset at creation to use OAuth discovery and dynamic client registration; switching an existing server back to discovery requires replacing the resource. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
