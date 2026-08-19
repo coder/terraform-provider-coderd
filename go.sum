@@ -136,8 +136,8 @@ github.com/clipperhouse/uax29/v2 v2.6.0 h1:z0cDbUV+aPASdFb2/ndFnS9ts/WNXgTNNGFoK
 github.com/clipperhouse/uax29/v2 v2.6.0/go.mod h1:Wn1g7MK6OoeDT0vL+Q0SQLDz/KpfsVRgg6W7ihQeh4g=
 github.com/cloudflare/circl v1.6.3 h1:9GPOhQGF9MCYUeXyMYlqTR6a5gTrgR/fBLXvUgtVcg8=
 github.com/cloudflare/circl v1.6.3/go.mod h1:2eXP6Qfat4O/Yhh8BznvKnJ+uzEoTQ6jVKJRn81BiS4=
-github.com/coder/coder/v2 v2.34.0-rc.0.0.20260818054033-fa8ffe4eda92 h1:U8izjyCLTP8Jmj/2RYAej4kHjaoXNETJRNiLQaZKgGk=
-github.com/coder/coder/v2 v2.34.0-rc.0.0.20260818054033-fa8ffe4eda92/go.mod h1:oeEC595OHeZsa0a6j9mzsla7PEgfFItAZb83f8f7Z00=
+github.com/coder/coder/v2 v2.34.0-rc.0.0.20260819135125-8a7e8d9d5b31 h1:CeGZSmHR6doldOLgRbZpQLzKzuJh9KQkSN0O3aktgvE=
+github.com/coder/coder/v2 v2.34.0-rc.0.0.20260819135125-8a7e8d9d5b31/go.mod h1:pZvSpxDWkuVFXq6X/JvnW+BHPuEr1hc5VkwrJ8aJJng=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 h1:3A0ES21Ke+FxEM8CXx9n47SZOKOpgSE1bbJzlE4qPVs=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0/go.mod h1:5UuS2Ts+nTToAMeOjNlnHFkPahrtDkmpydBen/3wgZc=
 github.com/coder/quartz v0.3.0 h1:bUoSEJ77NBfKtUqv6CPSC0AS8dsjqAqqAv7bN02m1mg=
