@@ -221,6 +221,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset to use OAuth discovery and dynamic client registration. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					unknownWhenAuthTypeChanges(),
 				},
@@ -243,6 +246,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "OAuth2 authorization URL. It can be populated by server-side discovery.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					unknownWhenAuthTypeChanges(),
 				},
@@ -251,6 +257,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "OAuth2 token URL. It can be populated by server-side discovery. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					unknownWhenAuthTypeChanges(),
 				},
@@ -273,6 +282,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "HTTP header used for API key authentication. The server may populate a default.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					unknownWhenAuthTypeChanges(),
 				},
