@@ -58,7 +58,7 @@ resource "coderd_agents_mcp_server" "example" {
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
 - `allow_in_plan_mode` (Boolean) Whether tools from this server are available in plan mode. Defaults to false.
-- `api_key_header` (String) HTTP header used for API key authentication. The server may populate a default.
+- `api_key_header` (String) HTTP header used for API key authentication. It must be configured when creating a server with `auth_type = "api_key"` or changing its auth type to it.
 - `api_key_value_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) API key value. Bump `api_key_value_wo_version` to rotate it.
 - `api_key_value_wo_version` (Number) Version for the write-only API key value. Bump it whenever the value changes.
 - `auth_type` (String) Authentication type. Valid values are `none`, `oauth2`, `api_key`, `custom_headers`, and `user_oidc`. Defaults to `none`. Changing this value invalidates users' stored OAuth tokens and clears secrets for the previous authentication type.

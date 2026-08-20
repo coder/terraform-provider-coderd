@@ -323,7 +323,7 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 				Default:             stringdefault.StaticString(""),
 			},
 			"api_key_header": schema.StringAttribute{
-				MarkdownDescription: "HTTP header used for API key authentication. The server may populate a default.",
+				MarkdownDescription: "HTTP header used for API key authentication. It must be configured when creating a server with `auth_type = \"api_key\"` or changing its auth type to it.",
 				Optional:            true,
 				Computed:            true,
 				Validators: []validator.String{
