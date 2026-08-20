@@ -433,15 +433,47 @@ func (r *AgentsMCPServerResource) Configure(ctx context.Context, req resource.Co
 func (r *AgentsMCPServerResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var data AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() || data.AuthType.IsNull() || data.AuthType.IsUnknown() {
+	if resp.Diagnostics.HasError() || data.AuthType.IsUnknown() {
 		return
+	}
+	// A null auth_type takes the schema default.
+	authType := "none"
+	if !data.AuthType.IsNull() {
+		authType = data.AuthType.ValueString()
+	}
+
+	// The server clears readable auth fields that do not belong to the
+	// effective auth type when it changes, so a configured value for another
+	// auth type cannot survive an apply and would make the result
+	// inconsistent with the plan. Write-only attributes stay configurable
+	// because they never enter state and non-destination version bumps are
+	// ignored.
+	type authField struct {
+		name  string
+		value types.String
+	}
+	if authType != "oauth2" {
+		for _, field := range []authField{
+			{"oauth2_client_id", data.OAuth2ClientID},
+			{"oauth2_auth_url", data.OAuth2AuthURL},
+			{"oauth2_token_url", data.OAuth2TokenURL},
+			{"oauth2_revocation_url", data.OAuth2RevocationURL},
+			{"oauth2_scopes", data.OAuth2Scopes},
+		} {
+			if !field.value.IsNull() && !field.value.IsUnknown() {
+				resp.Diagnostics.AddAttributeError(path.Root(field.name), "Invalid Attribute Combination", fmt.Sprintf("`%s` can only be configured when `auth_type` is \"oauth2\".", field.name))
+			}
+		}
+	}
+	if authType != "api_key" && !data.APIKeyHeader.IsNull() && !data.APIKeyHeader.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(path.Root("api_key_header"), "Invalid Attribute Combination", "`api_key_header` can only be configured when `auth_type` is \"api_key\".")
 	}
 
 	// Write-only secrets are only required at creation or on an auth type
 	// transition, so api_key and custom_headers completeness is checked in
 	// Create and updateRequest instead. Requiring them here would reject
 	// configs that adopt imported servers whose secrets cannot be read back.
-	switch data.AuthType.ValueString() {
+	switch authType {
 	case "oauth2":
 		fields := []struct {
 			path  path.Path

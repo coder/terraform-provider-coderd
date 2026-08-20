@@ -84,6 +84,18 @@ resource "terraform_data" "endpoint" {
 			body:      `  auth_type = "custom_headers"`,
 			wantError: "Missing Custom Headers",
 		},
+		"api key header with default none auth": {
+			body:      `  api_key_header = "Authorization"`,
+			wantError: "Invalid Attribute Combination",
+		},
+		"oauth2 client id with api_key auth": {
+			body: `  auth_type                = "api_key"
+  api_key_header           = "Authorization"
+  api_key_value_wo         = "secret"
+  api_key_value_wo_version = 1
+  oauth2_client_id         = "client-id"`,
+			wantError: "Invalid Attribute Combination",
+		},
 		"oauth2 partial manual config": {
 			body: `  auth_type        = "oauth2"
   oauth2_client_id = "client-id"`,
@@ -477,6 +489,11 @@ func TestAccAgentsMCPServerResource(t *testing.T) {
 	transitionMissingHeader.APIKeyValue = "secret-three"
 	transitionMissingHeader.APIKeyValueVersion = 3
 
+	// The server clears the header when auth_type leaves api_key, so keeping
+	// it configured could never match the plan after apply.
+	transitionKeepsHeader := noAuth
+	transitionKeepsHeader.APIKeyHeader = "Authorization"
+
 	transitionOAuth2Discovery := noAuth
 	transitionOAuth2Discovery.AuthType = "oauth2"
 
@@ -493,6 +510,15 @@ func TestAccAgentsMCPServerResource(t *testing.T) {
   oauth2_auth_url                 = terraform_data.endpoint.output
   oauth2_token_url                = "https://issuer.example.com/token"
   oauth2_client_secret_wo_version = 1`
+
+	// The endpoint is unknown at plan time and resolves to null at apply
+	// time, so the deferred transition check must re-fire during the
+	// apply-time re-plan, before the server is mutated.
+	transitionOAuth2NullEndpoint := noAuth
+	transitionOAuth2NullEndpoint.AuthType = "oauth2"
+	transitionOAuth2NullEndpoint.RawConfig = `  oauth2_client_id = "client-id"
+  oauth2_auth_url  = terraform_data.nullendpoint.id == "" ? "https://issuer.example.com/authorize" : null
+  oauth2_token_url = "https://issuer.example.com/token"`
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -586,6 +612,10 @@ func TestAccAgentsMCPServerResource(t *testing.T) {
 				ExpectError: regexp.MustCompile("Missing API Key Header"),
 			},
 			{
+				Config:      transitionKeepsHeader.String(t),
+				ExpectError: regexp.MustCompile("Invalid Attribute Combination"),
+			},
+			{
 				Config:      transitionOAuth2Discovery.String(t),
 				ExpectError: regexp.MustCompile("Missing OAuth2 Configuration"),
 			},
@@ -605,6 +635,13 @@ resource "terraform_data" "endpoint" {
 `,
 				PlanOnly:    true,
 				ExpectError: regexp.MustCompile("Missing OAuth2 Client Secret"),
+			},
+			{
+				Config: transitionOAuth2NullEndpoint.String(t) + `
+resource "terraform_data" "nullendpoint" {
+}
+`,
+				ExpectError: regexp.MustCompile("(Missing|Incomplete) OAuth2 Configuration"),
 			},
 			{
 				Config: rotated.String(t),
