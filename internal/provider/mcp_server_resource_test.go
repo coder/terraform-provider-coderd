@@ -416,6 +416,13 @@ func TestAccMCPServerResource(t *testing.T) {
   oauth2_token_url                = "https://issuer.example.com/token"
   oauth2_client_secret_wo_version = 1`
 
+	transitionOAuth2UnknownEndpointMissingSecret := noAuth
+	transitionOAuth2UnknownEndpointMissingSecret.AuthType = "oauth2"
+	transitionOAuth2UnknownEndpointMissingSecret.RawConfig = `  oauth2_client_id                = "client-id"
+  oauth2_auth_url                 = terraform_data.endpoint.output
+  oauth2_token_url                = "https://issuer.example.com/token"
+  oauth2_client_secret_wo_version = 1`
+
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
@@ -513,6 +520,19 @@ func TestAccMCPServerResource(t *testing.T) {
 			},
 			{
 				Config:      transitionOAuth2MissingSecret.String(t),
+				ExpectError: regexp.MustCompile("Missing OAuth2 Client Secret"),
+			},
+			{
+				// A not-yet-known endpoint defers only its own check, so the
+				// independent secret-rotation check must still fail the plan.
+				// PlanOnly guards the timing: the apply-time backstop reports
+				// the same error, so a full apply step would pass either way.
+				Config: transitionOAuth2UnknownEndpointMissingSecret.String(t) + `
+resource "terraform_data" "endpoint" {
+  input = "https://issuer.example.com/authorize"
+}
+`,
+				PlanOnly:    true,
 				ExpectError: regexp.MustCompile("Missing OAuth2 Client Secret"),
 			},
 			{

@@ -145,11 +145,11 @@ func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyP
 			{path.Root("oauth2_token_url"), config.OAuth2TokenURL},
 		}
 		for _, field := range fields {
+			// An unknown value defers only its own check to apply time; the
+			// remaining checks are decidable now and must still run.
 			if field.value.IsUnknown() {
-				return
+				continue
 			}
-		}
-		for _, field := range fields {
 			if field.value.IsNull() {
 				resp.Diagnostics.AddAttributeError(field.path, "Missing OAuth2 Configuration", "Changing `auth_type` to \"oauth2\" on an existing server requires `oauth2_client_id`, `oauth2_auth_url`, and `oauth2_token_url`, because OAuth2 discovery only runs at creation. To use discovery instead, replace the resource.")
 			}
