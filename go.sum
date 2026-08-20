@@ -138,6 +138,8 @@ github.com/cloudflare/circl v1.6.3 h1:9GPOhQGF9MCYUeXyMYlqTR6a5gTrgR/fBLXvUgtVcg
 github.com/cloudflare/circl v1.6.3/go.mod h1:2eXP6Qfat4O/Yhh8BznvKnJ+uzEoTQ6jVKJRn81BiS4=
 github.com/coder/coder/v2 v2.34.0-rc.0.0.20260819135125-8a7e8d9d5b31 h1:CeGZSmHR6doldOLgRbZpQLzKzuJh9KQkSN0O3aktgvE=
 github.com/coder/coder/v2 v2.34.0-rc.0.0.20260819135125-8a7e8d9d5b31/go.mod h1:pZvSpxDWkuVFXq6X/JvnW+BHPuEr1hc5VkwrJ8aJJng=
+github.com/coder/coder/v2 v2.34.0-rc.0.0.20260819194623-24b83dc727e8 h1:mLAxnd8iaIvQm43EfILFLvIyCRnHILQskGgnkj6V/P8=
+github.com/coder/coder/v2 v2.34.0-rc.0.0.20260819194623-24b83dc727e8/go.mod h1:pZvSpxDWkuVFXq6X/JvnW+BHPuEr1hc5VkwrJ8aJJng=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 h1:3A0ES21Ke+FxEM8CXx9n47SZOKOpgSE1bbJzlE4qPVs=
 github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0/go.mod h1:5UuS2Ts+nTToAMeOjNlnHFkPahrtDkmpydBen/3wgZc=
 github.com/coder/quartz v0.3.0 h1:bUoSEJ77NBfKtUqv6CPSC0AS8dsjqAqqAv7bN02m1mg=
