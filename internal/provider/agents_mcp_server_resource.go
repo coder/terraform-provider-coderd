@@ -628,7 +628,7 @@ func (m AgentsMCPServerResourceModel) createRequest(ctx context.Context, config 
 			diags.AddAttributeError(path.Root("custom_headers_wo"), "Missing Custom Headers", "Creating a server with `auth_type = \"custom_headers\"` requires a non-empty `custom_headers_wo` map.")
 		}
 	}
-	return codersdk.CreateMCPServerConfigRequest{
+	req := codersdk.CreateMCPServerConfigRequest{
 		DisplayName:         m.DisplayName.ValueString(),
 		Slug:                m.Slug.ValueString(),
 		Description:         m.Description.ValueString(),
@@ -637,14 +637,11 @@ func (m AgentsMCPServerResourceModel) createRequest(ctx context.Context, config 
 		URL:                 m.URL.ValueString(),
 		AuthType:            m.AuthType.ValueString(),
 		OAuth2ClientID:      m.OAuth2ClientID.ValueString(),
-		OAuth2ClientSecret:  writeOnlyString(config.OAuth2ClientSecretWO),
 		OAuth2AuthURL:       m.OAuth2AuthURL.ValueString(),
 		OAuth2TokenURL:      m.OAuth2TokenURL.ValueString(),
 		OAuth2RevocationURL: m.OAuth2RevocationURL.ValueString(),
 		OAuth2Scopes:        m.OAuth2Scopes.ValueString(),
 		APIKeyHeader:        m.APIKeyHeader.ValueString(),
-		APIKeyValue:         writeOnlyString(config.APIKeyValueWO),
-		CustomHeaders:       writeOnlyStringMap(ctx, config.CustomHeadersWO, diags),
 		ToolAllowList:       stringSetElements(ctx, m.ToolAllowList, diags),
 		ToolDenyList:        stringSetElements(ctx, m.ToolDenyList, diags),
 		Availability:        m.Availability.ValueString(),
@@ -653,6 +650,18 @@ func (m AgentsMCPServerResourceModel) createRequest(ctx context.Context, config 
 		AllowInPlanMode:     m.AllowInPlanMode.ValueBool(),
 		ForwardCoderHeaders: m.ForwardCoderHeaders.ValueBool(),
 	}
+	// A write-only secret is sent only when its auth type is selected. The
+	// server persists incoming secrets regardless of auth type, so a
+	// leftover credential for another type must not be transmitted.
+	switch m.AuthType.ValueString() {
+	case "oauth2":
+		req.OAuth2ClientSecret = writeOnlyString(config.OAuth2ClientSecretWO)
+	case "api_key":
+		req.APIKeyValue = writeOnlyString(config.APIKeyValueWO)
+	case "custom_headers":
+		req.CustomHeaders = writeOnlyStringMap(ctx, config.CustomHeadersWO, diags)
+	}
+	return req
 }
 
 func (m AgentsMCPServerResourceModel) updateRequest(ctx context.Context, state, config AgentsMCPServerResourceModel, diags *diag.Diagnostics) codersdk.UpdateMCPServerConfigRequest {

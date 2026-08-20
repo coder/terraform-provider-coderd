@@ -15,6 +15,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -282,6 +283,36 @@ func TestAgentsMCPServerUpdateRequestSecrets(t *testing.T) {
 		require.False(t, diags.HasError(), diags.Errors())
 		require.Nil(t, request.APIKeyValue)
 	})
+}
+
+func TestAgentsMCPServerCreateRequestSecrets(t *testing.T) {
+	t.Parallel()
+
+	// The server persists incoming secrets regardless of auth type, so a
+	// leftover write-only credential for another type must not be sent.
+	plan := testAgentsMCPServerModel("none")
+	config := plan
+	config.OAuth2ClientSecretWO = types.StringValue("oauth2-secret")
+	config.APIKeyValueWO = types.StringValue("api-key-secret")
+	config.CustomHeadersWO = types.MapValueMust(types.StringType, map[string]attr.Value{"X-Auth": types.StringValue("header-secret")})
+
+	var diags diag.Diagnostics
+	request := plan.createRequest(t.Context(), config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.Empty(t, request.OAuth2ClientSecret)
+	require.Empty(t, request.APIKeyValue)
+	require.Empty(t, request.CustomHeaders)
+
+	apiKeyPlan := testAgentsMCPServerModel("api_key")
+	apiKeyPlan.APIKeyHeader = types.StringValue("Authorization")
+	apiKeyConfig := apiKeyPlan
+	apiKeyConfig.APIKeyValueWO = types.StringValue("api-key-secret")
+
+	diags = diag.Diagnostics{}
+	request = apiKeyPlan.createRequest(t.Context(), apiKeyConfig, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.Equal(t, "api-key-secret", request.APIKeyValue)
+	require.Empty(t, request.OAuth2ClientSecret)
 }
 
 func TestAgentsMCPServerUpdateRequestSparse(t *testing.T) {
