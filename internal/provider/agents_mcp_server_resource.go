@@ -25,6 +25,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
+// agentsMCPServerMinVersion is the first Coder release that can include the
+// organization-scoped MCP server API added on main by coder/coder#27942.
+const agentsMCPServerMinVersion = "2.37.0"
+
 var (
 	_ resource.Resource                   = &AgentsMCPServerResource{}
 	_ resource.ResourceWithConfigure      = &AgentsMCPServerResource{}
@@ -177,6 +181,7 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 	emptyStringSet := types.SetValueMust(types.StringType, []attr.Value{})
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
+			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsMCPServerMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsMCPServerMinVersion + ") and later.\n\n" +
 			"-> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.\n\n" +
 			"Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization_id>/<id>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.\n\n" +
 			"Coder runs OAuth2 discovery and dynamic client registration only when a server is created with `auth_type = \"oauth2\"` and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with `terraform apply -replace`). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.",
