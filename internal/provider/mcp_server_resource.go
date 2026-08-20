@@ -449,15 +449,21 @@ func (r *MCPServerResource) ValidateConfig(ctx context.Context, req resource.Val
 			{path.Root("oauth2_token_url"), data.OAuth2TokenURL},
 		}
 		configured := 0
+		unset := 0
 		for _, field := range fields {
+			// An unknown field is skipped rather than deferring the whole
+			// check: mixing a configured field with an unset one is
+			// incomplete no matter what the unknown resolves to.
 			if field.value.IsUnknown() {
-				return
+				continue
 			}
 			if !field.value.IsNull() && field.value.ValueString() != "" {
 				configured++
+			} else {
+				unset++
 			}
 		}
-		if configured != 0 && configured != len(fields) {
+		if configured != 0 && unset != 0 {
 			for _, field := range fields {
 				resp.Diagnostics.AddAttributeError(field.path, "Incomplete OAuth2 Configuration", "Set `oauth2_client_id`, `oauth2_auth_url`, and `oauth2_token_url` together for manual OAuth2 configuration, or leave all three unset to use discovery and dynamic client registration.")
 			}

@@ -38,8 +38,23 @@ func TestAccMCPServerResourceSchemaValidation(t *testing.T) {
 
 	for name, tc := range map[string]struct {
 		body      string
+		extra     string
 		wantError string
 	}{
+		"oauth2 unknown auth url with missing token url": {
+			// The unknown endpoint cannot make this valid: the configured
+			// client ID rules out all-unset and the omitted token URL rules
+			// out all-set, so the plan must fail without waiting for apply.
+			body: `  auth_type        = "oauth2"
+  oauth2_client_id = "client-id"
+  oauth2_auth_url  = terraform_data.endpoint.output`,
+			extra: `
+resource "terraform_data" "endpoint" {
+  input = "https://issuer.example.com/authorize"
+}
+`,
+			wantError: "Incomplete OAuth2 Configuration",
+		},
 		"api key missing header": {
 			body: `  auth_type               = "api_key"
   api_key_value_wo        = "secret"
@@ -107,7 +122,7 @@ func TestAccMCPServerResourceSchemaValidation(t *testing.T) {
 				TerraformVersionChecks:   testMCPServerTerraformVersionChecks(),
 				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 				Steps: []resource.TestStep{{
-					Config:      testMCPServerValidationConfig(srv.URL, tc.body),
+					Config:      testMCPServerValidationConfig(srv.URL, tc.body) + tc.extra,
 					PlanOnly:    true,
 					ExpectError: regexp.MustCompile(tc.wantError),
 				}},
