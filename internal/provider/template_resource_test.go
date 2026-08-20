@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/config"
@@ -19,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/semver"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -33,6 +36,106 @@ func mustVariablesToSet(vars []Variable) types.Set {
 		panic(fmt.Sprintf("mustVariablesToSet: %v", diags.Errors()))
 	}
 	return s
+}
+
+func TestTemplateResourceReconcileVersionedMetadata(t *testing.T) {
+	t.Parallel()
+
+	t.Run("overwrites all versioned fields", func(t *testing.T) {
+		t.Parallel()
+
+		state := TemplateResourceModel{
+			MaxPortShareLevel:       types.StringValue("owner"),
+			CORSBehavior:            types.StringValue("simple"),
+			UseClassicParameterFlow: types.BoolValue(true),
+			AgentsAllowed:           types.BoolValue(false),
+		}
+		state.reconcileVersionedMetadata(&codersdk.Template{
+			MaxPortShareLevel:       codersdk.WorkspaceAgentPortShareLevelPublic,
+			CORSBehavior:            codersdk.CORSBehaviorPassthru,
+			UseClassicParameterFlow: false,
+			AgentsAllowed:           true,
+		})
+
+		require.Equal(t, "public", state.MaxPortShareLevel.ValueString())
+		require.Equal(t, "passthru", state.CORSBehavior.ValueString())
+		require.False(t, state.UseClassicParameterFlow.ValueBool())
+		require.True(t, state.AgentsAllowed.ValueBool())
+	})
+
+	t.Run("empty CORS behavior", func(t *testing.T) {
+		t.Parallel()
+
+		state := TemplateResourceModel{CORSBehavior: types.StringValue("simple")}
+		state.reconcileVersionedMetadata(&codersdk.Template{})
+
+		require.True(t, state.CORSBehavior.IsNull())
+	})
+}
+
+func TestTemplateResourceBoolRequests(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                    string
+		useClassicParameterFlow types.Bool
+		agentsAllowed           types.Bool
+		wantClassic             *bool
+		wantAgents              *bool
+	}{
+		{
+			name:                    "classic unknown, agents true",
+			useClassicParameterFlow: types.BoolUnknown(),
+			agentsAllowed:           types.BoolValue(true),
+			wantAgents:              ptr.Ref(true),
+		},
+		{
+			name:                    "classic true, agents unknown",
+			useClassicParameterFlow: types.BoolValue(true),
+			agentsAllowed:           types.BoolUnknown(),
+			wantClassic:             ptr.Ref(true),
+		},
+		{
+			name:                    "classic null, agents false",
+			useClassicParameterFlow: types.BoolNull(),
+			agentsAllowed:           types.BoolValue(false),
+			wantAgents:              ptr.Ref(false),
+		},
+		{
+			name:                    "classic false, agents null",
+			useClassicParameterFlow: types.BoolValue(false),
+			agentsAllowed:           types.BoolNull(),
+			wantClassic:             ptr.Ref(false),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			model := TemplateResourceModel{
+				AutostopRequirement: types.ObjectValueMust(autostopRequirementTypeAttr, map[string]attr.Value{
+					"days_of_week": types.SetValueMust(types.StringType, []attr.Value{}),
+					"weeks":        types.Int64Value(1),
+				}),
+				AutostartPermittedDaysOfWeek: types.SetValueMust(types.StringType, []attr.Value{}),
+				UseClassicParameterFlow:      tc.useClassicParameterFlow,
+				AgentsAllowed:                tc.agentsAllowed,
+				ACL:                          types.ObjectNull(aclTypeAttr),
+			}
+
+			var updateDiags diag.Diagnostics
+			updateReq := model.toUpdateRequest(t.Context(), &updateDiags)
+			require.False(t, updateDiags.HasError(), updateDiags.Errors())
+			require.Equal(t, tc.wantClassic, updateReq.UseClassicParameterFlow)
+			require.Equal(t, tc.wantAgents, updateReq.AgentsAllowed)
+
+			createResp := frameworkresource.CreateResponse{}
+			createReq := model.toCreateRequest(t.Context(), &createResp, uuid.New())
+			require.False(t, createResp.Diagnostics.HasError(), createResp.Diagnostics.Errors())
+			require.Equal(t, tc.wantClassic, createReq.UseClassicParameterFlow)
+			require.Equal(t, tc.wantAgents, createReq.AgentsAllowed)
+		})
+	}
 }
 
 func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
@@ -748,6 +851,68 @@ func TestAccTemplateResource(t *testing.T) {
 				},
 			},
 		})
+	})
+}
+
+func TestAccTemplateResourceAgentsAllowed(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_agents_allowed_acc")
+	buildInfo, err := client.BuildInfo(ctx)
+	require.NoError(t, err, "fetch buildinfo")
+	if semver.Compare(buildInfo.CanonicalVersion(), "v"+templateAgentsAllowedMinVersion) < 0 {
+		t.Skipf("test requires Coder v%s or later, deployment is %s", templateAgentsAllowedMinVersion, buildInfo.CanonicalVersion())
+	}
+
+	directory := t.TempDir()
+	err = cp.Copy("../../integration/template-test/example-template", directory)
+	require.NoError(t, err)
+
+	cfgOmitted := testAccTemplateResourceConfig{
+		URL:   client.URL.String(),
+		Token: client.SessionToken(),
+		Name:  ptr.Ref("agents-allowed-template"),
+		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			{
+				Directory: &directory,
+				Active:    ptr.Ref(true),
+			},
+		}),
+		ACL: testAccTemplateACLConfig{null: true},
+	}
+	cfgFalse := cfgOmitted
+	cfgFalse.AgentsAllowed = ptr.Ref(false)
+	cfgTrue := cfgFalse
+	cfgTrue.AgentsAllowed = ptr.Ref(true)
+	cfgOmittedAgain := cfgTrue
+	cfgOmittedAgain.AgentsAllowed = nil
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfgOmitted.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "true"),
+			},
+			{
+				Config: cfgFalse.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "false"),
+			},
+			{
+				Config: cfgTrue.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "agents_allowed", "true"),
+			},
+			{
+				// Omitting the attribute again preserves the prior state value.
+				Config:   cfgOmittedAgain.String(t),
+				PlanOnly: true,
+			},
+		},
 	})
 }
 
@@ -1606,6 +1771,7 @@ type testAccTemplateResourceConfig struct {
 	MaxPortShareLevel            *string
 	CORSBehavior                 *string
 	UseClassicParameterFlow      *bool
+	AgentsAllowed                *bool
 
 	// Versions is a pointer so that a nil value renders `versions = null`
 	// (matching AutostartRequirement above), letting tests exercise
@@ -1757,6 +1923,7 @@ resource "coderd_template" "test" {
 	max_port_share_level              = {{orNull .MaxPortShareLevel}}
 	cors_behavior                     = {{orNull .CORSBehavior}}
 	use_classic_parameter_flow        = {{orNull .UseClassicParameterFlow}}
+	agents_allowed                    = {{orNull .AgentsAllowed}}
 
 	acl = ` + c.ACL.String(t) + `
 

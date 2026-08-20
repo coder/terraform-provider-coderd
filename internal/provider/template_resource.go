@@ -46,6 +46,8 @@ var (
 	_ resource.ResourceWithConfigValidators = &TemplateResource{}
 )
 
+const templateAgentsAllowedMinVersion = "2.37.0"
+
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
 }
@@ -79,6 +81,7 @@ type TemplateResourceModel struct {
 	MaxPortShareLevel              types.String `tfsdk:"max_port_share_level"`
 	CORSBehavior                   types.String `tfsdk:"cors_behavior"`
 	UseClassicParameterFlow        types.Bool   `tfsdk:"use_classic_parameter_flow"`
+	AgentsAllowed                  types.Bool   `tfsdk:"agents_allowed"`
 
 	// If null, we are not managing ACL via Terraform (such as for AGPL).
 	ACL      types.Object `tfsdk:"acl"`
@@ -106,7 +109,8 @@ func (m *TemplateResourceModel) EqualTemplateMetadata(other *TemplateResourceMod
 		m.DeprecationMessage.Equal(other.DeprecationMessage) &&
 		m.MaxPortShareLevel.Equal(other.MaxPortShareLevel) &&
 		m.CORSBehavior.Equal(other.CORSBehavior) &&
-		m.UseClassicParameterFlow.Equal(other.UseClassicParameterFlow)
+		m.UseClassicParameterFlow.Equal(other.UseClassicParameterFlow) &&
+		m.AgentsAllowed.Equal(other.AgentsAllowed)
 }
 
 func (m *TemplateResourceModel) CheckEntitlements(ctx context.Context, features map[codersdk.FeatureName]codersdk.Feature) (diags diag.Diagnostics) {
@@ -467,6 +471,14 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 					boolplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"agents_allowed": schema.BoolAttribute{
+				MarkdownDescription: fmt.Sprintf("Whether Coder Agents can create workspaces from this template. Coder defaults this setting to true. Requires a Coder deployment running v%s or later.", templateAgentsAllowedMinVersion),
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"acl": schema.SingleNestedAttribute{
 				MarkdownDescription: "(Enterprise) Access control list for the template. If null, ACL policies will not be added, removed, or read by Terraform.",
 				Optional:            true,
@@ -690,6 +702,14 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		data.UseClassicParameterFlow = types.BoolValue(ucpfResp.UseClassicParameterFlow)
 	}
 
+	// Fetch the authoritative values after the compatibility updates.
+	authoritativeTemplate, err := client.Template(ctx, data.ID.ValueUUID())
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
+		return
+	}
+	data.reconcileVersionedMetadata(&authoritativeTemplate)
+
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -728,9 +748,7 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.Append(diag...)
 		return
 	}
-	data.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
-	data.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
-	data.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
+	data.reconcileVersionedMetadata(&template)
 
 	if !data.ACL.IsNull() {
 		tflog.Info(ctx, "reading template ACL")
@@ -905,8 +923,7 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
 		return
 	}
-	newState.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
-	newState.CORSBehavior = stringValueOrNull(string(templateResp.CORSBehavior))
+	newState.reconcileVersionedMetadata(&templateResp)
 
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -1416,6 +1433,16 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	}
 }
 
+// reconcileVersionedMetadata overwrites metadata fields that older Coder
+// servers can omit from mutation responses. Call it with an authoritative
+// template response before writing state.
+func (r *TemplateResourceModel) reconcileVersionedMetadata(template *codersdk.Template) {
+	r.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
+	r.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
+	r.UseClassicParameterFlow = types.BoolValue(template.UseClassicParameterFlow)
+	r.AgentsAllowed = types.BoolValue(template.AgentsAllowed)
+}
+
 func (r *TemplateResourceModel) readResponse(ctx context.Context, template *codersdk.Template) diag.Diagnostics {
 	r.Name = types.StringValue(template.Name)
 	r.DisplayName = types.StringValue(template.DisplayName)
@@ -1491,7 +1518,8 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
 		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
-		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		UseClassicParameterFlow:        boolPtrOrNil(r.UseClassicParameterFlow),
+		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		// If we're managing ACL, we want to delete the everyone group.
 		DisableEveryoneGroupAccess: ptr.Ref(!r.ACL.IsNull()),
 	}
@@ -1536,7 +1564,8 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64Pointer(),
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
-		UseClassicParameterFlow:        r.UseClassicParameterFlow.ValueBoolPointer(),
+		UseClassicParameterFlow:        boolPtrOrNil(r.UseClassicParameterFlow),
+		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
 		DisableEveryoneGroupAccess:     !r.ACL.IsNull(),
 	}

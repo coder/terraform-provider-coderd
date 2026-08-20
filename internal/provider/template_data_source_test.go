@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/semver"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
@@ -28,6 +29,10 @@ func TestAccTemplateDataSource(t *testing.T) {
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	orgID := firstUser.OrganizationIDs[0]
+
+	buildInfo, err := client.BuildInfo(ctx)
+	require.NoError(t, err, "fetch buildinfo")
+	supportsAgentsAllowed := semver.Compare(buildInfo.CanonicalVersion(), "v"+templateAgentsAllowedMinVersion) >= 0
 
 	version, _, err := newVersion(ctx, client, newVersionRequest{
 		OrganizationID: orgID,
@@ -67,6 +72,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 		TimeTilDormantAutoDeleteMillis: ptr.Ref((30 * 24 * time.Hour).Milliseconds()),
 		DisableEveryoneGroupAccess:     true,
 		RequireActiveVersion:           true,
+		AgentsAllowed:                  ptr.Ref(false),
 	})
 	require.NoError(t, err)
 
@@ -110,7 +116,7 @@ func TestAccTemplateDataSource(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	checkFn := resource.ComposeAggregateTestCheckFunc(
+	checks := []resource.TestCheckFunc{
 		resource.TestCheckResourceAttr("data.coderd_template.test", "organization_id", tpl.OrganizationID.String()),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "id", tpl.ID.String()),
 		resource.TestCheckResourceAttr("data.coderd_template.test", "name", tpl.Name),
@@ -149,7 +155,11 @@ func TestAccTemplateDataSource(t *testing.T) {
 			"id":   regexp.MustCompile(firstUser.ID.String()),
 			"role": regexp.MustCompile("^admin$"),
 		}),
-	)
+	}
+	if supportsAgentsAllowed {
+		checks = append(checks, resource.TestCheckResourceAttr("data.coderd_template.test", "agents_allowed", strconv.FormatBool(tpl.AgentsAllowed)))
+	}
+	checkFn := resource.ComposeAggregateTestCheckFunc(checks...)
 
 	t.Run("TemplateByOrgAndNameOK", func(t *testing.T) {
 		cfg := testAccTemplateDataSourceConfig{
