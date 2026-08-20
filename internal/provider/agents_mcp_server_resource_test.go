@@ -24,13 +24,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testMCPServerTerraformVersionChecks() []tfversion.TerraformVersionCheck {
+func testAgentsMCPServerTerraformVersionChecks() []tfversion.TerraformVersionCheck {
 	return []tfversion.TerraformVersionCheck{
 		tfversion.SkipBelow(tfversion.Version1_11_0),
 	}
 }
 
-func TestAccMCPServerResourceSchemaValidation(t *testing.T) {
+func TestAccAgentsMCPServerResourceSchemaValidation(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
@@ -119,10 +119,10 @@ resource "terraform_data" "endpoint" {
 
 			resource.Test(t, resource.TestCase{
 				IsUnitTest:               true,
-				TerraformVersionChecks:   testMCPServerTerraformVersionChecks(),
+				TerraformVersionChecks:   testAgentsMCPServerTerraformVersionChecks(),
 				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 				Steps: []resource.TestStep{{
-					Config:      testMCPServerValidationConfig(srv.URL, tc.body) + tc.extra,
+					Config:      testAgentsMCPServerValidationConfig(srv.URL, tc.body) + tc.extra,
 					PlanOnly:    true,
 					ExpectError: regexp.MustCompile(tc.wantError),
 				}},
@@ -131,13 +131,13 @@ resource "terraform_data" "endpoint" {
 	}
 }
 
-func testMCPServerValidationConfig(url, body string) string {
+func testAgentsMCPServerValidationConfig(url, body string) string {
 	return `provider "coderd" {
   url   = "` + url + `"
   token = "test-token"
 }
 
-resource "coderd_mcp_server" "test" {
+resource "coderd_agents_mcp_server" "test" {
   display_name = "MCP Test"
   slug         = "mcp-test"
   url          = "https://mcp.example.com/v1"
@@ -146,9 +146,9 @@ resource "coderd_mcp_server" "test" {
 `
 }
 
-// TestAccMCPServerRequiredStringsRejectEmpty guards that the required strings
+// TestAccAgentsMCPServerRequiredStringsRejectEmpty guards that the required strings
 // reject a configured "", which Terraform otherwise treats as present.
-func TestAccMCPServerRequiredStringsRejectEmpty(t *testing.T) {
+func TestAccAgentsMCPServerRequiredStringsRejectEmpty(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
@@ -172,7 +172,7 @@ func TestAccMCPServerRequiredStringsRejectEmpty(t *testing.T) {
   token = "test-token"
 }
 
-resource "coderd_mcp_server" "test" {
+resource "coderd_agents_mcp_server" "test" {
   display_name = ` + values["display_name"] + `
   slug         = ` + values["slug"] + `
   url          = ` + values["url"] + `
@@ -180,7 +180,7 @@ resource "coderd_mcp_server" "test" {
 `
 			resource.Test(t, resource.TestCase{
 				IsUnitTest:               true,
-				TerraformVersionChecks:   testMCPServerTerraformVersionChecks(),
+				TerraformVersionChecks:   testAgentsMCPServerTerraformVersionChecks(),
 				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 				Steps: []resource.TestStep{{
 					Config:      config,
@@ -192,12 +192,12 @@ resource "coderd_mcp_server" "test" {
 	}
 }
 
-func TestMCPServerUpdateRequestSecrets(t *testing.T) {
+func TestAgentsMCPServerUpdateRequestSecrets(t *testing.T) {
 	t.Parallel()
 
 	t.Run("rotation attaches secret", func(t *testing.T) {
 		t.Parallel()
-		state := testMCPServerModel("api_key")
+		state := testAgentsMCPServerModel("api_key")
 		state.APIKeyHeader = types.StringValue("Authorization")
 		state.APIKeyValueWOVersion = types.Int64Value(1)
 		plan := state
@@ -214,7 +214,7 @@ func TestMCPServerUpdateRequestSecrets(t *testing.T) {
 
 	t.Run("rotation without secret is rejected", func(t *testing.T) {
 		t.Parallel()
-		state := testMCPServerModel("api_key")
+		state := testAgentsMCPServerModel("api_key")
 		state.APIKeyHeader = types.StringValue("Authorization")
 		state.APIKeyValueWOVersion = types.Int64Value(1)
 		plan := state
@@ -229,7 +229,7 @@ func TestMCPServerUpdateRequestSecrets(t *testing.T) {
 
 	t.Run("non-destination version bump is ignored", func(t *testing.T) {
 		t.Parallel()
-		state := testMCPServerModel("oauth2")
+		state := testAgentsMCPServerModel("oauth2")
 		state.APIKeyValueWOVersion = types.Int64Value(1)
 		plan := state
 		plan.APIKeyValueWOVersion = types.Int64Value(2)
@@ -244,7 +244,7 @@ func TestMCPServerUpdateRequestSecrets(t *testing.T) {
 
 	t.Run("transition attaches unchanged-version secret", func(t *testing.T) {
 		t.Parallel()
-		state := testMCPServerModel("none")
+		state := testAgentsMCPServerModel("none")
 		state.APIKeyValueWOVersion = types.Int64Value(2)
 		plan := state
 		plan.AuthType = types.StringValue("api_key")
@@ -261,7 +261,7 @@ func TestMCPServerUpdateRequestSecrets(t *testing.T) {
 
 	t.Run("adoption preserves unmanaged secret", func(t *testing.T) {
 		t.Parallel()
-		state := testMCPServerModel("api_key")
+		state := testAgentsMCPServerModel("api_key")
 		state.APIKeyHeader = types.StringValue("Authorization")
 		plan := state
 
@@ -272,14 +272,65 @@ func TestMCPServerUpdateRequestSecrets(t *testing.T) {
 	})
 }
 
-func TestMCPServerStateFromServer(t *testing.T) {
+func TestAgentsMCPServerUpdateRequestSparse(t *testing.T) {
+	t.Parallel()
+
+	t.Run("only changed fields are sent", func(t *testing.T) {
+		t.Parallel()
+		state := testAgentsMCPServerModel("api_key")
+		state.APIKeyHeader = types.StringValue("Authorization")
+		plan := state
+		plan.DisplayName = types.StringValue("MCP Renamed")
+
+		var diags diag.Diagnostics
+		request := plan.updateRequest(t.Context(), state, plan, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.NotNil(t, request.DisplayName)
+		require.Equal(t, "MCP Renamed", *request.DisplayName)
+		// Unchanged fields must be omitted so a stale refreshed value cannot
+		// overwrite an out-of-band server change during apply.
+		require.Equal(t, codersdk.UpdateMCPServerConfigRequest{DisplayName: request.DisplayName}, request)
+	})
+
+	t.Run("unknown planned values are omitted", func(t *testing.T) {
+		t.Parallel()
+		state := testAgentsMCPServerModel("api_key")
+		state.APIKeyHeader = types.StringValue("Authorization")
+		plan := state
+		plan.AuthType = types.StringValue("none")
+		plan.APIKeyHeader = types.StringUnknown()
+
+		var diags diag.Diagnostics
+		request := plan.updateRequest(t.Context(), state, plan, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.NotNil(t, request.AuthType)
+		require.Equal(t, "none", *request.AuthType)
+		require.Nil(t, request.APIKeyHeader)
+	})
+
+	t.Run("changed tool sets are decoded and sent", func(t *testing.T) {
+		t.Parallel()
+		state := testAgentsMCPServerModel("none")
+		plan := state
+		plan.ToolAllowList = stringSetValue([]string{"search"})
+
+		var diags diag.Diagnostics
+		request := plan.updateRequest(t.Context(), state, plan, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.NotNil(t, request.ToolAllowList)
+		require.Equal(t, []string{"search"}, *request.ToolAllowList)
+		require.Nil(t, request.ToolDenyList)
+	})
+}
+
+func TestAgentsMCPServerStateFromServer(t *testing.T) {
 	t.Parallel()
 
 	id := uuid.New()
 	organizationID := uuid.New()
 	createdAt := time.Unix(100, 0)
 	updatedAt := time.Unix(200, 0)
-	prior := testMCPServerModel("api_key")
+	prior := testAgentsMCPServerModel("api_key")
 	prior.APIKeyValueWOVersion = types.Int64Value(7)
 	state := prior.stateFromServer(codersdk.MCPServerConfig{
 		ID:                  id,
@@ -304,6 +355,11 @@ func TestMCPServerStateFromServer(t *testing.T) {
 	require.Equal(t, id, state.ID.ValueUUID())
 	require.Equal(t, organizationID, state.OrganizationID.ValueUUID())
 	require.Equal(t, "Authorization", state.APIKeyHeader.ValueString())
+	// Optional strings the server omits ("") must normalize to null.
+	require.True(t, state.OAuth2ClientID.IsNull())
+	require.True(t, state.OAuth2AuthURL.IsNull())
+	require.True(t, state.OAuth2TokenURL.IsNull())
+	require.True(t, state.OAuth2RevocationURL.IsNull())
 	require.Equal(t, prior.APIKeyValueWOVersion, state.APIKeyValueWOVersion)
 	require.True(t, state.APIKeyValueWO.IsNull())
 	require.Equal(t, int64(100), state.CreatedAt.ValueInt64())
@@ -311,8 +367,8 @@ func TestMCPServerStateFromServer(t *testing.T) {
 	require.Len(t, state.ToolAllowList.Elements(), 1)
 }
 
-func testMCPServerModel(authType string) MCPServerResourceModel {
-	return MCPServerResourceModel{
+func testAgentsMCPServerModel(authType string) AgentsMCPServerResourceModel {
+	return AgentsMCPServerResourceModel{
 		DisplayName:                 types.StringValue("MCP Test"),
 		Slug:                        types.StringValue("mcp-test"),
 		URL:                         types.StringValue("https://mcp.example.com/v1"),
@@ -321,14 +377,14 @@ func testMCPServerModel(authType string) MCPServerResourceModel {
 		Transport:                   types.StringValue("streamable_http"),
 		AuthType:                    types.StringValue(authType),
 		Availability:                types.StringValue("default_off"),
-		OAuth2ClientID:              types.StringValue(""),
+		OAuth2ClientID:              types.StringNull(),
 		OAuth2ClientSecretWO:        types.StringNull(),
 		OAuth2ClientSecretWOVersion: types.Int64Null(),
-		OAuth2AuthURL:               types.StringValue(""),
-		OAuth2TokenURL:              types.StringValue(""),
-		OAuth2RevocationURL:         types.StringValue(""),
+		OAuth2AuthURL:               types.StringNull(),
+		OAuth2TokenURL:              types.StringNull(),
+		OAuth2RevocationURL:         types.StringNull(),
 		OAuth2Scopes:                types.StringValue(""),
-		APIKeyHeader:                types.StringValue(""),
+		APIKeyHeader:                types.StringNull(),
 		APIKeyValueWO:               types.StringNull(),
 		APIKeyValueWOVersion:        types.Int64Null(),
 		CustomHeadersWO:             types.MapNull(types.StringType),
@@ -342,14 +398,14 @@ func testMCPServerModel(authType string) MCPServerResourceModel {
 	}
 }
 
-func TestAccMCPServerResource(t *testing.T) {
+func TestAccAgentsMCPServerResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
 
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "mcp_server_acc")
+	client := integration.StartCoder(ctx, t, "agents_mcp_server_acc")
 	organizations, err := client.Organizations(ctx)
 	require.NoError(t, err, "list organizations")
 	require.NotEmpty(t, organizations, "first user must belong to an organization")
@@ -365,7 +421,7 @@ func TestAccMCPServerResource(t *testing.T) {
 		require.NoError(t, err, "probe org-scoped MCP server configs")
 	}
 
-	minimal := testAccMCPServerResourceConfig{
+	minimal := testAccAgentsMCPServerResourceConfig{
 		URL:         client.URL.String(),
 		Token:       client.SessionToken(),
 		DisplayName: "MCP Acceptance",
@@ -441,7 +497,7 @@ func TestAccMCPServerResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
 		PreCheck:                 func() { testAccPreCheck(t) },
-		TerraformVersionChecks:   testMCPServerTerraformVersionChecks(),
+		TerraformVersionChecks:   testAgentsMCPServerTerraformVersionChecks(),
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -455,62 +511,62 @@ func TestAccMCPServerResource(t *testing.T) {
 			{
 				Config: minimal.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "display_name", minimal.DisplayName),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "slug", minimal.Slug),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "description", ""),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "icon_url", ""),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "transport", "streamable_http"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "none"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "availability", "default_off"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "enabled", "false"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "model_intent", "false"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "allow_in_plan_mode", "false"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "forward_coder_headers", "false"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "tool_allow_list.#", "0"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "tool_deny_list.#", "0"),
-					resource.TestCheckResourceAttrSet("coderd_mcp_server.test", "organization_id"),
-					resource.TestCheckResourceAttrSet("coderd_mcp_server.test", "created_at"),
-					resource.TestCheckResourceAttrSet("coderd_mcp_server.test", "updated_at"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "display_name", minimal.DisplayName),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "slug", minimal.Slug),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "description", ""),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "icon_url", ""),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "transport", "streamable_http"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "auth_type", "none"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "availability", "default_off"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "enabled", "false"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "model_intent", "false"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "allow_in_plan_mode", "false"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "forward_coder_headers", "false"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "tool_allow_list.#", "0"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "tool_deny_list.#", "0"),
+					resource.TestCheckResourceAttrSet("coderd_agents_mcp_server.test", "organization_id"),
+					resource.TestCheckResourceAttrSet("coderd_agents_mcp_server.test", "created_at"),
+					resource.TestCheckResourceAttrSet("coderd_agents_mcp_server.test", "updated_at"),
 				),
 			},
 			{
 				Config: updated.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "display_name", updated.DisplayName),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "description", updated.Description),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "url", updated.ServerURL),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "enabled", "true"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "availability", updated.Availability),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "tool_allow_list.#", "2"),
-					resource.TestCheckTypeSetElemAttr("coderd_mcp_server.test", "tool_allow_list.*", "search"),
-					resource.TestCheckTypeSetElemAttr("coderd_mcp_server.test", "tool_allow_list.*", "read"),
-					resource.TestCheckTypeSetElemAttr("coderd_mcp_server.test", "tool_deny_list.*", "delete"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "display_name", updated.DisplayName),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "description", updated.Description),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "url", updated.ServerURL),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "enabled", "true"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "availability", updated.Availability),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "tool_allow_list.#", "2"),
+					resource.TestCheckTypeSetElemAttr("coderd_agents_mcp_server.test", "tool_allow_list.*", "search"),
+					resource.TestCheckTypeSetElemAttr("coderd_agents_mcp_server.test", "tool_allow_list.*", "read"),
+					resource.TestCheckTypeSetElemAttr("coderd_agents_mcp_server.test", "tool_deny_list.*", "delete"),
 				),
 			},
 			{
 				Config: renamed.String(t),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("coderd_mcp_server.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("coderd_agents_mcp_server.test", plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.TestCheckResourceAttr("coderd_mcp_server.test", "slug", renamed.Slug),
+				Check: resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "slug", renamed.Slug),
 			},
 			{
 				Config: apiKey.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", apiKey.APIKeyHeader),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "1"),
-					resource.TestCheckNoResourceAttr("coderd_mcp_server.test", "api_key_value_wo"),
-					checkMCPServerAPIKey(ctx, t, client, true),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "auth_type", "api_key"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "api_key_header", apiKey.APIKeyHeader),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "api_key_value_wo_version", "1"),
+					resource.TestCheckNoResourceAttr("coderd_agents_mcp_server.test", "api_key_value_wo"),
+					checkAgentsMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
 			{
 				Config: rotated.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "2"),
-					checkMCPServerAPIKey(ctx, t, client, true),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "api_key_value_wo_version", "2"),
+					checkAgentsMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
 			{
@@ -520,9 +576,9 @@ func TestAccMCPServerResource(t *testing.T) {
 			{
 				Config: noAuth.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "none"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", ""),
-					checkMCPServerAPIKey(ctx, t, client, false),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "auth_type", "none"),
+					resource.TestCheckNoResourceAttr("coderd_agents_mcp_server.test", "api_key_header"),
+					checkAgentsMCPServerAPIKey(ctx, t, client, false),
 				),
 			},
 			{
@@ -553,28 +609,28 @@ resource "terraform_data" "endpoint" {
 			{
 				Config: rotated.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_header", rotated.APIKeyHeader),
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version", "2"),
-					checkMCPServerAPIKey(ctx, t, client, true),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "auth_type", "api_key"),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "api_key_header", rotated.APIKeyHeader),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "api_key_value_wo_version", "2"),
+					checkAgentsMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
 			{
 				Config: adopted.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_mcp_server.test", "auth_type", "api_key"),
-					resource.TestCheckNoResourceAttr("coderd_mcp_server.test", "api_key_value_wo_version"),
-					checkMCPServerAPIKey(ctx, t, client, true),
+					resource.TestCheckResourceAttr("coderd_agents_mcp_server.test", "auth_type", "api_key"),
+					resource.TestCheckNoResourceAttr("coderd_agents_mcp_server.test", "api_key_value_wo_version"),
+					checkAgentsMCPServerAPIKey(ctx, t, client, true),
 				),
 			},
 			{
-				ResourceName:      "coderd_mcp_server.test",
+				ResourceName:      "coderd_agents_mcp_server.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 				ImportStateIdFunc: func(s *terraform.State) (string, error) {
-					rs, ok := s.RootModule().Resources["coderd_mcp_server.test"]
+					rs, ok := s.RootModule().Resources["coderd_agents_mcp_server.test"]
 					if !ok {
-						return "", fmt.Errorf("coderd_mcp_server.test not found in state")
+						return "", fmt.Errorf("coderd_agents_mcp_server.test not found in state")
 					}
 					return rs.Primary.Attributes["organization_id"] + "/" + rs.Primary.ID, nil
 				},
@@ -591,7 +647,7 @@ resource "terraform_data" "endpoint" {
 	})
 }
 
-type testAccMCPServerResourceConfig struct {
+type testAccAgentsMCPServerResourceConfig struct {
 	URL                string
 	Token              string
 	DisplayName        string
@@ -610,7 +666,7 @@ type testAccMCPServerResourceConfig struct {
 	RawConfig          string
 }
 
-func (c testAccMCPServerResourceConfig) String(t *testing.T) string {
+func (c testAccAgentsMCPServerResourceConfig) String(t *testing.T) string {
 	t.Helper()
 	const tpl = `
 provider "coderd" {
@@ -618,7 +674,7 @@ provider "coderd" {
   token = "{{.Token}}"
 }
 
-resource "coderd_mcp_server" "test" {
+resource "coderd_agents_mcp_server" "test" {
   display_name = "{{.DisplayName}}"
   slug         = "{{.Slug}}"
   url          = "{{.ServerURL}}"
@@ -662,12 +718,12 @@ resource "coderd_mcp_server" "test" {
 	return out.String()
 }
 
-func checkMCPServerAPIKey(ctx context.Context, t *testing.T, client *codersdk.Client, want bool) resource.TestCheckFunc {
+func checkAgentsMCPServerAPIKey(ctx context.Context, t *testing.T, client *codersdk.Client, want bool) resource.TestCheckFunc {
 	t.Helper()
 	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources["coderd_mcp_server.test"]
+		rs, ok := s.RootModule().Resources["coderd_agents_mcp_server.test"]
 		if !ok {
-			return fmt.Errorf("coderd_mcp_server.test not found in state")
+			return fmt.Errorf("coderd_agents_mcp_server.test not found in state")
 		}
 		organizationID, err := uuid.Parse(rs.Primary.Attributes["organization_id"])
 		if err != nil {

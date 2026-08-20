@@ -3,7 +3,7 @@ variable "mcp_api_key" {
   sensitive = true
 }
 
-resource "coderd_mcp_server" "example" {
+resource "coderd_agents_mcp_server" "example" {
   display_name = "Internal Search"
   slug         = "internal-search"
   url          = "https://mcp.example.com/v1"

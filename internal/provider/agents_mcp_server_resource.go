@@ -26,22 +26,22 @@ import (
 )
 
 var (
-	_ resource.Resource                   = &MCPServerResource{}
-	_ resource.ResourceWithConfigure      = &MCPServerResource{}
-	_ resource.ResourceWithImportState    = &MCPServerResource{}
-	_ resource.ResourceWithModifyPlan     = &MCPServerResource{}
-	_ resource.ResourceWithValidateConfig = &MCPServerResource{}
+	_ resource.Resource                   = &AgentsMCPServerResource{}
+	_ resource.ResourceWithConfigure      = &AgentsMCPServerResource{}
+	_ resource.ResourceWithImportState    = &AgentsMCPServerResource{}
+	_ resource.ResourceWithModifyPlan     = &AgentsMCPServerResource{}
+	_ resource.ResourceWithValidateConfig = &AgentsMCPServerResource{}
 )
 
-func NewMCPServerResource() resource.Resource {
-	return &MCPServerResource{}
+func NewAgentsMCPServerResource() resource.Resource {
+	return &AgentsMCPServerResource{}
 }
 
-type MCPServerResource struct {
+type AgentsMCPServerResource struct {
 	data *CoderdProviderData
 }
 
-type MCPServerResourceModel struct {
+type AgentsMCPServerResourceModel struct {
 	ID                          UUID         `tfsdk:"id"`
 	OrganizationID              UUID         `tfsdk:"organization_id"`
 	DisplayName                 types.String `tfsdk:"display_name"`
@@ -74,25 +74,25 @@ type MCPServerResourceModel struct {
 	UpdatedAt                   types.Int64  `tfsdk:"updated_at"`
 }
 
-func (r *MCPServerResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_mcp_server"
+func (r *AgentsMCPServerResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_agents_mcp_server"
 }
 
-func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+func (r *AgentsMCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	resp.Diagnostics.AddWarning(
 		"Experimental Resource",
-		"coderd_mcp_server is experimental. Changes are expected, and it is not recommended for production use.",
+		"coderd_agents_mcp_server is experimental. Changes are expected, and it is not recommended for production use.",
 	)
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	var plan, config MCPServerResourceModel
+	var plan, config AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() || plan.AuthType.IsUnknown() {
 		return
 	}
-	var state MCPServerResourceModel
+	var state AgentsMCPServerResourceModel
 	hasState := !req.State.Raw.IsNull()
 	if hasState {
 		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -173,7 +173,7 @@ func (r *MCPServerResource) ModifyPlan(ctx context.Context, req resource.ModifyP
 	}
 }
 
-func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	emptyStringSet := types.SetValueMust(types.StringType, []attr.Value{})
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
@@ -309,6 +309,9 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "OAuth2 token revocation URL. It can be populated by server-side discovery. Changing it invalidates users' stored OAuth tokens.",
 				Optional:            true,
 				Computed:            true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					unknownWhenAuthTypeChanges(),
 				},
@@ -412,7 +415,7 @@ func (r *MCPServerResource) Schema(ctx context.Context, req resource.SchemaReque
 	}
 }
 
-func (r *MCPServerResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *AgentsMCPServerResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -427,8 +430,8 @@ func (r *MCPServerResource) Configure(ctx context.Context, req resource.Configur
 	r.data = data
 }
 
-func (r *MCPServerResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var data MCPServerResourceModel
+func (r *AgentsMCPServerResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() || data.AuthType.IsNull() || data.AuthType.IsUnknown() {
 		return
@@ -471,8 +474,8 @@ func (r *MCPServerResource) ValidateConfig(ctx context.Context, req resource.Val
 	}
 }
 
-func (r *MCPServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan, config MCPServerResourceModel
+func (r *AgentsMCPServerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan, config AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
@@ -499,8 +502,8 @@ func (r *MCPServerResource) Create(ctx context.Context, req resource.CreateReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *MCPServerResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state MCPServerResourceModel
+func (r *AgentsMCPServerResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -522,8 +525,8 @@ func (r *MCPServerResource) Read(ctx context.Context, req resource.ReadRequest, 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &refreshed)...)
 }
 
-func (r *MCPServerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state, config MCPServerResourceModel
+func (r *AgentsMCPServerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state, config AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -547,8 +550,8 @@ func (r *MCPServerResource) Update(ctx context.Context, req resource.UpdateReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &updated)...)
 }
 
-func (r *MCPServerResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state MCPServerResourceModel
+func (r *AgentsMCPServerResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state AgentsMCPServerResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -559,7 +562,7 @@ func (r *MCPServerResource) Delete(ctx context.Context, req resource.DeleteReque
 	}
 }
 
-func (r *MCPServerResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *AgentsMCPServerResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
 	if len(parts) != 2 {
 		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization_id>/<id>`.")
@@ -579,7 +582,7 @@ func (r *MCPServerResource) ImportState(ctx context.Context, req resource.Import
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id.String())...)
 }
 
-func (m MCPServerResourceModel) createRequest(ctx context.Context, config MCPServerResourceModel, diags *diag.Diagnostics) codersdk.CreateMCPServerConfigRequest {
+func (m AgentsMCPServerResourceModel) createRequest(ctx context.Context, config AgentsMCPServerResourceModel, diags *diag.Diagnostics) codersdk.CreateMCPServerConfigRequest {
 	switch m.AuthType.ValueString() {
 	case "api_key":
 		if m.APIKeyHeader.ValueString() == "" {
@@ -620,30 +623,73 @@ func (m MCPServerResourceModel) createRequest(ctx context.Context, config MCPSer
 	}
 }
 
-func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config MCPServerResourceModel, diags *diag.Diagnostics) codersdk.UpdateMCPServerConfigRequest {
-	toolAllowList := stringSetElements(ctx, m.ToolAllowList, diags)
-	toolDenyList := stringSetElements(ctx, m.ToolDenyList, diags)
-	req := codersdk.UpdateMCPServerConfigRequest{
-		DisplayName:         stringPointer(m.DisplayName.ValueString()),
-		Slug:                stringPointer(m.Slug.ValueString()),
-		Description:         stringPointer(m.Description.ValueString()),
-		IconURL:             stringPointer(m.IconURL.ValueString()),
-		Transport:           stringPointer(m.Transport.ValueString()),
-		URL:                 stringPointer(m.URL.ValueString()),
-		AuthType:            stringPointer(m.AuthType.ValueString()),
-		OAuth2ClientID:      stringPointer(m.OAuth2ClientID.ValueString()),
-		OAuth2AuthURL:       nonEmptyStringPointer(m.OAuth2AuthURL.ValueString()),
-		OAuth2TokenURL:      nonEmptyStringPointer(m.OAuth2TokenURL.ValueString()),
-		OAuth2RevocationURL: stringPointer(m.OAuth2RevocationURL.ValueString()),
-		OAuth2Scopes:        stringPointer(m.OAuth2Scopes.ValueString()),
-		APIKeyHeader:        stringPointer(m.APIKeyHeader.ValueString()),
-		ToolAllowList:       &toolAllowList,
-		ToolDenyList:        &toolDenyList,
-		Availability:        stringPointer(m.Availability.ValueString()),
-		Enabled:             boolPointer(m.Enabled.ValueBool()),
-		ModelIntent:         boolPointer(m.ModelIntent.ValueBool()),
-		AllowInPlanMode:     boolPointer(m.AllowInPlanMode.ValueBool()),
-		ForwardCoderHeaders: boolPointer(m.ForwardCoderHeaders.ValueBool()),
+func (m AgentsMCPServerResourceModel) updateRequest(ctx context.Context, state, config AgentsMCPServerResourceModel, diags *diag.Diagnostics) codersdk.UpdateMCPServerConfigRequest {
+	// The PATCH is sparse: omitted fields keep their server-side value, so
+	// only fields whose planned value differs from state are sent. Unknown
+	// planned values become nil pointers and are omitted, leaving them to
+	// the server (for example when an auth type change resets a field).
+	var req codersdk.UpdateMCPServerConfigRequest
+	if !m.DisplayName.Equal(state.DisplayName) {
+		req.DisplayName = stringPtrOrNil(m.DisplayName)
+	}
+	if !m.Slug.Equal(state.Slug) {
+		req.Slug = stringPtrOrNil(m.Slug)
+	}
+	if !m.Description.Equal(state.Description) {
+		req.Description = stringPtrOrNil(m.Description)
+	}
+	if !m.IconURL.Equal(state.IconURL) {
+		req.IconURL = stringPtrOrNil(m.IconURL)
+	}
+	if !m.Transport.Equal(state.Transport) {
+		req.Transport = stringPtrOrNil(m.Transport)
+	}
+	if !m.URL.Equal(state.URL) {
+		req.URL = stringPtrOrNil(m.URL)
+	}
+	if !m.AuthType.Equal(state.AuthType) {
+		req.AuthType = stringPtrOrNil(m.AuthType)
+	}
+	if !m.OAuth2ClientID.Equal(state.OAuth2ClientID) {
+		req.OAuth2ClientID = stringPtrOrNil(m.OAuth2ClientID)
+	}
+	if !m.OAuth2AuthURL.Equal(state.OAuth2AuthURL) {
+		req.OAuth2AuthURL = stringPtrOrNil(m.OAuth2AuthURL)
+	}
+	if !m.OAuth2TokenURL.Equal(state.OAuth2TokenURL) {
+		req.OAuth2TokenURL = stringPtrOrNil(m.OAuth2TokenURL)
+	}
+	if !m.OAuth2RevocationURL.Equal(state.OAuth2RevocationURL) {
+		req.OAuth2RevocationURL = stringPtrOrNil(m.OAuth2RevocationURL)
+	}
+	if !m.OAuth2Scopes.Equal(state.OAuth2Scopes) {
+		req.OAuth2Scopes = stringPtrOrNil(m.OAuth2Scopes)
+	}
+	if !m.APIKeyHeader.Equal(state.APIKeyHeader) {
+		req.APIKeyHeader = stringPtrOrNil(m.APIKeyHeader)
+	}
+	if !m.ToolAllowList.IsUnknown() && !m.ToolAllowList.Equal(state.ToolAllowList) {
+		toolAllowList := stringSetElements(ctx, m.ToolAllowList, diags)
+		req.ToolAllowList = &toolAllowList
+	}
+	if !m.ToolDenyList.IsUnknown() && !m.ToolDenyList.Equal(state.ToolDenyList) {
+		toolDenyList := stringSetElements(ctx, m.ToolDenyList, diags)
+		req.ToolDenyList = &toolDenyList
+	}
+	if !m.Availability.Equal(state.Availability) {
+		req.Availability = stringPtrOrNil(m.Availability)
+	}
+	if !m.Enabled.Equal(state.Enabled) {
+		req.Enabled = m.Enabled.ValueBoolPointer()
+	}
+	if !m.ModelIntent.Equal(state.ModelIntent) {
+		req.ModelIntent = m.ModelIntent.ValueBoolPointer()
+	}
+	if !m.AllowInPlanMode.Equal(state.AllowInPlanMode) {
+		req.AllowInPlanMode = m.AllowInPlanMode.ValueBoolPointer()
+	}
+	if !m.ForwardCoderHeaders.Equal(state.ForwardCoderHeaders) {
+		req.ForwardCoderHeaders = m.ForwardCoderHeaders.ValueBoolPointer()
 	}
 	// A secret is sent only when its auth type is the destination: on a
 	// version bump for rotation, or on a transition into the type because the
@@ -692,26 +738,28 @@ func (m MCPServerResourceModel) updateRequest(ctx context.Context, state, config
 	return req
 }
 
-func (m MCPServerResourceModel) stateFromServer(server codersdk.MCPServerConfig) MCPServerResourceModel {
-	return MCPServerResourceModel{
-		ID:                          UUIDValue(server.ID),
-		OrganizationID:              UUIDValue(server.OrganizationID),
-		DisplayName:                 types.StringValue(server.DisplayName),
-		Slug:                        types.StringValue(server.Slug),
-		URL:                         types.StringValue(server.URL),
-		Description:                 types.StringValue(server.Description),
-		IconURL:                     types.StringValue(server.IconURL),
-		Transport:                   types.StringValue(server.Transport),
-		AuthType:                    types.StringValue(server.AuthType),
+func (m AgentsMCPServerResourceModel) stateFromServer(server codersdk.MCPServerConfig) AgentsMCPServerResourceModel {
+	return AgentsMCPServerResourceModel{
+		ID:             UUIDValue(server.ID),
+		OrganizationID: UUIDValue(server.OrganizationID),
+		DisplayName:    types.StringValue(server.DisplayName),
+		Slug:           types.StringValue(server.Slug),
+		URL:            types.StringValue(server.URL),
+		Description:    types.StringValue(server.Description),
+		IconURL:        types.StringValue(server.IconURL),
+		Transport:      types.StringValue(server.Transport),
+		AuthType:       types.StringValue(server.AuthType),
+		// Optional strings without static defaults map an omitted server
+		// value ("") to null, matching how Terraform represents unset.
 		Availability:                types.StringValue(server.Availability),
-		OAuth2ClientID:              types.StringValue(server.OAuth2ClientID),
+		OAuth2ClientID:              stringValueOrNull(server.OAuth2ClientID),
 		OAuth2ClientSecretWO:        types.StringNull(),
 		OAuth2ClientSecretWOVersion: m.OAuth2ClientSecretWOVersion,
-		OAuth2AuthURL:               types.StringValue(server.OAuth2AuthURL),
-		OAuth2TokenURL:              types.StringValue(server.OAuth2TokenURL),
-		OAuth2RevocationURL:         types.StringValue(server.OAuth2RevocationURL),
+		OAuth2AuthURL:               stringValueOrNull(server.OAuth2AuthURL),
+		OAuth2TokenURL:              stringValueOrNull(server.OAuth2TokenURL),
+		OAuth2RevocationURL:         stringValueOrNull(server.OAuth2RevocationURL),
 		OAuth2Scopes:                types.StringValue(server.OAuth2Scopes),
-		APIKeyHeader:                types.StringValue(server.APIKeyHeader),
+		APIKeyHeader:                stringValueOrNull(server.APIKeyHeader),
 		APIKeyValueWO:               types.StringNull(),
 		APIKeyValueWOVersion:        m.APIKeyValueWOVersion,
 		CustomHeadersWO:             types.MapNull(types.StringType),
@@ -744,6 +792,9 @@ func writeOnlyStringMap(ctx context.Context, value types.Map, diags *diag.Diagno
 }
 
 func stringSetElements(ctx context.Context, value types.Set, diags *diag.Diagnostics) []string {
+	if value.IsNull() || value.IsUnknown() {
+		return nil
+	}
 	var result []string
 	diags.Append(value.ElementsAs(ctx, &result, false)...)
 	return result
@@ -759,19 +810,4 @@ func stringSetValue(values []string) types.Set {
 
 func writeOnlyVersionChanged(plan, state types.Int64) bool {
 	return !plan.IsNull() && !plan.IsUnknown() && !plan.Equal(state)
-}
-
-func stringPointer(value string) *string {
-	return &value
-}
-
-func nonEmptyStringPointer(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
-func boolPointer(value bool) *bool {
-	return &value
 }
