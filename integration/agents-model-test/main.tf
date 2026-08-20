@@ -36,12 +36,6 @@ resource "coderd_agents_model" "claude_opus" {
 
   model_config = jsonencode({
     max_output_tokens = 128000
-    cost = {
-      input_price_per_million_tokens       = "5"
-      output_price_per_million_tokens      = "25"
-      cache_read_price_per_million_tokens  = "0.5"
-      cache_write_price_per_million_tokens = "6.25"
-    }
     reasoning_effort = {
       default = "high"
       max     = "high"
@@ -62,10 +56,6 @@ resource "coderd_agents_model" "claude_sonnet" {
   compression_threshold = 70
 
   model_config = jsonencode({
-    cost = {
-      input_price_per_million_tokens  = "3"
-      output_price_per_million_tokens = "15"
-    }
     reasoning_effort = {
       default = "max"
       max     = "max"
@@ -90,11 +80,6 @@ resource "coderd_agents_model" "gpt_xhigh" {
   compression_threshold = 70
 
   model_config = jsonencode({
-    cost = {
-      input_price_per_million_tokens      = "2.5"
-      output_price_per_million_tokens     = "15"
-      cache_read_price_per_million_tokens = "0.25"
-    }
     reasoning_effort = {
       default = "xhigh"
       max     = "xhigh"

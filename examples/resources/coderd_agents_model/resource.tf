@@ -22,10 +22,6 @@ resource "coderd_agents_model" "sonnet" {
   model_config = jsonencode({
     max_output_tokens = 8192
     temperature       = 0.7
-    cost = {
-      input_price_per_million_tokens  = "3"
-      output_price_per_million_tokens = "15"
-    }
     reasoning_effort = {
       default = "high"
       max     = "high"

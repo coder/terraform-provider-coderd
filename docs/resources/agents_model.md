@@ -40,10 +40,6 @@ resource "coderd_agents_model" "sonnet" {
   model_config = jsonencode({
     max_output_tokens = 8192
     temperature       = 0.7
-    cost = {
-      input_price_per_million_tokens  = "3"
-      output_price_per_million_tokens = "15"
-    }
     reasoning_effort = {
       default = "high"
       max     = "high"
@@ -71,7 +67,7 @@ resource "coderd_agents_model" "sonnet" {
 - `compression_threshold` (Number) Percentage of the context window at which Coder should compact chat context. Defaults to 70 and must be between 0 and 100.
 - `display_name` (String) Display name shown in Coder.
 - `enabled` (Boolean) Whether this model configuration is enabled. Defaults to true.
-- `model_config` (String) Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, `cost`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.
+- `model_config` (String) Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.
 
 ### Read-Only
 
