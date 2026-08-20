@@ -57,19 +57,19 @@ resource "coderd_agents_mcp_server" "example" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `allow_in_plan_mode` (Boolean) Whether tools from this server are available in plan mode.
+- `allow_in_plan_mode` (Boolean) Whether tools from this server are available in plan mode. Defaults to false.
 - `api_key_header` (String) HTTP header used for API key authentication. The server may populate a default.
 - `api_key_value_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) API key value. Bump `api_key_value_wo_version` to rotate it.
 - `api_key_value_wo_version` (Number) Version for the write-only API key value. Bump it whenever the value changes.
-- `auth_type` (String) Authentication type. Valid values are `none`, `oauth2`, `api_key`, `custom_headers`, and `user_oidc`. Changing this value invalidates users' stored OAuth tokens and clears secrets for the previous authentication type.
-- `availability` (String) Availability policy. Valid values are `force_on`, `default_on`, and `default_off`.
+- `auth_type` (String) Authentication type. Valid values are `none`, `oauth2`, `api_key`, `custom_headers`, and `user_oidc`. Defaults to `none`. Changing this value invalidates users' stored OAuth tokens and clears secrets for the previous authentication type.
+- `availability` (String) Availability policy. Valid values are `force_on`, `default_on`, and `default_off`. Defaults to `default_off`.
 - `custom_headers_wo` (Map of String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) HTTP headers used for custom header authentication. Bump `custom_headers_wo_version` to replace them.
 - `custom_headers_wo_version` (Number) Version for the write-only custom headers. Bump it whenever the map changes.
 - `description` (String) Description shown in Coder.
-- `enabled` (Boolean) Whether the MCP server is enabled.
-- `forward_coder_headers` (Boolean) Whether Coder identity headers are forwarded to the MCP server.
+- `enabled` (Boolean) Whether the MCP server is enabled. Defaults to false.
+- `forward_coder_headers` (Boolean) Whether Coder identity headers are forwarded to the MCP server. Defaults to false.
 - `icon_url` (String) Icon URL shown in Coder.
-- `model_intent` (Boolean) Whether the model may select this MCP server based on intent.
+- `model_intent` (Boolean) Whether the model may select this MCP server based on intent. Defaults to false.
 - `oauth2_auth_url` (String) OAuth2 authorization URL. It can be populated by server-side discovery.
 - `oauth2_client_id` (String) OAuth2 client ID. Leave this, `oauth2_auth_url`, and `oauth2_token_url` unset at creation to use OAuth discovery and dynamic client registration; switching an existing server back to discovery requires replacing the resource. Changing it invalidates users' stored OAuth tokens.
 - `oauth2_client_secret_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) OAuth2 client secret. Bump `oauth2_client_secret_wo_version` to rotate it.
@@ -80,7 +80,7 @@ resource "coderd_agents_mcp_server" "example" {
 - `organization_id` (String) Organization ID that owns the MCP server configuration. Defaults to the provider default organization ID.
 - `tool_allow_list` (Set of String) Tool names that are allowed. An empty set allows all tools unless denied.
 - `tool_deny_list` (Set of String) Tool names that are denied.
-- `transport` (String) MCP transport. Valid values are `streamable_http` and `sse`.
+- `transport` (String) MCP transport. Valid values are `streamable_http` and `sse`. Defaults to `streamable_http`.
 
 ### Read-Only
 

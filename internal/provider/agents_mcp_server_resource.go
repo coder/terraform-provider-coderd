@@ -232,7 +232,7 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 				Default:             stringdefault.StaticString(""),
 			},
 			"transport": schema.StringAttribute{
-				MarkdownDescription: "MCP transport. Valid values are `streamable_http` and `sse`.",
+				MarkdownDescription: "MCP transport. Valid values are `streamable_http` and `sse`. Defaults to `streamable_http`.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString("streamable_http"),
@@ -241,7 +241,7 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 				},
 			},
 			"auth_type": schema.StringAttribute{
-				MarkdownDescription: "Authentication type. Valid values are `none`, `oauth2`, `api_key`, `custom_headers`, and `user_oidc`. Changing this value invalidates users' stored OAuth tokens and clears secrets for the previous authentication type.",
+				MarkdownDescription: "Authentication type. Valid values are `none`, `oauth2`, `api_key`, `custom_headers`, and `user_oidc`. Defaults to `none`. Changing this value invalidates users' stored OAuth tokens and clears secrets for the previous authentication type.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString("none"),
@@ -250,7 +250,7 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 				},
 			},
 			"availability": schema.StringAttribute{
-				MarkdownDescription: "Availability policy. Valid values are `force_on`, `default_on`, and `default_off`.",
+				MarkdownDescription: "Availability policy. Valid values are `force_on`, `default_on`, and `default_off`. Defaults to `default_off`.",
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString("default_off"),
@@ -377,25 +377,25 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 				Default:             setdefault.StaticValue(emptyStringSet),
 			},
 			"enabled": schema.BoolAttribute{
-				MarkdownDescription: "Whether the MCP server is enabled.",
+				MarkdownDescription: "Whether the MCP server is enabled. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"model_intent": schema.BoolAttribute{
-				MarkdownDescription: "Whether the model may select this MCP server based on intent.",
+				MarkdownDescription: "Whether the model may select this MCP server based on intent. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"allow_in_plan_mode": schema.BoolAttribute{
-				MarkdownDescription: "Whether tools from this server are available in plan mode.",
+				MarkdownDescription: "Whether tools from this server are available in plan mode. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
 			},
 			"forward_coder_headers": schema.BoolAttribute{
-				MarkdownDescription: "Whether Coder identity headers are forwarded to the MCP server.",
+				MarkdownDescription: "Whether Coder identity headers are forwarded to the MCP server. Defaults to false.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(false),
