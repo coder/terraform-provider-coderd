@@ -118,17 +118,39 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		name                   string
 		targetCollectionStatus int
+		organizationStatus     int
 		wantSummary            string
+		wantDetailContains     []string
+		wantRequestCount       int32
 	}{
 		{
 			name:                   "model missing",
 			targetCollectionStatus: http.StatusOK,
 			wantSummary:            "Default Agents Model Not Found or Inaccessible",
+			wantRequestCount:       2,
+		},
+		{
+			name:                   "endpoint unavailable",
+			targetCollectionStatus: http.StatusNotFound,
+			organizationStatus:     http.StatusOK,
+			wantSummary:            "Agents Default Model Endpoint Unavailable",
+			wantDetailContains:     []string{agentsDefaultModelMinVersion},
+			wantRequestCount:       3,
 		},
 		{
 			name:                   "organization missing",
 			targetCollectionStatus: http.StatusNotFound,
+			organizationStatus:     http.StatusNotFound,
 			wantSummary:            "Organization Not Found or Inaccessible",
+			wantRequestCount:       3,
+		},
+		{
+			name:                   "organization probe fails",
+			targetCollectionStatus: http.StatusNotFound,
+			organizationStatus:     http.StatusInternalServerError,
+			wantSummary:            "Client Error",
+			wantDetailContains:     []string{"Organization probe error:"},
+			wantRequestCount:       3,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,6 +161,7 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 			modelID := uuid.New()
 			targetCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
 			modelPath := fmt.Sprintf("%s/%s", targetCollectionPath, modelID)
+			organizationPath := fmt.Sprintf("/api/v2/organizations/%s", targetOrganizationID)
 			var requestCount atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -148,6 +171,12 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 					writeJSON(w, http.StatusNotFound, codersdk.Response{Message: "Not Found."})
 				case req.Method == http.MethodGet && req.URL.Path == targetCollectionPath:
 					writeAgentsDefaultModelCollectionResponse(w, tc.targetCollectionStatus)
+				case req.Method == http.MethodGet && req.URL.Path == organizationPath:
+					if tc.organizationStatus == http.StatusOK {
+						writeJSON(w, http.StatusOK, codersdk.Organization{MinimalOrganization: codersdk.MinimalOrganization{ID: targetOrganizationID, Name: "target"}})
+						return
+					}
+					writeJSON(w, tc.organizationStatus, codersdk.Response{Message: statusMessage(tc.organizationStatus)})
 				default:
 					writeJSON(w, http.StatusInternalServerError, codersdk.Response{Message: "unexpected request"})
 				}
@@ -163,7 +192,10 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 			require.Equal(t, tc.wantSummary, diags.Errors()[0].Summary())
 			require.Contains(t, diags.Errors()[0].Detail(), "Original error:")
 			require.Contains(t, diags.Errors()[0].Detail(), "Not Found.")
-			require.Equal(t, int32(2), requestCount.Load(), "expected only the model request and its organization collection probe")
+			for _, want := range tc.wantDetailContains {
+				require.Contains(t, diags.Errors()[0].Detail(), want)
+			}
+			require.Equal(t, tc.wantRequestCount, requestCount.Load())
 		})
 	}
 }

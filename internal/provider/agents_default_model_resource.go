@@ -246,11 +246,33 @@ func (r *AgentsDefaultModelResource) agentsDefaultModelDiag(ctx context.Context,
 		return diags
 	}
 
+	organizationEndpoint := fmt.Sprintf("/api/v2/organizations/%s", organizationID)
+	_, organizationErr := r.data.Client.Organization(ctx, organizationID)
+	if organizationErr == nil {
+		diags.AddError(
+			"Agents Default Model Endpoint Unavailable",
+			fmt.Sprintf("Unable to %s the default Agents model: the model endpoint %s and the organization's chat model collection both returned 404, but the organization is available at %s. "+
+				"This resource requires Coder version %s or later; upgrade the deployment, or remove `coderd_agents_default_model` from your configuration. "+
+				"Original error: %s. Collection probe error: %s",
+				action, endpoint, organizationEndpoint, agentsDefaultModelMinVersion, err, collectionErr),
+		)
+		return diags
+	}
+	if !isHTTPNotFound(organizationErr) {
+		diags.AddError(
+			"Client Error",
+			fmt.Sprintf("Unable to %s the default Agents model, and unable to determine whether the organization's chat model endpoint is supported because probing %s failed. "+
+				"Original error: %s. Collection probe error: %s. Organization probe error: %s",
+				action, organizationEndpoint, err, collectionErr, organizationErr),
+		)
+		return diags
+	}
+
 	diags.AddError(
 		"Organization Not Found or Inaccessible",
-		fmt.Sprintf("Unable to %s the default Agents model: the chat model collection for organization %s returned 404. "+
-			"The organization does not exist or is inaccessible. Original error: %s. Collection probe error: %s",
-			action, organizationID, err, collectionErr),
+		fmt.Sprintf("Unable to %s the default Agents model: the chat model collection and %s both returned 404. "+
+			"Organization %s does not exist or is inaccessible. Original error: %s. Collection probe error: %s. Organization probe error: %s",
+			action, organizationEndpoint, organizationID, err, collectionErr, organizationErr),
 	)
 	return diags
 }
