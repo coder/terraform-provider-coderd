@@ -4,14 +4,19 @@ page_title: "coderd_agents_model Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
   ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
-  Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see coderd_ai_provider) along with context, compression, and optional JSON tuning settings.
+  ~> Warning
+  This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
+  Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see coderd_ai_provider) along with context, compression, and optional JSON tuning settings. Import IDs use <organization_id>/<id>.
 ---
 
 # coderd_agents_model (Resource)
 
 ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
 
-Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings.
+~> **Warning**
+This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
+
+Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization_id>/<id>`.
 
 ## Example Usage
 
@@ -68,6 +73,7 @@ resource "coderd_agents_model" "sonnet" {
 - `display_name` (String) Display name shown in Coder.
 - `enabled` (Boolean) Whether this model configuration is enabled. Defaults to true.
 - `model_config` (String) Optional JSON blob of per-call tuning for the model, such as `max_output_tokens`, `temperature`, `top_p`, and `provider_options`. See the field reference (including per-provider `provider_options`) at https://pkg.go.dev/github.com/coder/coder/v2/codersdk#ChatModelCallConfig.
+- `organization_id` (String) Organization ID that owns the Agents model configuration. Defaults to the provider default organization ID.
 
 ### Read-Only
 
@@ -83,14 +89,14 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# The ID supplied must be the Agents model configuration UUID returned by Coder.
-$ terraform import coderd_agents_model.sonnet <model-config-id>
+# The ID supplied must be the organization UUID and Agents model configuration UUID returned by Coder.
+$ terraform import coderd_agents_model.sonnet <organization-id>/<model-config-id>
 ```
 Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
 
 ```terraform
 import {
   to = coderd_agents_model.sonnet
-  id = "<model-config-id>"
+  id = "<organization-id>/<model-config-id>"
 }
 ```

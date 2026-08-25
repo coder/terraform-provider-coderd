@@ -207,8 +207,12 @@ func TestIntegration(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, providers, 2)
 
+				organizations, err := c.Organizations(ctx)
+				require.NoError(t, err)
+				require.NotEmpty(t, organizations)
+
 				exp := codersdk.NewExperimentalClient(c)
-				configs, err := exp.ListChatModelConfigs(ctx)
+				configs, err := exp.ChatModels(ctx, organizations[0].ID)
 				require.NoError(t, err)
 
 				providerTypeByID := make(map[uuid.UUID]string, len(providers))
@@ -267,10 +271,10 @@ func TestIntegration(t *testing.T) {
 						}
 					}`},
 				}
-				require.Len(t, configs, len(want))
+				require.Len(t, configs.Models, len(want))
 
 				var defaults []string
-				for _, m := range configs {
+				for _, m := range configs.Models {
 					if m.IsDefault {
 						defaults = append(defaults, m.Model)
 					}

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"testing"
@@ -32,8 +34,10 @@ import (
 func TestAgentsModelCreateRequest(t *testing.T) {
 	t.Parallel()
 
+	organizationID := uuid.New()
 	aiProviderID := uuid.New()
 	plan := AgentsModelResourceModel{
+		OrganizationID:       UUIDValue(organizationID),
 		AIProviderID:         UUIDValue(aiProviderID),
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
@@ -65,6 +69,7 @@ func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
 	t.Parallel()
 
 	state := AgentsModelResourceModel{
+		OrganizationID:       UUIDValue(uuid.New()),
 		AIProviderID:         UUIDValue(uuid.New()),
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
@@ -95,6 +100,7 @@ func TestAgentsModelUpdateRequestChangedFields(t *testing.T) {
 	t.Parallel()
 
 	state := AgentsModelResourceModel{
+		OrganizationID:       UUIDValue(uuid.New()),
 		AIProviderID:         UUIDValue(uuid.New()),
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
@@ -117,6 +123,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	t.Parallel()
 
 	modelConfigID := uuid.New()
+	organizationID := uuid.New()
 	aiProviderID := uuid.New()
 	createdAt := time.Unix(1700000000, 0)
 	updatedAt := time.Unix(1700000600, 0)
@@ -127,8 +134,9 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	remote := decodeAgentsModelConfigForTest(t, `{"top_p":0.9,"max_output_tokens":9223372036854775807,"top_k":40}`)
 
 	var diags diag.Diagnostics
-	state := stateFromModelConfig(codersdk.ChatModelConfig{
+	state := stateFromModelConfig(codersdk.ChatModel{
 		ID:                   modelConfigID,
+		OrganizationID:       organizationID,
 		AIProviderID:         aiProviderID,
 		Model:                "claude-3-5-sonnet-20241022",
 		DisplayName:          "Claude 3.5 Sonnet",
@@ -141,6 +149,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	}, "anthropic", &diags)
 	require.False(t, diags.HasError(), diags.Errors())
 	require.Equal(t, modelConfigID, state.ID.ValueUUID())
+	require.Equal(t, organizationID, state.OrganizationID.ValueUUID())
 	require.Equal(t, aiProviderID, state.AIProviderID.ValueUUID())
 	require.Equal(t, "anthropic", state.ProviderType.ValueString())
 	require.Equal(t, "claude-3-5-sonnet-20241022", state.Model.ValueString())
@@ -456,6 +465,52 @@ resource "coderd_agents_model" "sonnet" {
 	})
 }
 
+func TestAgentsModelResourcePlanDefersUnknownOrganizationID(t *testing.T) {
+	t.Parallel()
+
+	// PlanOnly reaches provider Configure(), which fetches the current user
+	// and entitlements, so use a mock server instead of an unreachable URL.
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	cfg := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+
+variable "organization_id" {
+  type = string
+}
+
+resource "terraform_data" "organization" {
+  input = var.organization_id
+}
+
+resource "coderd_agents_model" "sonnet" {
+  organization_id = terraform_data.organization.output
+  ai_provider_id   = "` + uuid.NewString() + `"
+  model            = "claude-3-5-sonnet-20241022"
+  context_limit    = 200000
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// terraform_data.output remains unknown in the initial plan even
+				// though ConfigVariables supplies a concrete input value.
+				Config: cfg,
+				ConfigVariables: config.Variables{
+					"organization_id": config.StringVariable(uuid.NewString()),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
 func TestAccAgentsModelResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -463,11 +518,19 @@ func TestAccAgentsModelResource(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
+	organization, err := client.CreateOrganization(ctx, codersdk.CreateOrganizationRequest{
+		Name:        "agents-model-acc",
+		DisplayName: "Agents Model Acceptance",
+	})
+	require.NoError(t, err, "create non-default organization")
+	t.Cleanup(func() { _ = client.DeleteOrganization(context.WithoutCancel(t.Context()), organization.ID.String()) })
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg1 := testAccAgentsModelResourceConfig{
 		URL:                  client.URL.String(),
 		Token:                client.SessionToken(),
+		OrganizationID:       organization.ID.String(),
 		AIProviderID:         aiProvider.ID.String(),
 		Model:                "claude-3-5-sonnet-20241022",
 		DisplayName:          "Claude 3.5 Sonnet",
@@ -495,6 +558,7 @@ func TestAccAgentsModelResource(t *testing.T) {
 				Config: cfg1.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("coderd_agents_model.sonnet", "id"),
+					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "organization_id", organization.ID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "ai_provider_id", aiProvider.ID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "provider_type", "anthropic"),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "model", cfg1.Model),
@@ -513,6 +577,13 @@ func TestAccAgentsModelResource(t *testing.T) {
 				ResourceName:      "coderd_agents_model.sonnet",
 				ImportState:       true,
 				ImportStateVerify: true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources["coderd_agents_model.sonnet"]
+					if !ok {
+						return "", fmt.Errorf("coderd_agents_model.sonnet not found in state")
+					}
+					return rs.Primary.Attributes["organization_id"] + "/" + rs.Primary.ID, nil
+				},
 				// Coder serializes model_config fields in struct order while jsonencode sorts them
 				// alphabetically, so ImportStateVerify's byte comparison can't match it. Compare it
 				// semantically via ImportStateCheck instead.
@@ -545,6 +616,7 @@ func TestAccAgentsModelResourceModelConfigNoDrift(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_drift_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg := fmt.Sprintf(`
@@ -604,11 +676,13 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_import_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	// Create the model out-of-band so state is first populated by import (Read).
+	organizationID := accDefaultOrganizationID(ctx, t, client)
 	exp := codersdk.NewExperimentalClient(client)
-	created, err := exp.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
+	created, err := exp.CreateChatModel(ctx, organizationID, codersdk.CreateChatModelRequest{
 		AIProviderID: &aiProvider.ID,
 		Model:        "claude-3-5-sonnet-20241022",
 		ContextLimit: ptr.Ref(int64(200000)),
@@ -619,7 +693,7 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	})
 	require.NoError(t, err, "create chat model config out-of-band")
 	// WithoutCancel: t.Context() is already cancelled by the time cleanup runs.
-	t.Cleanup(func() { _ = exp.DeleteChatModelConfig(context.WithoutCancel(t.Context()), created.ID) })
+	t.Cleanup(func() { _ = exp.DeleteChatModel(context.WithoutCancel(t.Context()), organizationID, created.ID) })
 
 	cfg := fmt.Sprintf(`
 provider "coderd" {
@@ -649,7 +723,7 @@ resource "coderd_agents_model" "sonnet" {
 				Config:             cfg,
 				ResourceName:       "coderd_agents_model.sonnet",
 				ImportState:        true,
-				ImportStateId:      created.ID.String(),
+				ImportStateId:      organizationID.String() + "/" + created.ID.String(),
 				ImportStatePersist: true,
 			},
 			{
@@ -673,6 +747,7 @@ func TestAccAgentsModelResourceEmptyModelConfig(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_empty_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg := fmt.Sprintf(`
@@ -706,6 +781,7 @@ resource "coderd_agents_model" "sonnet" {
 type testAccAgentsModelResourceConfig struct {
 	URL                  string
 	Token                string
+	OrganizationID       string
 	AIProviderID         string
 	Model                string
 	DisplayName          string
@@ -724,6 +800,9 @@ provider "coderd" {
 }
 
 resource "coderd_agents_model" "sonnet" {
+{{- if .OrganizationID }}
+  organization_id       = "{{.OrganizationID}}"
+{{- end }}
   ai_provider_id         = "{{.AIProviderID}}"
   model                  = "{{.Model}}"
   display_name           = "{{.DisplayName}}"
@@ -753,6 +832,7 @@ func TestAccAgentsModelResourceProviderTypeRederive(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_provider_type_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	anthropic := createAccAgentsModelAIProvider(ctx, t, client)
 	openai := createAccAgentsModelAIProviderOfType(ctx, t, client, codersdk.CreateAIProviderRequest{
 		Type:        codersdk.AIProviderTypeOpenAI,
@@ -816,6 +896,27 @@ resource "coderd_agents_model" "sonnet" {
 			},
 		},
 	})
+}
+
+func skipUnlessAgentsModelEndpoint(ctx context.Context, t *testing.T, client *codersdk.Client) {
+	t.Helper()
+	organizationID := accDefaultOrganizationID(ctx, t, client)
+	_, err := codersdk.NewExperimentalClient(client).ChatModels(ctx, organizationID)
+	if err != nil {
+		var sdkErr *codersdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
+			t.Skipf("deployment does not support org-scoped chat models: %s", err)
+		}
+		require.NoError(t, err, "probe org-scoped chat models")
+	}
+}
+
+func accDefaultOrganizationID(ctx context.Context, t *testing.T, client *codersdk.Client) uuid.UUID {
+	t.Helper()
+	organizations, err := client.Organizations(ctx)
+	require.NoError(t, err, "list organizations")
+	require.NotEmpty(t, organizations, "first user must belong to an organization")
+	return organizations[0].ID
 }
 
 func createAccAgentsModelAIProviderOfType(ctx context.Context, t *testing.T, client *codersdk.Client, req codersdk.CreateAIProviderRequest) codersdk.AIProvider {

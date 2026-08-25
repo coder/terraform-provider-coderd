@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -26,6 +28,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
+
+// agentsModelMinVersion is the first Coder release that includes the
+// organization-scoped chat model API.
+const agentsModelMinVersion = "2.37.0"
 
 var (
 	_ resource.Resource                = &AgentsModelResource{}
@@ -48,6 +54,7 @@ func (r *AgentsModelResource) experimentalClient() *codersdk.ExperimentalClient 
 
 type AgentsModelResourceModel struct {
 	ID                   UUID                   `tfsdk:"id"`
+	OrganizationID       UUID                   `tfsdk:"organization_id"`
 	AIProviderID         UUID                   `tfsdk:"ai_provider_id"`
 	ProviderType         types.String           `tfsdk:"provider_type"`
 	Model                types.String           `tfsdk:"model"`
@@ -74,7 +81,8 @@ func (r *AgentsModelResource) ModifyPlan(ctx context.Context, req resource.Modif
 func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.\n\n" +
-			"Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings.",
+			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsModelMinVersion + ") and later.\n\n" +
+			"Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization_id>/<id>`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Agents model configuration ID.",
@@ -82,6 +90,15 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"organization_id": schema.StringAttribute{
+				MarkdownDescription: "Organization ID that owns the Agents model configuration. Defaults to the provider default organization ID.",
+				CustomType:          UUIDType,
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
 				},
 			},
 			"ai_provider_id": schema.StringAttribute{
@@ -194,15 +211,19 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if plan.OrganizationID.IsNull() || plan.OrganizationID.IsUnknown() {
+		plan.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+	}
 	createReq := plan.createRequest(&resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	tflog.Info(ctx, "creating Agents model")
-	modelConfig, err := r.createChatModelConfigWithRetry(ctx, createReq)
+	organizationID := plan.OrganizationID.ValueUUID()
+	modelConfig, err := r.createChatModelWithRetry(ctx, organizationID, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", err))
+		resp.Diagnostics.Append(agentsModelCreateDiag(organizationID, err)...)
 		return
 	}
 
@@ -217,7 +238,7 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config codersdk.ChatModelConfig, diags *diag.Diagnostics) string {
+func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config codersdk.ChatModel, diags *diag.Diagnostics) string {
 	provider, err := r.data.Client.AIProvider(ctx, config.AIProviderID.String())
 	if err != nil {
 		diags.AddError("Client Error", fmt.Sprintf("Unable to read AI provider %s to derive provider_type, got error: %s", config.AIProviderID, err))
@@ -226,30 +247,29 @@ func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config cod
 	return string(provider.Type)
 }
 
-// createChatModelConfigWithRetry retries CreateChatModelConfig on the 409
-// default-election race (the only unique constraint is the single-default one,
-// so a 409 can only be that race). Required until Linear CODAGT-736 is fixed
-// server-side; remove this and call CreateChatModelConfig directly once it is.
-func (r *AgentsModelResource) createChatModelConfigWithRetry(ctx context.Context, req codersdk.CreateChatModelConfigRequest) (codersdk.ChatModelConfig, error) {
+// createChatModelWithRetry retries CreateChatModel on the 409
+// default-election race. coder/coder#27968 now serializes default election
+// server-side, so the retry is likely vestigial but harmless.
+func (r *AgentsModelResource) createChatModelWithRetry(ctx context.Context, organizationID uuid.UUID, req codersdk.CreateChatModelRequest) (codersdk.ChatModel, error) {
 	const maxAttempts = 10
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		config, err := r.experimentalClient().CreateChatModelConfig(ctx, req)
+		config, err := r.experimentalClient().CreateChatModel(ctx, organizationID, req)
 		if err == nil {
 			return config, nil
 		}
 		var sdkErr *codersdk.Error
 		if !errors.As(err, &sdkErr) || sdkErr.StatusCode() != http.StatusConflict {
-			return codersdk.ChatModelConfig{}, err
+			return codersdk.ChatModel{}, err
 		}
 		lastErr = err
 		select {
 		case <-ctx.Done():
-			return codersdk.ChatModelConfig{}, ctx.Err()
+			return codersdk.ChatModel{}, ctx.Err()
 		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
 		}
 	}
-	return codersdk.ChatModelConfig{}, lastErr
+	return codersdk.ChatModel{}, lastErr
 }
 
 func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -260,29 +280,26 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	modelConfigID := state.ID.ValueUUID()
-	configs, err := r.experimentalClient().ListChatModelConfigs(ctx)
+	config, err := r.experimentalClient().ChatModel(ctx, state.OrganizationID.ValueUUID(), modelConfigID)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Agents model with ID %s not found. Marking as deleted.", modelConfigID.String()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read Agents model, got error: %s", err))
 		return
 	}
 
-	for _, config := range configs {
-		if config.ID == modelConfigID {
-			providerType := r.lookupProviderType(ctx, config, &resp.Diagnostics)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			refreshed := stateFromModelConfig(config, providerType, &resp.Diagnostics)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			resp.Diagnostics.Append(resp.State.Set(ctx, &refreshed)...)
-			return
-		}
+	providerType := r.lookupProviderType(ctx, config, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-
-	resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Agents model with ID %s not found. Marking as deleted.", modelConfigID.String()))
-	resp.State.RemoveResource(ctx)
+	refreshed := stateFromModelConfig(config, providerType, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &refreshed)...)
 }
 
 func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -298,7 +315,7 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	tflog.Info(ctx, "updating Agents model", map[string]any{"id": state.ID.ValueString()})
-	modelConfig, err := r.experimentalClient().UpdateChatModelConfig(ctx, state.ID.ValueUUID(), updateReq)
+	modelConfig, err := r.experimentalClient().UpdateChatModel(ctx, state.OrganizationID.ValueUUID(), state.ID.ValueUUID(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update Agents model, got error: %s", err))
 		return
@@ -323,19 +340,55 @@ func (r *AgentsModelResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	tflog.Info(ctx, "deleting Agents model", map[string]any{"id": state.ID.ValueString()})
-	if err := r.experimentalClient().DeleteChatModelConfig(ctx, state.ID.ValueUUID()); err != nil && !isNotFound(err) {
+	if err := r.experimentalClient().DeleteChatModel(ctx, state.OrganizationID.ValueUUID(), state.ID.ValueUUID()); err != nil && !isNotFound(err) {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete Agents model, got error: %s", err))
 		return
 	}
 }
 
 func (r *AgentsModelResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	parts := strings.Split(req.ID, "/")
+	if len(parts) != 2 {
+		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization_id>/<id>`.")
+		return
+	}
+	organizationID, err := uuid.Parse(parts[0])
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse organization ID as UUID: %s", err))
+		return
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse Agents model ID as UUID: %s", err))
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), organizationID.String())...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id.String())...)
 }
 
-func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersdk.CreateChatModelConfigRequest {
+func agentsModelCreateDiag(organizationID uuid.UUID, err error) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var sdkErr *codersdk.Error
+	if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
+		endpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", organizationID)
+		diags.AddError(
+			"Agents Model Endpoint Unavailable",
+			fmt.Sprintf("Unable to create the Agents model: the deployment returned 404 for %s. "+
+				"This resource requires Coder version %s or later; upgrade the deployment, or remove "+
+				"`coderd_agents_model` from your configuration. Original error: %s",
+				endpoint, agentsModelMinVersion, err),
+		)
+		return diags
+	}
+
+	diags.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", err))
+	return diags
+}
+
+func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersdk.CreateChatModelRequest {
 	aiProviderID := m.AIProviderID.ValueUUID()
-	req := codersdk.CreateChatModelConfigRequest{
+	req := codersdk.CreateChatModelRequest{
 		AIProviderID:         &aiProviderID,
 		Model:                m.Model.ValueString(),
 		DisplayName:          m.DisplayName.ValueString(),
@@ -347,8 +400,8 @@ func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersd
 	return req
 }
 
-func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, diags *diag.Diagnostics) codersdk.UpdateChatModelConfigRequest {
-	var req codersdk.UpdateChatModelConfigRequest
+func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, diags *diag.Diagnostics) codersdk.UpdateChatModelRequest {
+	var req codersdk.UpdateChatModelRequest
 	if !m.AIProviderID.Equal(state.AIProviderID) {
 		aiProviderID := m.AIProviderID.ValueUUID()
 		req.AIProviderID = &aiProviderID
@@ -379,9 +432,10 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 	return req
 }
 
-func stateFromModelConfig(config codersdk.ChatModelConfig, providerType string, diags *diag.Diagnostics) AgentsModelResourceModel {
+func stateFromModelConfig(config codersdk.ChatModel, providerType string, diags *diag.Diagnostics) AgentsModelResourceModel {
 	return AgentsModelResourceModel{
 		ID:                   UUIDValue(config.ID),
+		OrganizationID:       UUIDValue(config.OrganizationID),
 		AIProviderID:         UUIDValue(config.AIProviderID),
 		ProviderType:         types.StringValue(providerType),
 		Model:                types.StringValue(config.Model),
