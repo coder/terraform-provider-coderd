@@ -73,7 +73,7 @@ func (r *AgentsDefaultModelResource) Schema(ctx context.Context, req resource.Sc
 				CustomType:          UUIDType,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					useStateForUnknownUnlessChanged("organization_id"),
 				},
 			},
 			"organization_id": schema.StringAttribute{
@@ -120,7 +120,7 @@ func (r *AgentsDefaultModelResource) Create(ctx context.Context, req resource.Cr
 	})
 	state, err := r.setDefault(ctx, plan.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID())
 	if err != nil {
-		resp.Diagnostics.Append(agentsDefaultModelDiag("set", plan.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID(), err)...)
+		resp.Diagnostics.Append(r.agentsDefaultModelDiag(ctx, "set", plan.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID(), err)...)
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -135,8 +135,8 @@ func (r *AgentsDefaultModelResource) Read(ctx context.Context, req resource.Read
 
 	configs, err := r.experimentalClient().ChatModels(ctx, state.OrganizationID.ValueUUID())
 	if err != nil {
-		if isNotFound(err) {
-			resp.State.RemoveResource(ctx)
+		if isHTTPNotFound(err) {
+			resp.Diagnostics.Append(r.agentsDefaultModelCollection404Diag(ctx, "read", state.OrganizationID.ValueUUID(), err, err)...)
 			return
 		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read default Agents model, got error: %s", err))
@@ -173,7 +173,7 @@ func (r *AgentsDefaultModelResource) Update(ctx context.Context, req resource.Up
 	organizationID := state.OrganizationID.ValueUUID()
 	updated, err := r.setDefault(ctx, organizationID, plan.ModelID.ValueUUID())
 	if err != nil {
-		resp.Diagnostics.Append(agentsDefaultModelDiag("update", organizationID, plan.ModelID.ValueUUID(), err)...)
+		resp.Diagnostics.Append(r.agentsDefaultModelDiag(ctx, "update", organizationID, plan.ModelID.ValueUUID(), err)...)
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &updated)...)
@@ -216,22 +216,84 @@ func stateFromAgentsDefaultModelConfig(config codersdk.ChatModel) AgentsDefaultM
 	}
 }
 
-func agentsDefaultModelDiag(action string, organizationID, modelID uuid.UUID, err error) diag.Diagnostics {
+func (r *AgentsDefaultModelResource) agentsDefaultModelDiag(ctx context.Context, action string, organizationID, modelID uuid.UUID, err error) diag.Diagnostics {
 	var diags diag.Diagnostics
+	if !isHTTPNotFound(err) {
+		diags.AddError("Client Error", fmt.Sprintf("Unable to %s the default Agents model, got error: %s", action, err))
+		return diags
+	}
 
-	var sdkErr *codersdk.Error
-	if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
-		endpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models/%s", organizationID, modelID)
+	endpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models/%s", organizationID, modelID)
+	_, collectionErr := r.experimentalClient().ChatModels(ctx, organizationID)
+	if collectionErr == nil {
 		diags.AddError(
-			"Unsupported Coder Version",
-			fmt.Sprintf("Unable to %s the default Agents model: the deployment returned 404 for %s. "+
-				"This endpoint requires Coder version %s or later; upgrade the deployment, or remove "+
-				"`coderd_agents_default_model` from your configuration. Original error: %s",
-				action, endpoint, agentsDefaultModelMinVersion, err),
+			"Default Agents Model Not Found or Inaccessible",
+			fmt.Sprintf("Unable to %s the default Agents model: %s returned 404, but the organization's chat model collection is available. "+
+				"Model %s does not exist in organization %s or is inaccessible. Original error: %s",
+				action, endpoint, modelID, organizationID, err),
+		)
+		return diags
+	}
+	if !isHTTPNotFound(collectionErr) {
+		diags.AddError(
+			"Client Error",
+			fmt.Sprintf("Unable to %s the default Agents model, and unable to determine whether the 404 from %s is model-specific because probing the organization's chat model collection failed. "+
+				"Original error: %s. Collection probe error: %s",
+				action, endpoint, err, collectionErr),
 		)
 		return diags
 	}
 
-	diags.AddError("Client Error", fmt.Sprintf("Unable to %s the default Agents model, got error: %s", action, err))
+	return r.agentsDefaultModelCollection404Diag(ctx, action, organizationID, err, collectionErr)
+}
+
+// agentsDefaultModelCollection404Diag classifies a 404 from an organization's
+// chat model collection. A second probe against the provider's known-valid
+// default organization distinguishes an inaccessible organization from a Coder
+// version that does not expose the organization-scoped endpoint at all.
+func (r *AgentsDefaultModelResource) agentsDefaultModelCollection404Diag(ctx context.Context, action string, organizationID uuid.UUID, originalErr, collectionErr error) diag.Diagnostics {
+	var diags diag.Diagnostics
+	defaultOrganizationID := r.data.DefaultOrganizationID
+	defaultEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", defaultOrganizationID)
+
+	capabilityErr := collectionErr
+	if organizationID != defaultOrganizationID {
+		_, capabilityErr = r.experimentalClient().ChatModels(ctx, defaultOrganizationID)
+		if capabilityErr == nil {
+			detail := fmt.Sprintf("Unable to %s the default Agents model: the chat model collection for organization %s returned 404, while the same endpoint is available for the provider's default organization %s. "+
+				"The configured organization does not exist or is inaccessible. Original error: %s",
+				action, organizationID, defaultOrganizationID, originalErr)
+			if collectionErr.Error() != originalErr.Error() {
+				detail += fmt.Sprintf(" Collection probe error: %s", collectionErr)
+			}
+			diags.AddError("Organization Not Found or Inaccessible", detail)
+			return diags
+		}
+	}
+
+	if isHTTPNotFound(capabilityErr) {
+		originalEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", organizationID)
+		detail := fmt.Sprintf("Unable to %s the default Agents model: the deployment returned 404 for %s, and the capability probe against the provider's known-valid default organization at %s also returned 404. "+
+			"This endpoint requires Coder version %s or later; upgrade the deployment, or remove `coderd_agents_default_model` from your configuration. Original error: %s",
+			action, originalEndpoint, defaultEndpoint, agentsDefaultModelMinVersion, originalErr)
+		if capabilityErr.Error() != originalErr.Error() {
+			detail += fmt.Sprintf(" Capability probe error: %s", capabilityErr)
+		}
+		diags.AddError("Unsupported Coder Version", detail)
+		return diags
+	}
+
+	detail := fmt.Sprintf("Unable to %s the default Agents model after the organization's chat model collection returned 404, and unable to determine whether the endpoint is supported because the capability probe against %s failed. "+
+		"Original error: %s. Capability probe error: %s",
+		action, defaultEndpoint, originalErr, capabilityErr)
+	if collectionErr.Error() != originalErr.Error() {
+		detail += fmt.Sprintf(" Collection probe error: %s", collectionErr)
+	}
+	diags.AddError("Client Error", detail)
 	return diags
+}
+
+func isHTTPNotFound(err error) bool {
+	var sdkErr *codersdk.Error
+	return errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound
 }
