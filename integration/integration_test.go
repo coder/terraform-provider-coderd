@@ -200,8 +200,9 @@ func TestIntegration(t *testing.T) {
 			},
 		},
 		{
-			name: "agents-model-test",
-			preF: func(t testing.TB, c *codersdk.Client) {},
+			name:       "agents-model-test",
+			minVersion: "v2.37.0",
+			preF:       func(t testing.TB, c *codersdk.Client) {},
 			assertF: func(t testing.TB, c *codersdk.Client) {
 				providers, err := c.AIProviders(ctx)
 				require.NoError(t, err)
