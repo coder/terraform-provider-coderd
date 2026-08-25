@@ -2,22 +2,24 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
-	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// defaultAgentsModelID is the constant resource ID for the singleton default
-// Agents model pointer. Coder enforces exactly one default chat model globally,
-// so this resource has no scope key and uses a stable identifier instead.
-const defaultAgentsModelID = "default"
+// defaultAgentsModelMinVersion is the first Coder release that can include the
+// organization-scoped chat model API.
+const defaultAgentsModelMinVersion = "2.37.0"
 
 var (
 	_ resource.Resource                = &DefaultAgentsModelResource{}
@@ -39,8 +41,9 @@ func (r *DefaultAgentsModelResource) experimentalClient() *codersdk.Experimental
 }
 
 type DefaultAgentsModelResourceModel struct {
-	ID      types.String `tfsdk:"id"`
-	ModelID UUID         `tfsdk:"model_id"`
+	ID             UUID `tfsdk:"id"`
+	OrganizationID UUID `tfsdk:"organization_id"`
+	ModelID        UUID `tfsdk:"model_id"`
 }
 
 func (r *DefaultAgentsModelResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -57,21 +60,32 @@ func (r *DefaultAgentsModelResource) ModifyPlan(ctx context.Context, req resourc
 func (r *DefaultAgentsModelResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
-			"Selects which `coderd_agents_model` is the deployment-wide default chat model for Coder Agents.\n\n" +
-			"Coder enforces a single default model globally: marking a model as default automatically demotes the " +
-			"previous default in the same operation. Because the default is a global singleton, only one " +
-			"`coderd_default_agents_model` resource should exist per deployment.\n\n" +
-			"Destroying this resource does not clear the default server-side. Coder always keeps exactly one model " +
-			"marked as default and force-promotes a replacement when the current default is removed, so deleting this " +
-			"resource only stops Terraform from managing which model is default.",
+			"~> **Warning**\nThis resource is only compatible with Coder version [" + defaultAgentsModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + defaultAgentsModelMinVersion + ") and later.\n\n" +
+			"Selects which `coderd_agents_model` is the default chat model for Coder Agents in an organization.\n\n" +
+			"Coder enforces a single default model per organization: marking a model as default automatically demotes the " +
+			"previous default in the same operation. Only one `coderd_default_agents_model` resource should exist per organization.\n\n" +
+			"Destroying this resource does not clear the default server-side. Coder requires a default once models exist " +
+			"and promotes a replacement when the current default is removed, so deleting this resource only stops " +
+			"Terraform from managing which model is default.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				MarkdownDescription: "Constant identifier for the singleton default Agents model pointer. Always `default`.",
+				MarkdownDescription: "Organization ID that identifies this organization's default Agents model selection.",
+				CustomType:          UUIDType,
 				Computed:            true,
-				Default:             stringdefault.StaticString(defaultAgentsModelID),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"organization_id": schema.StringAttribute{
+				MarkdownDescription: "Organization ID whose default Agents model is managed.",
+				CustomType:          UUIDType,
+				Required:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"model_id": schema.StringAttribute{
-				MarkdownDescription: "ID of the `coderd_agents_model` to mark as the deployment-wide default. Usually this is `coderd_agents_model.<name>.id`.",
+				MarkdownDescription: "ID of the `coderd_agents_model` to mark as the organization's default. Usually this is `coderd_agents_model.<name>.id`.",
 				CustomType:          UUIDType,
 				Required:            true,
 			},
@@ -100,11 +114,13 @@ func (r *DefaultAgentsModelResource) Create(ctx context.Context, req resource.Cr
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	tflog.Info(ctx, "setting default Agents model", map[string]any{"model_id": plan.ModelID.ValueString()})
-	state, err := r.setDefault(ctx, plan.ModelID.ValueUUID())
+	tflog.Info(ctx, "setting default Agents model", map[string]any{
+		"organization_id": plan.OrganizationID.ValueString(),
+		"model_id":        plan.ModelID.ValueString(),
+	})
+	state, err := r.setDefault(ctx, plan.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID())
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to set default Agents model, got error: %s", err))
+		resp.Diagnostics.Append(defaultAgentsModelDiag("set", plan.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID(), err)...)
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -117,8 +133,12 @@ func (r *DefaultAgentsModelResource) Read(ctx context.Context, req resource.Read
 		return
 	}
 
-	configs, err := r.experimentalClient().ChatModels(ctx, r.data.DefaultOrganizationID)
+	configs, err := r.experimentalClient().ChatModels(ctx, state.OrganizationID.ValueUUID())
 	if err != nil {
+		if isNotFound(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read default Agents model, got error: %s", err))
 		return
 	}
@@ -131,46 +151,51 @@ func (r *DefaultAgentsModelResource) Read(ctx context.Context, req resource.Read
 		}
 	}
 
-	// Coder keeps a default model whenever any model exists, so reaching here
-	// means there are no models at all. Treat the pointer as deleted.
+	// Coder requires a default whenever any models exist, so reaching here means
+	// there are no models in this organization. Treat the selection as deleted.
 	resp.Diagnostics.AddWarning("Client Warning",
-		fmt.Sprintf("No default Agents model found among %d model config(s). Marking as deleted.", len(configs.Models)))
+		fmt.Sprintf("No default Agents model found among %d model config(s) in organization %s. Marking as deleted.", len(configs.Models), state.OrganizationID.ValueString()))
 	resp.State.RemoveResource(ctx)
 }
 
 func (r *DefaultAgentsModelResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan DefaultAgentsModelResourceModel
+	var plan, state DefaultAgentsModelResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	tflog.Info(ctx, "updating default Agents model", map[string]any{"model_id": plan.ModelID.ValueString()})
-	state, err := r.setDefault(ctx, plan.ModelID.ValueUUID())
+	tflog.Info(ctx, "updating default Agents model", map[string]any{
+		"organization_id": state.OrganizationID.ValueString(),
+		"model_id":        plan.ModelID.ValueString(),
+	})
+	updated, err := r.setDefault(ctx, state.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID())
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update default Agents model, got error: %s", err))
+		resp.Diagnostics.Append(defaultAgentsModelDiag("update", state.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID(), err)...)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &updated)...)
 }
 
 func (r *DefaultAgentsModelResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Coder requires a default once models exist and has no API for unsetting it.
 	tflog.Info(ctx, "deleting coderd_default_agents_model is a no-op; Coder retains its current default model")
 }
 
 func (r *DefaultAgentsModelResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// The import ID seeds model_id, but Read immediately overwrites it with
-	// whichever model Coder currently reports as default, so any value (even a
-	// stale or arbitrary UUID) self-corrects. Import does not promote a model.
-	resource.ImportStatePassthroughID(ctx, path.Root("model_id"), req, resp)
+	// Import by organization ID. Read resolves the organization's current
+	// default model without promoting or otherwise modifying any model.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), req.ID)...)
 }
 
-// setDefault marks the given model config as the deployment-wide default and
-// returns the resulting resource state. The request carries only is_default;
+// setDefault marks the given model config as the default for its organization
+// and returns the resulting resource state. The request carries only is_default;
 // Coder merges it into the existing model config and atomically demotes the
-// previous default.
-func (r *DefaultAgentsModelResource) setDefault(ctx context.Context, modelID uuid.UUID) (DefaultAgentsModelResourceModel, error) {
-	updated, err := r.experimentalClient().UpdateChatModel(ctx, r.data.DefaultOrganizationID, modelID, codersdk.UpdateChatModelRequest{
+// previous default in that organization.
+func (r *DefaultAgentsModelResource) setDefault(ctx context.Context, organizationID, modelID uuid.UUID) (DefaultAgentsModelResourceModel, error) {
+	updated, err := r.experimentalClient().UpdateChatModel(ctx, organizationID, modelID, codersdk.UpdateChatModelRequest{
 		IsDefault: new(true),
 	})
 	if err != nil {
@@ -180,11 +205,32 @@ func (r *DefaultAgentsModelResource) setDefault(ctx context.Context, modelID uui
 }
 
 // stateFromDefaultModelConfig maps the model config that Coder reports as the
-// default into resource state. The resource ID is a constant because the default
-// is a global singleton.
+// default into resource state. The organization UUID is the natural identity
+// because each organization has at most one default model.
 func stateFromDefaultModelConfig(config codersdk.ChatModel) DefaultAgentsModelResourceModel {
 	return DefaultAgentsModelResourceModel{
-		ID:      types.StringValue(defaultAgentsModelID),
-		ModelID: UUIDValue(config.ID),
+		ID:             UUIDValue(config.OrganizationID),
+		OrganizationID: UUIDValue(config.OrganizationID),
+		ModelID:        UUIDValue(config.ID),
 	}
+}
+
+func defaultAgentsModelDiag(action string, organizationID, modelID uuid.UUID, err error) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var sdkErr *codersdk.Error
+	if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
+		endpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models/%s", organizationID, modelID)
+		diags.AddError(
+			"Unsupported Coder Version",
+			fmt.Sprintf("Unable to %s the default Agents model: the deployment returned 404 for %s. "+
+				"This endpoint requires Coder version %s or later; upgrade the deployment, or remove "+
+				"`coderd_default_agents_model` from your configuration. Original error: %s",
+				action, endpoint, defaultAgentsModelMinVersion, err),
+		)
+		return diags
+	}
+
+	diags.AddError("Client Error", fmt.Sprintf("Unable to %s the default Agents model, got error: %s", action, err))
+	return diags
 }
