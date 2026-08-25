@@ -237,7 +237,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewAgentsMCPServerResource,
 		NewAgentsModelResource,
 		NewDefaultAgentsModelResource,
-		NewChatSystemPromptResource,
+		NewAgentsSystemPromptResource,
 		NewOAuth2ProviderSettingsResource,
 	}
 }
