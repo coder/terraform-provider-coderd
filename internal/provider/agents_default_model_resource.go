@@ -136,7 +136,7 @@ func (r *AgentsDefaultModelResource) Read(ctx context.Context, req resource.Read
 	organizationID := state.OrganizationID.ValueUUID()
 	configs, err := r.experimentalClient().ChatModels(ctx, organizationID)
 	if err != nil {
-		if isHTTPNotFound(err) {
+		if isNotFound(err) {
 			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization %s not found or inaccessible. Marking its default Agents model selection as deleted.", organizationID))
 			resp.State.RemoveResource(ctx)
 			return
