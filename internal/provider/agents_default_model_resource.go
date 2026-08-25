@@ -137,13 +137,8 @@ func (r *AgentsDefaultModelResource) Read(ctx context.Context, req resource.Read
 	configs, err := r.experimentalClient().ChatModels(ctx, organizationID)
 	if err != nil {
 		if isHTTPNotFound(err) {
-			diags, organizationNotFound := r.agentsDefaultModelCollection404Diag(ctx, "read", organizationID, err, err)
-			if organizationNotFound {
-				resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization %s not found or inaccessible. Marking its default Agents model selection as deleted.", organizationID))
-				resp.State.RemoveResource(ctx)
-				return
-			}
-			resp.Diagnostics.Append(diags...)
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Organization %s not found or inaccessible. Marking its default Agents model selection as deleted.", organizationID))
+			resp.State.RemoveResource(ctx)
 			return
 		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read default Agents model, got error: %s", err))
@@ -251,55 +246,13 @@ func (r *AgentsDefaultModelResource) agentsDefaultModelDiag(ctx context.Context,
 		return diags
 	}
 
-	diags, _ = r.agentsDefaultModelCollection404Diag(ctx, action, organizationID, err, collectionErr)
+	diags.AddError(
+		"Organization Not Found or Inaccessible",
+		fmt.Sprintf("Unable to %s the default Agents model: the chat model collection for organization %s returned 404. "+
+			"The organization does not exist or is inaccessible. Original error: %s. Collection probe error: %s",
+			action, organizationID, err, collectionErr),
+	)
 	return diags
-}
-
-// agentsDefaultModelCollection404Diag classifies a 404 from an organization's
-// chat model collection. A second probe against the provider's known-valid
-// default organization distinguishes a missing or inaccessible organization
-// from a Coder version that does not expose the organization-scoped endpoint.
-// The boolean result is true for the former case.
-func (r *AgentsDefaultModelResource) agentsDefaultModelCollection404Diag(ctx context.Context, action string, organizationID uuid.UUID, originalErr, collectionErr error) (diag.Diagnostics, bool) {
-	var diags diag.Diagnostics
-	defaultOrganizationID := r.data.DefaultOrganizationID
-	defaultEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", defaultOrganizationID)
-
-	capabilityErr := collectionErr
-	if organizationID != defaultOrganizationID {
-		_, capabilityErr = r.experimentalClient().ChatModels(ctx, defaultOrganizationID)
-		if capabilityErr == nil {
-			detail := fmt.Sprintf("Unable to %s the default Agents model: the chat model collection for organization %s returned 404, while the same endpoint is available for the provider's default organization %s. "+
-				"The configured organization does not exist or is inaccessible. Original error: %s",
-				action, organizationID, defaultOrganizationID, originalErr)
-			if collectionErr.Error() != originalErr.Error() {
-				detail += fmt.Sprintf(" Collection probe error: %s", collectionErr)
-			}
-			diags.AddError("Organization Not Found or Inaccessible", detail)
-			return diags, true
-		}
-	}
-
-	if isHTTPNotFound(capabilityErr) {
-		originalEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", organizationID)
-		detail := fmt.Sprintf("Unable to %s the default Agents model: the deployment returned 404 for %s, and the capability probe against the provider's known-valid default organization at %s also returned 404. "+
-			"This endpoint requires Coder version %s or later; upgrade the deployment, or remove `coderd_agents_default_model` from your configuration. Original error: %s",
-			action, originalEndpoint, defaultEndpoint, agentsDefaultModelMinVersion, originalErr)
-		if capabilityErr.Error() != originalErr.Error() {
-			detail += fmt.Sprintf(" Capability probe error: %s", capabilityErr)
-		}
-		diags.AddError("Unsupported Coder Version", detail)
-		return diags, false
-	}
-
-	detail := fmt.Sprintf("Unable to %s the default Agents model after the organization's chat model collection returned 404, and unable to determine whether the endpoint is supported because the capability probe against %s failed. "+
-		"Original error: %s. Capability probe error: %s",
-		action, defaultEndpoint, originalErr, capabilityErr)
-	if collectionErr.Error() != originalErr.Error() {
-		detail += fmt.Sprintf(" Collection probe error: %s", collectionErr)
-	}
-	diags.AddError("Client Error", detail)
-	return diags, false
 }
 
 func isHTTPNotFound(err error) bool {
