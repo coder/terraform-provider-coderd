@@ -218,6 +218,10 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 			targetCollectionStatus: http.StatusNotFound,
 		},
 		{
+			name:                   "organization missing with Coder 400 response",
+			targetCollectionStatus: http.StatusBadRequest,
+		},
+		{
 			name:                   "empty supported collection",
 			targetCollectionStatus: http.StatusOK,
 		},
@@ -290,6 +294,10 @@ func agentsDefaultModelTestState(t *testing.T, r *AgentsDefaultModelResource, mo
 func writeAgentsDefaultModelCollectionResponse(w http.ResponseWriter, status int) {
 	if status == 0 {
 		status = http.StatusInternalServerError
+	}
+	if status == http.StatusBadRequest {
+		writeJSON(w, status, codersdk.Response{Message: "must be an existing uuid or username"})
+		return
 	}
 	if status != http.StatusOK {
 		writeJSON(w, status, codersdk.Response{Message: statusMessage(status)})
