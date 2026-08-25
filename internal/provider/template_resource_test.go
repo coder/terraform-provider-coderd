@@ -2521,7 +2521,7 @@ func versionObjectType() types.ObjectType {
 // fields the validator must succeed without diagnostics.
 func TestValidateListUnknownTFVars(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	objType := versionObjectType()
 
 	versionVal, diags := types.ObjectValue(objType.AttrTypes, map[string]attr.Value{
@@ -2554,7 +2554,7 @@ func TestValidateListUnknownTFVars(t *testing.T) {
 // sensitive or unknown values.
 func TestUnknownTFVarsDeserialization(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	objType := versionObjectType()
 
 	// buildAndDeserialize wraps a single version object (with the given tf_vars

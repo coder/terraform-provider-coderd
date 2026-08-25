@@ -71,7 +71,7 @@ func TestHeadersBypassRateLimit(t *testing.T) {
 
 	t.Run("WithoutBypass", func(t *testing.T) {
 		t.Parallel()
-		subCtx, subCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		subCtx, subCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer subCancel()
 
 		got429 := false
@@ -90,7 +90,7 @@ func TestHeadersBypassRateLimit(t *testing.T) {
 
 	t.Run("WithBypass", func(t *testing.T) {
 		t.Parallel()
-		subCtx, subCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		subCtx, subCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer subCancel()
 
 		// Create a new client with the bypass header set.

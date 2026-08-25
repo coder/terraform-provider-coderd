@@ -186,7 +186,7 @@ func dumpContainerLogs(t *testing.T, ctr testcontainers.Container) {
 	if ctr == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	logs, err := ctr.Logs(ctx)
 	if err != nil {

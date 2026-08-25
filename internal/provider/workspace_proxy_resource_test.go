@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"os"
 	"regexp"
 	"strings"
@@ -19,7 +18,7 @@ func TestWorkspaceProxyResourceSessionTokenSensitive(t *testing.T) {
 	t.Parallel()
 
 	resp := &fwresource.SchemaResponse{}
-	(&WorkspaceProxyResource{}).Schema(context.Background(), fwresource.SchemaRequest{}, resp)
+	(&WorkspaceProxyResource{}).Schema(t.Context(), fwresource.SchemaRequest{}, resp)
 	require.Empty(t, resp.Diagnostics)
 
 	attr := resp.Schema.Attributes["session_token"]
