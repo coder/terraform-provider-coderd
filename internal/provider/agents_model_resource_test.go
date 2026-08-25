@@ -61,6 +61,102 @@ func TestAgentsModelStateOrganizationIDLegacy(t *testing.T) {
 	require.Equal(t, organizationID, got)
 }
 
+func TestAgentsModelCreateDiag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		probeStatus     int
+		probeMessage    string
+		wantSummary     string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:        "supported endpoint identifies invalid organization",
+			probeStatus: http.StatusOK,
+			wantSummary: "Invalid Agents Model Organization",
+			wantContains: []string{
+				"target organization not found",
+				"may not exist or the token may not have access",
+			},
+			wantNotContains: []string{agentsModelMinVersion},
+		},
+		{
+			name:         "probe 404 identifies unsupported endpoint",
+			probeStatus:  http.StatusNotFound,
+			probeMessage: "endpoint not found",
+			wantSummary:  "Agents Model Endpoint Unavailable",
+			wantContains: []string{
+				"target organization not found",
+				"endpoint not found",
+				agentsModelMinVersion,
+			},
+		},
+		{
+			name:         "other probe failure remains generic",
+			probeStatus:  http.StatusInternalServerError,
+			probeMessage: "probe failed",
+			wantSummary:  "Client Error",
+			wantContains: []string{
+				"target organization not found",
+				"probe failed",
+				"unable to determine whether the endpoint is supported",
+			},
+			wantNotContains: []string{agentsModelMinVersion},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			targetOrganizationID := uuid.New()
+			defaultOrganizationID := uuid.New()
+			targetEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
+			probeEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", defaultOrganizationID)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case req.Method == http.MethodPost && req.URL.Path == targetEndpoint:
+					w.WriteHeader(http.StatusNotFound)
+					require.NoError(t, json.NewEncoder(w).Encode(codersdk.Response{Message: "target organization not found"}))
+				case req.Method == http.MethodGet && req.URL.Path == probeEndpoint:
+					w.WriteHeader(tt.probeStatus)
+					if tt.probeStatus == http.StatusOK {
+						require.NoError(t, json.NewEncoder(w).Encode(codersdk.OrganizationChatModelsResponse{}))
+						return
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(codersdk.Response{Message: tt.probeMessage}))
+				default:
+					http.NotFound(w, req)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			srvURL, err := url.Parse(srv.URL)
+			require.NoError(t, err)
+			r := &AgentsModelResource{data: &CoderdProviderData{
+				Client:                codersdk.New(srvURL),
+				DefaultOrganizationID: defaultOrganizationID,
+			}}
+
+			_, createErr := r.experimentalClient().CreateChatModel(t.Context(), targetOrganizationID, codersdk.CreateChatModelRequest{})
+			require.Error(t, createErr)
+
+			diags := r.agentsModelCreateDiag(t.Context(), targetOrganizationID, createErr)
+			require.Len(t, diags, 1)
+			require.Equal(t, tt.wantSummary, diags[0].Summary())
+			for _, want := range append(tt.wantContains, targetOrganizationID.String(), "Original error") {
+				require.Contains(t, diags[0].Detail(), want)
+			}
+			for _, notWant := range tt.wantNotContains {
+				require.NotContains(t, diags[0].Detail(), notWant)
+			}
+		})
+	}
+}
+
 func TestAgentsModelCreateRequest(t *testing.T) {
 	t.Parallel()
 

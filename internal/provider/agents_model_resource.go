@@ -264,7 +264,7 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	organizationID := plan.OrganizationID.ValueUUID()
 	modelConfig, err := r.createChatModelWithRetry(ctx, organizationID, createReq)
 	if err != nil {
-		resp.Diagnostics.Append(agentsModelCreateDiag(organizationID, err)...)
+		resp.Diagnostics.Append(r.agentsModelCreateDiag(ctx, organizationID, err)...)
 		return
 	}
 
@@ -434,23 +434,45 @@ func (r *AgentsModelResource) ImportState(ctx context.Context, req resource.Impo
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id.String())...)
 }
 
-func agentsModelCreateDiag(organizationID uuid.UUID, err error) diag.Diagnostics {
+func (r *AgentsModelResource) agentsModelCreateDiag(ctx context.Context, organizationID uuid.UUID, createErr error) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	var sdkErr *codersdk.Error
-	if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
-		endpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", organizationID)
+	if !errors.As(createErr, &sdkErr) || sdkErr.StatusCode() != http.StatusNotFound {
+		diags.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", createErr))
+		return diags
+	}
+
+	createEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", organizationID)
+	probeEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", r.data.DefaultOrganizationID)
+	_, probeErr := r.experimentalClient().ChatModels(ctx, r.data.DefaultOrganizationID)
+	if probeErr == nil {
 		diags.AddError(
-			"Agents Model Endpoint Unavailable",
-			fmt.Sprintf("Unable to create the Agents model: the deployment returned 404 for %s. "+
-				"This resource requires Coder version %s or later; upgrade the deployment, or remove "+
-				"`coderd_agents_model` from your configuration. Original error: %s",
-				endpoint, agentsModelMinVersion, err),
+			"Invalid Agents Model Organization",
+			fmt.Sprintf("Unable to create the Agents model: the deployment returned 404 for %s, but the same endpoint is available for the provider's default organization. "+
+				"Organization %s may not exist or the token may not have access to it. Original error: %s",
+				createEndpoint, organizationID, createErr),
 		)
 		return diags
 	}
 
-	diags.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", err))
+	var probeSDKErr *codersdk.Error
+	if errors.As(probeErr, &probeSDKErr) && probeSDKErr.StatusCode() == http.StatusNotFound {
+		diags.AddError(
+			"Agents Model Endpoint Unavailable",
+			fmt.Sprintf("Unable to create the Agents model: the deployment returned 404 for %s, and the capability probe returned 404 for %s. "+
+				"This resource requires Coder version %s or later; upgrade the deployment, or remove "+
+				"`coderd_agents_model` from your configuration. Original error: %s. Probe error: %s",
+				createEndpoint, probeEndpoint, agentsModelMinVersion, createErr, probeErr),
+		)
+		return diags
+	}
+
+	diags.AddError(
+		"Client Error",
+		fmt.Sprintf("Unable to create the Agents model, and unable to determine whether the endpoint is supported because the capability probe for %s also failed. Original error: %s. Probe error: %s",
+			probeEndpoint, createErr, probeErr),
+	)
 	return diags
 }
 
