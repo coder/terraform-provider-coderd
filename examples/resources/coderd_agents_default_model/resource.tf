@@ -22,7 +22,7 @@ resource "coderd_agents_model" "sonnet" {
 # Mark the Sonnet model as the default for Coder Agents in its organization.
 # Setting a new default automatically demotes the previous one in that
 # organization, so use one resource per organization.
-resource "coderd_default_agents_model" "default" {
+resource "coderd_agents_default_model" "default" {
   organization_id = coderd_agents_model.sonnet.organization_id
   model_id        = coderd_agents_model.sonnet.id
 }

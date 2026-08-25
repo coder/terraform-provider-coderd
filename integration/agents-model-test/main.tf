@@ -111,9 +111,10 @@ resource "coderd_agents_model" "gpt_mini" {
   })
 }
 
-# Select Claude Sonnet as the deployment-wide default. Coder auto-promotes the
-# first model created (claude_opus) to default, so this resource demotes it and
-# proves the pointer overrides the server's automatic choice end-to-end.
-resource "coderd_default_agents_model" "default" {
-  model_id = coderd_agents_model.claude_sonnet.id
+# Select Claude Sonnet as the default in its organization. Coder auto-promotes
+# the first model created (claude_opus), so this resource demotes it and proves
+# the pointer overrides the server's automatic choice end-to-end.
+resource "coderd_agents_default_model" "default" {
+  organization_id = coderd_agents_model.claude_sonnet.organization_id
+  model_id        = coderd_agents_model.claude_sonnet.id
 }
