@@ -74,6 +74,7 @@ func TestAccDefaultAgentsModelResource(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "default_agents_model_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg := func(defaultModel string) string {
@@ -159,6 +160,7 @@ func TestAccDefaultAgentsModelResourceDriftAndDelete(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "default_agents_model_drift_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	organizationID := accDefaultOrganizationID(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
