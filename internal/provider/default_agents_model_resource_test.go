@@ -11,6 +11,9 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -33,6 +36,50 @@ func TestDefaultAgentsModelStateFromModelConfig(t *testing.T) {
 	require.Equal(t, organizationID.String(), state.OrganizationID.ValueString())
 	require.Equal(t, modelID, state.ModelID.ValueUUID())
 	require.Equal(t, modelID.String(), state.ModelID.ValueString())
+}
+
+// TestDefaultAgentsModelUpgradeStateV0 upgrades legacy (schema version 0)
+// state, which held the constant id "default" and no organization_id, to
+// version 1: id and organization_id become null (Read resolves them through
+// the legacy compatibility route) and model_id is preserved.
+func TestDefaultAgentsModelUpgradeStateV0(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	modelID := uuid.New()
+
+	r := &DefaultAgentsModelResource{}
+	upgrader, ok := r.UpgradeState(ctx)[0]
+	require.True(t, ok)
+	require.NotNil(t, upgrader.PriorSchema)
+	require.NotNil(t, upgrader.StateUpgrader)
+
+	priorRaw := tftypes.NewValue(upgrader.PriorSchema.Type().TerraformType(ctx), map[string]tftypes.Value{
+		"id":       tftypes.NewValue(tftypes.String, "default"),
+		"model_id": tftypes.NewValue(tftypes.String, modelID.String()),
+	})
+
+	var schemaResp fwresource.SchemaResponse
+	r.Schema(ctx, fwresource.SchemaRequest{}, &schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError(), schemaResp.Diagnostics)
+
+	req := fwresource.UpgradeStateRequest{
+		State: &tfsdk.State{Raw: priorRaw, Schema: *upgrader.PriorSchema},
+	}
+	resp := &fwresource.UpgradeStateResponse{
+		State: tfsdk.State{
+			Raw:    tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), nil),
+			Schema: schemaResp.Schema,
+		},
+	}
+	upgrader.StateUpgrader(ctx, req, resp)
+	require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
+
+	var upgraded DefaultAgentsModelResourceModel
+	require.False(t, resp.State.Get(ctx, &upgraded).HasError())
+	require.True(t, upgraded.ID.IsNull())
+	require.True(t, upgraded.OrganizationID.IsNull())
+	require.Equal(t, modelID, upgraded.ModelID.ValueUUID())
 }
 
 // TestDefaultAgentsModelResourceValidationDefersUnknownConfig checks validation
@@ -115,6 +162,87 @@ resource "coderd_default_agents_model" "default" {
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// TestAccDefaultAgentsModelResourceUpgradeFromV0_0_23 creates schema version 0
+// state with the last provider release that used the deployment-wide default
+// model, then switches to the in-repository provider. The current provider must
+// upgrade id = "default", recover the default organization during Read, and
+// converge without changing the selected server-side model.
+func TestAccDefaultAgentsModelResourceUpgradeFromV0_0_23(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "default_agents_model_upgrade_v0_0_23_acc", integration.UseLicense)
+	organizationID := accDefaultOrganizationID(ctx, t, client)
+	skipIfDefaultAgentsModelUnsupported(ctx, t, client, organizationID)
+	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
+	model := createAccChatModel(ctx, t, client, organizationID, aiProvider.ID, "claude-3-5-sonnet-20241022")
+
+	// The first model in an organization is automatically the default. Import it
+	// with v0.0.23 rather than creating coderd_default_agents_model: that release's
+	// unscoped PATCH route no longer exists in Coder 2.37, while its import and
+	// compatibility-list Read paths still produce the exact released v0 state.
+	cfg := fmt.Sprintf(`
+provider "coderd" {
+  url   = %q
+  token = %q
+}
+
+resource "coderd_default_agents_model" "default" {
+  model_id = %q
+}
+`, client.URL.String(), client.SessionToken(), model.ID.String())
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest: true,
+		PreCheck:   func() { testAccPreCheck(t) },
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				ExternalProviders: map[string]resource.ExternalProvider{
+					"coderd": {
+						Source:            "coder/coderd",
+						VersionConstraint: "= 0.0.23",
+					},
+				},
+				ResourceName:       "coderd_default_agents_model.default",
+				ImportState:        true,
+				ImportStateId:      model.ID.String(),
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected one imported resource, got %d", len(states))
+					}
+					if got := states[0].Attributes["id"]; got != "default" {
+						return fmt.Errorf("expected legacy id %q, got %q", "default", got)
+					}
+					if got := states[0].Attributes["model_id"]; got != model.ID.String() {
+						return fmt.Errorf("expected legacy model_id %q, got %q", model.ID, got)
+					}
+					return nil
+				},
+			},
+			{
+				Config:                   cfg,
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_default_agents_model.default", "id", organizationID.String()),
+					resource.TestCheckResourceAttr("coderd_default_agents_model.default", "organization_id", organizationID.String()),
+					resource.TestCheckResourceAttr("coderd_default_agents_model.default", "model_id", model.ID.String()),
+					checkServerDefaultMatchesResource(ctx, t, client, organizationID, "coderd_default_agents_model.default"),
+				),
+			},
+			{
+				Config:                   cfg,
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				PlanOnly:                 true,
 			},
 		},
 	})

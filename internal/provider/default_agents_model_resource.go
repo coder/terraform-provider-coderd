@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -22,10 +23,11 @@ import (
 const defaultAgentsModelMinVersion = "2.37.0"
 
 var (
-	_ resource.Resource                = &DefaultAgentsModelResource{}
-	_ resource.ResourceWithConfigure   = &DefaultAgentsModelResource{}
-	_ resource.ResourceWithImportState = &DefaultAgentsModelResource{}
-	_ resource.ResourceWithModifyPlan  = &DefaultAgentsModelResource{}
+	_ resource.Resource                 = &DefaultAgentsModelResource{}
+	_ resource.ResourceWithConfigure    = &DefaultAgentsModelResource{}
+	_ resource.ResourceWithImportState  = &DefaultAgentsModelResource{}
+	_ resource.ResourceWithModifyPlan   = &DefaultAgentsModelResource{}
+	_ resource.ResourceWithUpgradeState = &DefaultAgentsModelResource{}
 )
 
 func NewDefaultAgentsModelResource() resource.Resource {
@@ -46,6 +48,14 @@ type DefaultAgentsModelResourceModel struct {
 	ModelID        UUID `tfsdk:"model_id"`
 }
 
+// defaultAgentsModelResourceModelV0 is the model for schema version 0, when the
+// resource tracked the deployment-wide default under the constant id "default"
+// with no organization.
+type defaultAgentsModelResourceModelV0 struct {
+	ID      types.String `tfsdk:"id"`
+	ModelID UUID         `tfsdk:"model_id"`
+}
+
 func (r *DefaultAgentsModelResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_default_agents_model"
 }
@@ -59,6 +69,9 @@ func (r *DefaultAgentsModelResource) ModifyPlan(ctx context.Context, req resourc
 
 func (r *DefaultAgentsModelResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		// Version 1 replaced the constant id "default" (schema version 0) with
+		// the organization UUID when defaults became per-organization.
+		Version: 1,
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"~> **Warning**\nThis resource is only compatible with Coder version [" + defaultAgentsModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + defaultAgentsModelMinVersion + ") and later.\n\n" +
 			"Selects which `coderd_agents_model` is the default chat model for Coder Agents in an organization.\n\n" +
@@ -88,6 +101,50 @@ func (r *DefaultAgentsModelResource) Schema(ctx context.Context, req resource.Sc
 				MarkdownDescription: "ID of the `coderd_agents_model` to mark as the organization's default. Usually this is `coderd_agents_model.<name>.id`.",
 				CustomType:          UUIDType,
 				Required:            true,
+			},
+		},
+	}
+}
+
+// defaultAgentsModelSchemaV0 is the resource schema at version 0 (provider
+// <= 0.0.23), when the default was deployment-wide: id held the constant
+// string "default" and there was no organization_id. Only the attribute types
+// matter here; id must be a plain string because "default" is not a UUID.
+func defaultAgentsModelSchemaV0() schema.Schema {
+	return schema.Schema{
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed: true,
+			},
+			"model_id": schema.StringAttribute{
+				CustomType: UUIDType,
+				Required:   true,
+			},
+		},
+	}
+}
+
+func (r *DefaultAgentsModelResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
+	priorSchema := defaultAgentsModelSchemaV0()
+	return map[int64]resource.StateUpgrader{
+		0: {
+			PriorSchema: &priorSchema,
+			StateUpgrader: func(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+				var prior defaultAgentsModelResourceModelV0
+				resp.Diagnostics.Append(req.State.Get(ctx, &prior)...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				// Leave id and organization_id null rather than resolving them
+				// here: Read and Update already treat a null organization_id as
+				// legacy state and recover the organization the v0 resource
+				// managed (Coder's default organization) through the
+				// compatibility route, rewriting both fields.
+				resp.Diagnostics.Append(resp.State.Set(ctx, &DefaultAgentsModelResourceModel{
+					ID:             NewUUIDNull(),
+					OrganizationID: NewUUIDNull(),
+					ModelID:        prior.ModelID,
+				})...)
 			},
 		},
 	}
@@ -133,7 +190,16 @@ func (r *DefaultAgentsModelResource) Read(ctx context.Context, req resource.Read
 		return
 	}
 
-	configs, err := r.experimentalClient().ChatModels(ctx, state.OrganizationID.ValueUUID())
+	var configs codersdk.OrganizationChatModelsResponse
+	var err error
+	if state.OrganizationID.IsNull() || state.OrganizationID.IsUnknown() {
+		// Legacy state predates organization_id. The old unscoped resource managed
+		// models in Coder's default organization, which may differ from the
+		// provider user's first organization.
+		configs, err = legacyDefaultOrganizationChatModels(ctx, r.data.Client)
+	} else {
+		configs, err = r.experimentalClient().ChatModels(ctx, state.OrganizationID.ValueUUID())
+	}
 	if err != nil {
 		if isNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -170,9 +236,22 @@ func (r *DefaultAgentsModelResource) Update(ctx context.Context, req resource.Up
 		"organization_id": state.OrganizationID.ValueString(),
 		"model_id":        plan.ModelID.ValueString(),
 	})
-	updated, err := r.setDefault(ctx, state.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID())
+	organizationID := state.OrganizationID.ValueUUID()
+	if state.OrganizationID.IsNull() || state.OrganizationID.IsUnknown() {
+		config, found, err := legacyDefaultOrganizationChatModel(ctx, r.data.Client, plan.ModelID.ValueUUID())
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to resolve the organization for legacy default Agents model state, got error: %s", err))
+			return
+		}
+		if !found {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update default Agents model because model %s no longer exists.", plan.ModelID.ValueString()))
+			return
+		}
+		organizationID = config.OrganizationID
+	}
+	updated, err := r.setDefault(ctx, organizationID, plan.ModelID.ValueUUID())
 	if err != nil {
-		resp.Diagnostics.Append(defaultAgentsModelDiag("update", state.OrganizationID.ValueUUID(), plan.ModelID.ValueUUID(), err)...)
+		resp.Diagnostics.Append(defaultAgentsModelDiag("update", organizationID, plan.ModelID.ValueUUID(), err)...)
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &updated)...)
