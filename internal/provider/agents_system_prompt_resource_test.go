@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const chatSystemPromptPath = "/api/experimental/chats/config/system-prompt"
+const agentsSystemPromptPath = "/api/experimental/chats/config/system-prompt"
 
-const chatSystemPromptResourceAddr = "coderd_chat_system_prompt.test"
+const agentsSystemPromptResourceAddr = "coderd_agents_system_prompt.test"
 
 type fakeChatCoderd struct {
 	*httptest.Server
@@ -70,7 +70,7 @@ func (f *fakeChatCoderd) handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, codersdk.Entitlements{
 			Features: map[codersdk.FeatureName]codersdk.Feature{},
 		})
-	case r.URL.Path == chatSystemPromptPath && r.Method == http.MethodGet:
+	case r.URL.Path == agentsSystemPromptPath && r.Method == http.MethodGet:
 		f.mu.Lock()
 		status, prompt, include := f.getStatus, f.prompt, f.includeDflt
 		f.mu.Unlock()
@@ -83,7 +83,7 @@ func (f *fakeChatCoderd) handle(w http.ResponseWriter, r *http.Request) {
 			IncludeDefaultSystemPrompt: include,
 			DefaultSystemPrompt:        "built-in prompt",
 		})
-	case r.URL.Path == chatSystemPromptPath && r.Method == http.MethodPut:
+	case r.URL.Path == agentsSystemPromptPath && r.Method == http.MethodPut:
 		f.mu.Lock()
 		status := f.putStatus
 		f.mu.Unlock()
@@ -112,19 +112,19 @@ func (f *fakeChatCoderd) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func chatSystemPromptConfig(url, prompt string, includeDefault *bool) string {
+func agentsSystemPromptConfig(url, prompt string, includeDefault *bool) string {
 	include := ""
 	if includeDefault != nil {
 		include = fmt.Sprintf("\n\tinclude_default_system_prompt = %t", *includeDefault)
 	}
 	return oauth2SettingsProviderBlock(url) + fmt.Sprintf(`
-resource "coderd_chat_system_prompt" "test" {
+resource "coderd_agents_system_prompt" "test" {
 	system_prompt = %q%s
 }
 `, prompt, include)
 }
 
-func TestChatSystemPromptSemanticEquals(t *testing.T) {
+func TestAgentsSystemPromptSemanticEquals(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -142,20 +142,20 @@ func TestChatSystemPromptSemanticEquals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, diags := newChatSystemPromptTextValue(tc.a).StringSemanticEquals(ctx, newChatSystemPromptTextValue(tc.b))
+			got, diags := newAgentsSystemPromptTextValue(tc.a).StringSemanticEquals(ctx, newAgentsSystemPromptTextValue(tc.b))
 			require.False(t, diags.HasError())
 			require.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestChatSystemPromptLengthValidator(t *testing.T) {
+func TestAgentsSystemPromptLengthValidator(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
 
-	okPrompt := strings.Repeat("a", maxChatSystemPromptBytes) + "\n\n\n"
-	tooLong := strings.Repeat("a", maxChatSystemPromptBytes+1)
+	okPrompt := strings.Repeat("a", maxAgentsSystemPromptBytes) + "\n\n\n"
+	tooLong := strings.Repeat("a", maxAgentsSystemPromptBytes+1)
 
 	for _, tc := range []struct {
 		name    string
@@ -170,7 +170,7 @@ func TestChatSystemPromptLengthValidator(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			resp := &validator.StringResponse{}
-			chatSystemPromptLengthValidator{}.ValidateString(ctx, validator.StringRequest{
+			agentsSystemPromptLengthValidator{}.ValidateString(ctx, validator.StringRequest{
 				Path:        pathSystemPrompt,
 				ConfigValue: tc.value,
 			}, resp)
@@ -179,7 +179,7 @@ func TestChatSystemPromptLengthValidator(t *testing.T) {
 	}
 }
 
-func TestAccChatSystemPromptResource(t *testing.T) {
+func TestAccAgentsSystemPromptResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
@@ -194,17 +194,17 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: chatSystemPromptConfig(f.URL, "You are a helpful agent.\n", nil),
+				Config: agentsSystemPromptConfig(f.URL, "You are a helpful agent.\n", nil),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
-						chatSystemPromptResourceAddr,
+						agentsSystemPromptResourceAddr,
 						tfjsonpath.New("include_default_system_prompt"),
 						knownvalue.Bool(true),
 					),
 				},
 			},
 			{
-				Config: chatSystemPromptConfig(f.URL, "You are a helpful agent.\n", nil),
+				Config: agentsSystemPromptConfig(f.URL, "You are a helpful agent.\n", nil),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -212,10 +212,10 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 				},
 			},
 			{
-				Config: chatSystemPromptConfig(f.URL, "You are a very helpful agent.\n", &includeFalse),
+				Config: agentsSystemPromptConfig(f.URL, "You are a very helpful agent.\n", &includeFalse),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
-						chatSystemPromptResourceAddr,
+						agentsSystemPromptResourceAddr,
 						tfjsonpath.New("include_default_system_prompt"),
 						knownvalue.Bool(false),
 					),
@@ -230,7 +230,7 @@ func TestAccChatSystemPromptResource(t *testing.T) {
 	require.True(t, f.includeDflt)
 }
 
-func TestAccChatSystemPromptImport(t *testing.T) {
+func TestAccAgentsSystemPromptImport(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
@@ -247,14 +247,14 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:             chatSystemPromptConfig(f.URL, "configured in the dashboard", nil),
-				ResourceName:       chatSystemPromptResourceAddr,
+				Config:             agentsSystemPromptConfig(f.URL, "configured in the dashboard", nil),
+				ResourceName:       agentsSystemPromptResourceAddr,
 				ImportState:        true,
 				ImportStatePersist: true,
-				ImportStateId:      "chat_system_prompt",
+				ImportStateId:      "agents_system_prompt",
 			},
 			{
-				Config: chatSystemPromptConfig(f.URL, "configured in the dashboard", nil),
+				Config: agentsSystemPromptConfig(f.URL, "configured in the dashboard", nil),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectEmptyPlan(),
@@ -269,7 +269,7 @@ func TestAccChatSystemPromptImport(t *testing.T) {
 	require.Equal(t, []string{""}, f.putPrompts)
 }
 
-func TestAccChatSystemPromptEndpointUnavailable(t *testing.T) {
+func TestAccAgentsSystemPromptEndpointUnavailable(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
@@ -287,20 +287,20 @@ func TestAccChatSystemPromptEndpointUnavailable(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      chatSystemPromptConfig(f.URL, "prompt", nil),
+				Config:      agentsSystemPromptConfig(f.URL, "prompt", nil),
 				ExpectError: regexp.MustCompile("Chat System Prompt Endpoint Unavailable"),
 			},
 		},
 	})
 }
 
-func TestAccChatSystemPromptRealCoderNoDrift(t *testing.T) {
+func TestAccAgentsSystemPromptRealCoderNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "chat_system_prompt_acc")
+	client := integration.StartCoder(ctx, t, "agents_system_prompt_acc")
 	experimental := codersdk.NewExperimentalClient(client)
 
 	messyPrompt := "You are a helpful agent.\r\nBe concise.\u200b\n\n\n\nAlways cite sources.\n"
@@ -311,7 +311,7 @@ provider "coderd" {
   token = %[2]q
 }
 
-resource "coderd_chat_system_prompt" "test" {
+resource "coderd_agents_system_prompt" "test" {
   system_prompt = %[3]q
 }
 `, client.URL.String(), client.SessionToken(), messyPrompt)
@@ -325,7 +325,7 @@ resource "coderd_chat_system_prompt" "test" {
 				Config: cfg,
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(
-						chatSystemPromptResourceAddr,
+						agentsSystemPromptResourceAddr,
 						tfjsonpath.New("include_default_system_prompt"),
 						knownvalue.Bool(true),
 					),
@@ -344,13 +344,13 @@ resource "coderd_chat_system_prompt" "test" {
 	require.True(t, live.IncludeDefaultSystemPrompt)
 }
 
-func TestAccChatSystemPromptRealCoderImportNoDrift(t *testing.T) {
+func TestAccAgentsSystemPromptRealCoderImportNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
 		t.Skip("Acceptance tests are disabled.")
 	}
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "chat_system_prompt_import_acc")
+	client := integration.StartCoder(ctx, t, "agents_system_prompt_import_acc")
 	experimental := codersdk.NewExperimentalClient(client)
 
 	includeDefault := true
@@ -367,12 +367,12 @@ provider "coderd" {
 `, client.URL.String(), client.SessionToken())
 
 	cfgExact := providerBlock + `
-resource "coderd_chat_system_prompt" "test" {
+resource "coderd_agents_system_prompt" "test" {
   system_prompt = "configured in the dashboard"
 }
 `
 	cfgTrailingNewline := providerBlock + `
-resource "coderd_chat_system_prompt" "test" {
+resource "coderd_agents_system_prompt" "test" {
   system_prompt = "configured in the dashboard\n"
 }
 `
@@ -384,10 +384,10 @@ resource "coderd_chat_system_prompt" "test" {
 		Steps: []resource.TestStep{
 			{
 				Config:             cfgExact,
-				ResourceName:       chatSystemPromptResourceAddr,
+				ResourceName:       agentsSystemPromptResourceAddr,
 				ImportState:        true,
 				ImportStatePersist: true,
-				ImportStateId:      "chat_system_prompt",
+				ImportStateId:      "agents_system_prompt",
 			},
 			{
 				Config:   cfgExact,
@@ -404,7 +404,7 @@ resource "coderd_chat_system_prompt" "test" {
 	})
 }
 
-func TestChatSystemPromptModifyPlan(t *testing.T) {
+func TestAgentsSystemPromptModifyPlan(t *testing.T) {
 	t.Parallel()
 
 	objType := tftypes.Object{
@@ -523,7 +523,7 @@ func TestChatSystemPromptModifyPlan(t *testing.T) {
 			client := codersdk.New(serverURL)
 			client.SetSessionToken("test-token")
 
-			r := &ChatSystemPromptResource{
+			r := &AgentsSystemPromptResource{
 				CoderdProviderData: &CoderdProviderData{Client: client},
 			}
 

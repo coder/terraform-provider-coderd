@@ -48,6 +48,14 @@ make testacc               # TF_ACC=1 go test ./... -timeout 120m
 
 ## Adding a new resource
 
+**Naming.** Terraform resource types are prefixed with the Coder feature area they belong to so related resources cluster together in configs and docs. Prefer an existing prefix over inventing a new one:
+
+- `coderd_agents_*` — Coder Agents feature area (`coderd_agents_mcp_server`, `coderd_agents_model`, `coderd_agents_system_prompt`, `coderd_default_agents_model`).
+- `coderd_organization_*` — organization-scoped settings (`coderd_organization_group_sync`, `coderd_organization_sync_settings`).
+- `coderd_oauth2_*`, `coderd_workspace_*`, etc. follow the same rule.
+
+The Go file, the `TypeName` (`req.ProviderTypeName + "_<name>"`), the `examples/resources/coderd_<name>/` directory, and the generated `docs/resources/<name>.md` must all use the same `<name>`. Rename all four together if you change it.
+
 1. Create `internal/provider/<name>_resource.go` — model struct, `Schema`, `Configure`, CRUD, and validators (implement the framework `Resource` interface).
 2. Register it by adding `New<Name>Resource` to the slice returned by `Resources(ctx)` in `internal/provider/provider.go`.
 3. Add an example to `examples/resources/coderd_<name>/resource.tf` (plus `import.sh` if importable) — `docs/` is generated from these, so a missing example means missing/incorrect docs.
