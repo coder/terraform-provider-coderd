@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/coder/coder/v2/codersdk"
@@ -115,10 +116,9 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name                    string
-		targetCollectionStatus  int
-		defaultCollectionStatus int
-		wantSummary             string
+		name                   string
+		targetCollectionStatus int
+		wantSummary            string
 	}{
 		{
 			name:                   "model missing",
@@ -126,16 +126,9 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 			wantSummary:            "Default Agents Model Not Found or Inaccessible",
 		},
 		{
-			name:                    "organization missing",
-			targetCollectionStatus:  http.StatusNotFound,
-			defaultCollectionStatus: http.StatusOK,
-			wantSummary:             "Organization Not Found or Inaccessible",
-		},
-		{
-			name:                    "unsupported endpoint",
-			targetCollectionStatus:  http.StatusNotFound,
-			defaultCollectionStatus: http.StatusNotFound,
-			wantSummary:             "Unsupported Coder Version",
+			name:                   "organization missing",
+			targetCollectionStatus: http.StatusNotFound,
+			wantSummary:            "Organization Not Found or Inaccessible",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,17 +138,16 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 			defaultOrganizationID := uuid.New()
 			modelID := uuid.New()
 			targetCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
-			defaultCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", defaultOrganizationID)
 			modelPath := fmt.Sprintf("%s/%s", targetCollectionPath, modelID)
+			var requestCount atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				requestCount.Add(1)
 				switch {
 				case req.Method == http.MethodPatch && req.URL.Path == modelPath:
 					writeJSON(w, http.StatusNotFound, codersdk.Response{Message: "Not Found."})
 				case req.Method == http.MethodGet && req.URL.Path == targetCollectionPath:
 					writeAgentsDefaultModelCollectionResponse(w, tc.targetCollectionStatus)
-				case req.Method == http.MethodGet && req.URL.Path == defaultCollectionPath:
-					writeAgentsDefaultModelCollectionResponse(w, tc.defaultCollectionStatus)
 				default:
 					writeJSON(w, http.StatusInternalServerError, codersdk.Response{Message: "unexpected request"})
 				}
@@ -171,11 +163,7 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 			require.Equal(t, tc.wantSummary, diags.Errors()[0].Summary())
 			require.Contains(t, diags.Errors()[0].Detail(), "Original error:")
 			require.Contains(t, diags.Errors()[0].Detail(), "Not Found.")
-			if tc.wantSummary == "Unsupported Coder Version" {
-				require.Contains(t, diags.Errors()[0].Detail(), agentsDefaultModelMinVersion)
-			} else {
-				require.NotContains(t, diags.Errors()[0].Detail(), "requires Coder version")
-			}
+			require.Equal(t, int32(2), requestCount.Load(), "expected only the model request and its organization collection probe")
 		})
 	}
 }
@@ -184,28 +172,22 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name                    string
-		targetCollectionStatus  int
-		defaultCollectionStatus int
-		wantSummary             string
-		wantRemoved             bool
+		name                           string
+		targetCollectionStatus         int
+		providerDefaultMatchesTargetID bool
 	}{
 		{
-			name:                    "missing organization removes state",
-			targetCollectionStatus:  http.StatusNotFound,
-			defaultCollectionStatus: http.StatusOK,
-			wantRemoved:             true,
+			name:                           "configured provider default organization missing",
+			targetCollectionStatus:         http.StatusNotFound,
+			providerDefaultMatchesTargetID: true,
 		},
 		{
-			name:                    "unsupported endpoint retains state",
-			targetCollectionStatus:  http.StatusNotFound,
-			defaultCollectionStatus: http.StatusNotFound,
-			wantSummary:             "Unsupported Coder Version",
+			name:                   "other organization missing",
+			targetCollectionStatus: http.StatusNotFound,
 		},
 		{
-			name:                   "empty supported collection removes state",
+			name:                   "empty supported collection",
 			targetCollectionStatus: http.StatusOK,
-			wantRemoved:            true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,19 +195,20 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 
 			targetOrganizationID := uuid.New()
 			defaultOrganizationID := uuid.New()
+			if tc.providerDefaultMatchesTargetID {
+				defaultOrganizationID = targetOrganizationID
+			}
 			modelID := uuid.New()
 			targetCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
-			defaultCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", defaultOrganizationID)
+			var requestCount atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				switch req.URL.Path {
-				case targetCollectionPath:
-					writeAgentsDefaultModelCollectionResponse(w, tc.targetCollectionStatus)
-				case defaultCollectionPath:
-					writeAgentsDefaultModelCollectionResponse(w, tc.defaultCollectionStatus)
-				default:
+				requestCount.Add(1)
+				if req.URL.Path != targetCollectionPath {
 					writeJSON(w, http.StatusInternalServerError, codersdk.Response{Message: "unexpected request"})
+					return
 				}
+				writeAgentsDefaultModelCollectionResponse(w, tc.targetCollectionStatus)
 			}))
 			t.Cleanup(srv.Close)
 
@@ -238,15 +221,9 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 			resp := &fwresource.ReadResponse{State: state}
 			r.Read(t.Context(), fwresource.ReadRequest{State: state}, resp)
 
-			require.Equal(t, tc.wantRemoved, resp.State.Raw.IsNull())
-			if tc.wantSummary == "" {
-				require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
-				return
-			}
-			require.Len(t, resp.Diagnostics.Errors(), 1)
-			require.Equal(t, tc.wantSummary, resp.Diagnostics.Errors()[0].Summary())
-			require.Contains(t, resp.Diagnostics.Errors()[0].Detail(), "Original error:")
-			require.Contains(t, resp.Diagnostics.Errors()[0].Detail(), "Not Found.")
+			require.True(t, resp.State.Raw.IsNull())
+			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
+			require.Equal(t, int32(1), requestCount.Load(), "expected only the resource organization's collection to be requested")
 		})
 	}
 }
