@@ -191,10 +191,10 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 		wantRemoved             bool
 	}{
 		{
-			name:                    "missing organization retains state",
+			name:                    "missing organization removes state",
 			targetCollectionStatus:  http.StatusNotFound,
 			defaultCollectionStatus: http.StatusOK,
-			wantSummary:             "Organization Not Found or Inaccessible",
+			wantRemoved:             true,
 		},
 		{
 			name:                    "unsupported endpoint retains state",
