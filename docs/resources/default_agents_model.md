@@ -4,20 +4,25 @@ page_title: "coderd_default_agents_model Resource - terraform-provider-coderd"
 subcategory: ""
 description: |-
   ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
-  Selects which coderd_agents_model is the deployment-wide default chat model for Coder Agents.
-  Coder enforces a single default model globally: marking a model as default automatically demotes the previous default in the same operation. Because the default is a global singleton, only one coderd_default_agents_model resource should exist per deployment.
-  Destroying this resource does not clear the default server-side. Coder always keeps exactly one model marked as default and force-promotes a replacement when the current default is removed, so deleting this resource only stops Terraform from managing which model is default.
+  ~> Warning
+  This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
+  Selects which coderd_agents_model is the default chat model for Coder Agents in an organization.
+  Coder enforces a single default model per organization: marking a model as default automatically demotes the previous default in the same operation. Only one coderd_default_agents_model resource should exist per organization.
+  Destroying this resource does not clear the default server-side. Coder requires a default once models exist and promotes a replacement when the current default is removed, so deleting this resource only stops Terraform from managing which model is default.
 ---
 
 # coderd_default_agents_model (Resource)
 
 ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
 
-Selects which `coderd_agents_model` is the deployment-wide default chat model for Coder Agents.
+~> **Warning**
+This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
 
-Coder enforces a single default model globally: marking a model as default automatically demotes the previous default in the same operation. Because the default is a global singleton, only one `coderd_default_agents_model` resource should exist per deployment.
+Selects which `coderd_agents_model` is the default chat model for Coder Agents in an organization.
 
-Destroying this resource does not clear the default server-side. Coder always keeps exactly one model marked as default and force-promotes a replacement when the current default is removed, so deleting this resource only stops Terraform from managing which model is default.
+Coder enforces a single default model per organization: marking a model as default automatically demotes the previous default in the same operation. Only one `coderd_default_agents_model` resource should exist per organization.
+
+Destroying this resource does not clear the default server-side. Coder requires a default once models exist and promotes a replacement when the current default is removed, so deleting this resource only stops Terraform from managing which model is default.
 
 ## Example Usage
 
@@ -43,11 +48,12 @@ resource "coderd_agents_model" "sonnet" {
   context_limit  = 200000
 }
 
-# Mark the Sonnet model as the deployment-wide default for Coder Agents.
-# Setting a new default automatically demotes the previous one, so only a single
-# coderd_default_agents_model resource should exist per deployment.
+# Mark the Sonnet model as the default for Coder Agents in its organization.
+# Setting a new default automatically demotes the previous one in that
+# organization, so use one resource per organization.
 resource "coderd_default_agents_model" "default" {
-  model_id = coderd_agents_model.sonnet.id
+  organization_id = coderd_agents_model.sonnet.organization_id
+  model_id        = coderd_agents_model.sonnet.id
 }
 ```
 
@@ -56,11 +62,12 @@ resource "coderd_default_agents_model" "default" {
 
 ### Required
 
-- `model_id` (String) ID of the `coderd_agents_model` to mark as the deployment-wide default. Usually this is `coderd_agents_model.<name>.id`.
+- `model_id` (String) ID of the `coderd_agents_model` to mark as the organization's default. Usually this is `coderd_agents_model.<name>.id`.
+- `organization_id` (String) Organization ID whose default Agents model is managed.
 
 ### Read-Only
 
-- `id` (String) Constant identifier for the singleton default Agents model pointer. Always `default`.
+- `id` (String) Organization ID that identifies this organization's default Agents model selection.
 
 ## Import
 
@@ -69,14 +76,14 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# The ID supplied is a coderd_agents_model UUID, e.g. coderd_agents_model.<name>.id.
-$ terraform import coderd_default_agents_model.default <model-config-id>
+# The ID supplied is the organization UUID whose default model should be imported.
+$ terraform import coderd_default_agents_model.default <organization-id>
 ```
 Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
 
 ```terraform
 import {
   to = coderd_default_agents_model.default
-  id = "<model-config-id>"
+  id = "<organization-id>"
 }
 ```
