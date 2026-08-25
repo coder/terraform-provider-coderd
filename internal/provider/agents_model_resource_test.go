@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"testing"
@@ -30,6 +32,34 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAgentsModelStateOrganizationIDLegacy(t *testing.T) {
+	t.Parallel()
+
+	organizationID := uuid.New()
+	modelID := uuid.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/experimental/chats/models", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(codersdk.OrganizationChatModelsResponse{
+			Models: []codersdk.ChatModel{{
+				ID:             modelID,
+				OrganizationID: organizationID,
+			}},
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	srvURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	r := &AgentsModelResource{data: &CoderdProviderData{Client: codersdk.New(srvURL)}}
+
+	got, found, err := r.stateOrganizationID(t.Context(), NewUUIDNull(), modelID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, organizationID, got)
+}
 
 func TestAgentsModelCreateRequest(t *testing.T) {
 	t.Parallel()
