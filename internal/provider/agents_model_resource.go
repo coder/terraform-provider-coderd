@@ -51,45 +51,23 @@ func (r *AgentsModelResource) experimentalClient() *codersdk.ExperimentalClient 
 	return codersdk.NewExperimentalClient(r.data.Client)
 }
 
-// legacyDefaultOrganizationChatModels uses the compatibility collection route
-// retained for models created before chat model configurations became
-// organization-scoped. It is only used to recover organization_id from legacy
-// Terraform state; normal CRUD uses the organization-scoped SDK methods.
-func legacyDefaultOrganizationChatModels(ctx context.Context, client *codersdk.Client) (codersdk.OrganizationChatModelsResponse, error) {
-	res, err := client.Request(ctx, http.MethodGet, "/api/experimental/chats/models", nil)
-	if err != nil {
-		return codersdk.OrganizationChatModelsResponse{}, err
+// requireStateOrganizationID resolves organization_id from state. State
+// written by provider versions that predate organization-scoped chat models
+// lacks it, and Coder 2.37 removed the compatibility route that could recover
+// it (coder/coder#28632), so such state must be re-imported.
+func requireStateOrganizationID(value UUID, modelID uuid.UUID, diags *diag.Diagnostics) uuid.UUID {
+	if value.IsNull() || value.IsUnknown() {
+		diags.AddError(
+			"Legacy Agents Model State",
+			fmt.Sprintf(
+				"State for Agents model %[1]s predates organization-scoped chat models and cannot be upgraded automatically. "+
+					"Remove it from state and re-import it with the composite ID `<organization_id>/%[1]s`.",
+				modelID,
+			),
+		)
+		return uuid.Nil
 	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return codersdk.OrganizationChatModelsResponse{}, codersdk.ReadBodyAsError(res)
-	}
-	var configs codersdk.OrganizationChatModelsResponse
-	return configs, codersdk.ReadBodyAsJSON(res, &configs)
-}
-
-func legacyDefaultOrganizationChatModel(ctx context.Context, client *codersdk.Client, modelID uuid.UUID) (codersdk.ChatModel, bool, error) {
-	configs, err := legacyDefaultOrganizationChatModels(ctx, client)
-	if err != nil {
-		return codersdk.ChatModel{}, false, err
-	}
-	for _, config := range configs.Models {
-		if config.ID == modelID {
-			return config, true, nil
-		}
-	}
-	return codersdk.ChatModel{}, false, nil
-}
-
-func (r *AgentsModelResource) stateOrganizationID(ctx context.Context, value UUID, modelID uuid.UUID) (uuid.UUID, bool, error) {
-	if !value.IsNull() && !value.IsUnknown() {
-		return value.ValueUUID(), true, nil
-	}
-	config, found, err := legacyDefaultOrganizationChatModel(ctx, r.data.Client, modelID)
-	if err != nil || !found {
-		return uuid.Nil, found, err
-	}
-	return config.OrganizationID, true, nil
+	return value.ValueUUID()
 }
 
 type AgentsModelResourceModel struct {
@@ -320,14 +298,8 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	modelConfigID := state.ID.ValueUUID()
-	organizationID, found, err := r.stateOrganizationID(ctx, state.OrganizationID, modelConfigID)
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to resolve the organization for legacy Agents model state, got error: %s", err))
-		return
-	}
-	if !found {
-		resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Agents model with ID %s not found. Marking as deleted.", modelConfigID.String()))
-		resp.State.RemoveResource(ctx)
+	organizationID := requireStateOrganizationID(state.OrganizationID, modelConfigID, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 	config, err := r.experimentalClient().ChatModel(ctx, organizationID, modelConfigID)
@@ -365,13 +337,8 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	tflog.Info(ctx, "updating Agents model", map[string]any{"id": state.ID.ValueString()})
-	organizationID, found, err := r.stateOrganizationID(ctx, state.OrganizationID, state.ID.ValueUUID())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to resolve the organization for legacy Agents model state, got error: %s", err))
-		return
-	}
-	if !found {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update Agents model %s because it no longer exists.", state.ID.ValueString()))
+	organizationID := requireStateOrganizationID(state.OrganizationID, state.ID.ValueUUID(), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 	modelConfig, err := r.experimentalClient().UpdateChatModel(ctx, organizationID, state.ID.ValueUUID(), updateReq)
@@ -399,12 +366,8 @@ func (r *AgentsModelResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	tflog.Info(ctx, "deleting Agents model", map[string]any{"id": state.ID.ValueString()})
-	organizationID, found, err := r.stateOrganizationID(ctx, state.OrganizationID, state.ID.ValueUUID())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to resolve the organization for legacy Agents model state, got error: %s", err))
-		return
-	}
-	if !found {
+	organizationID := requireStateOrganizationID(state.OrganizationID, state.ID.ValueUUID(), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 	if err := r.experimentalClient().DeleteChatModel(ctx, organizationID, state.ID.ValueUUID()); err != nil && !isNotFound(err) {
