@@ -6,7 +6,7 @@ description: |-
   ~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.
   ~> Warning
   This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
-  Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see coderd_ai_provider) along with context, compression, and optional JSON tuning settings. Import IDs use <organization_id>/<id>.
+  Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see coderd_ai_provider) along with context, compression, and optional JSON tuning settings. Import IDs use <organization-name>/<id>.
 ---
 
 # coderd_agents_model (Resource)
@@ -16,7 +16,7 @@ description: |-
 ~> **Warning**
 This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
 
-Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization_id>/<id>`.
+Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization-name>/<id>`.
 
 ## Example Usage
 
@@ -89,14 +89,14 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# The ID supplied must be the organization UUID and Agents model configuration UUID returned by Coder.
-$ terraform import coderd_agents_model.sonnet <organization-id>/<model-config-id>
+# The ID supplied must be the organization name and the Agents model configuration UUID returned by Coder.
+$ terraform import coderd_agents_model.sonnet <organization-name>/<model-config-id>
 ```
 Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
 
 ```terraform
 import {
   to = coderd_agents_model.sonnet
-  id = "<organization-id>/<model-config-id>"
+  id = "<organization-name>/<model-config-id>"
 }
 ```

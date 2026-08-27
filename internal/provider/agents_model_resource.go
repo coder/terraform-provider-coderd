@@ -119,7 +119,7 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.\n\n" +
 			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsModelMinVersion + ") and later.\n\n" +
-			"Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization_id>/<id>`.",
+			"Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization-name>/<id>`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Agents model configuration ID.",
@@ -409,12 +409,12 @@ func (r *AgentsModelResource) Delete(ctx context.Context, req resource.DeleteReq
 func (r *AgentsModelResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
 	if len(parts) != 2 {
-		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization_id>/<id>`.")
+		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization-name>/<id>`.")
 		return
 	}
-	organizationID, err := uuid.Parse(parts[0])
+	org, err := r.data.Client.OrganizationByName(ctx, parts[0])
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse organization ID as UUID: %s", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization %q: %s", parts[0], err))
 		return
 	}
 	id, err := uuid.Parse(parts[1])
@@ -422,7 +422,7 @@ func (r *AgentsModelResource) ImportState(ctx context.Context, req resource.Impo
 		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse Agents model ID as UUID: %s", err))
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), organizationID.String())...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), org.ID.String())...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id.String())...)
 }
 

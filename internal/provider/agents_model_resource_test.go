@@ -841,7 +841,8 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	// Create the model out-of-band so state is first populated by import (Read).
-	organizationID := accDefaultOrganizationID(ctx, t, client)
+	organization := accDefaultOrganization(ctx, t, client)
+	organizationID := organization.ID
 	exp := codersdk.NewExperimentalClient(client)
 	created, err := exp.CreateChatModel(ctx, organizationID, codersdk.CreateChatModelRequest{
 		AIProviderID: &aiProvider.ID,
@@ -884,7 +885,7 @@ resource "coderd_agents_model" "sonnet" {
 				Config:             cfg,
 				ResourceName:       "coderd_agents_model.sonnet",
 				ImportState:        true,
-				ImportStateId:      organizationID.String() + "/" + created.ID.String(),
+				ImportStateId:      organization.Name + "/" + created.ID.String(),
 				ImportStatePersist: true,
 			},
 			{
@@ -1072,12 +1073,16 @@ func skipUnlessAgentsModelEndpoint(ctx context.Context, t *testing.T, client *co
 	}
 }
 
-func accDefaultOrganizationID(ctx context.Context, t *testing.T, client *codersdk.Client) uuid.UUID {
+func accDefaultOrganization(ctx context.Context, t *testing.T, client *codersdk.Client) codersdk.Organization {
 	t.Helper()
 	organizations, err := client.Organizations(ctx)
 	require.NoError(t, err, "list organizations")
 	require.NotEmpty(t, organizations, "first user must belong to an organization")
-	return organizations[0].ID
+	return organizations[0]
+}
+
+func accDefaultOrganizationID(ctx context.Context, t *testing.T, client *codersdk.Client) uuid.UUID {
+	return accDefaultOrganization(ctx, t, client).ID
 }
 
 func createAccAgentsModelAIProviderOfType(ctx context.Context, t *testing.T, client *codersdk.Client, req codersdk.CreateAIProviderRequest) codersdk.AIProvider {
