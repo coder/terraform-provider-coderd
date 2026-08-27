@@ -24,8 +24,8 @@ var _ resource.Resource = &AgentsSystemPromptResource{}
 var _ resource.ResourceWithImportState = &AgentsSystemPromptResource{}
 var _ resource.ResourceWithModifyPlan = &AgentsSystemPromptResource{}
 
-// First release with the chat system prompt endpoint (coder/coder#22857).
-const agentsSystemPromptMinVersion = "2.32.0"
+// First release serving the chat API under /api/v2 (coder/coder#28496).
+const agentsSystemPromptMinVersion = "2.37.0"
 
 // Mirrors coderd/exp_chats.go.
 const maxAgentsSystemPromptBytes = 131072
