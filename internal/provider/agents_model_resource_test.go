@@ -15,41 +15,85 @@ import (
 	"text/template"
 	"time"
 
+	"sync/atomic"
+
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAgentsModelRequireStateOrganizationID(t *testing.T) {
+func TestAgentsModelResolveOrganizationID(t *testing.T) {
 	t.Parallel()
 
-	organizationID := uuid.New()
+	stateOrganizationID := uuid.New()
+	planOrganizationID := uuid.New()
 	modelID := uuid.New()
 
 	var diags diag.Diagnostics
-	got := requireStateOrganizationID(UUIDValue(organizationID), modelID, &diags)
+	got := resolveOrganizationID(UUIDValue(stateOrganizationID), UUIDValue(planOrganizationID), modelID, &diags)
 	require.False(t, diags.HasError())
-	require.Equal(t, organizationID, got)
+	require.Equal(t, stateOrganizationID, got)
 
 	// Legacy state written before models became organization-scoped lacks
-	// organization_id and must be re-imported.
+	// organization_id; the configured (planned) value adopts the model.
 	diags = nil
-	requireStateOrganizationID(NewUUIDNull(), modelID, &diags)
+	got = resolveOrganizationID(NewUUIDNull(), UUIDValue(planOrganizationID), modelID, &diags)
+	require.False(t, diags.HasError())
+	require.Equal(t, planOrganizationID, got)
+
+	diags = nil
+	resolveOrganizationID(NewUUIDNull(), NewUUIDNull(), modelID, &diags)
 	require.True(t, diags.HasError())
 	require.Contains(t, diags.Errors()[0].Detail(), modelID.String())
-	require.Contains(t, diags.Errors()[0].Detail(), "re-import")
+	require.Contains(t, diags.Errors()[0].Detail(), "organization_id")
+}
+
+func TestAgentsModelOrganizationRequiresReplace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		config, state   types.String
+		requiresReplace bool
+	}{
+		// Adopting an organization into legacy state is an in-place update.
+		{"adopt legacy state", types.StringValue(uuid.NewString()), types.StringNull(), false},
+		{"change organization", types.StringValue(uuid.NewString()), types.StringValue(uuid.NewString()), true},
+		{"unset from config", types.StringNull(), types.StringValue(uuid.NewString()), false},
+		{"unknown config", types.StringUnknown(), types.StringValue(uuid.NewString()), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp := &stringplanmodifier.RequiresReplaceIfFuncResponse{}
+			agentsModelOrganizationRequiresReplace(t.Context(), planmodifier.StringRequest{
+				ConfigValue: tt.config,
+				StateValue:  tt.state,
+			}, resp)
+			require.Equal(t, tt.requiresReplace, resp.RequiresReplace)
+		})
+	}
 }
 
 func TestAgentsModelCreateDiag(t *testing.T) {
@@ -1107,4 +1151,212 @@ func testCheckAgentsModelConfig(maxOutputTokens int64, temperature float64) reso
 		}
 		return nil
 	})
+}
+
+// legacyCoderdProvider mimics the pre-organization-scoped provider (<= 0.0.23)
+// closely enough to write state whose coderd_agents_model lacks
+// organization_id, without talking to any server.
+type legacyCoderdProvider struct {
+	model codersdk.ChatModel
+}
+
+var _ provider.Provider = (*legacyCoderdProvider)(nil)
+
+func (*legacyCoderdProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+	resp.TypeName = "coderd"
+}
+
+func (*legacyCoderdProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+	resp.Schema = providerschema.Schema{
+		Attributes: map[string]providerschema.Attribute{
+			"url":   providerschema.StringAttribute{Optional: true},
+			"token": providerschema.StringAttribute{Optional: true},
+		},
+	}
+}
+
+func (*legacyCoderdProvider) Configure(context.Context, provider.ConfigureRequest, *provider.ConfigureResponse) {
+}
+
+func (*legacyCoderdProvider) DataSources(context.Context) []func() datasource.DataSource {
+	return nil
+}
+
+func (p *legacyCoderdProvider) Resources(context.Context) []func() frameworkresource.Resource {
+	return []func() frameworkresource.Resource{
+		func() frameworkresource.Resource { return &legacyAgentsModelResource{model: p.model} },
+	}
+}
+
+// legacyAgentsModelResource reproduces the old coderd_agents_model schema:
+// the current one minus organization_id, with server-computed values canned.
+type legacyAgentsModelResource struct {
+	model codersdk.ChatModel
+}
+
+var _ frameworkresource.Resource = (*legacyAgentsModelResource)(nil)
+
+type legacyAgentsModelModel struct {
+	ID                   types.String `tfsdk:"id"`
+	AIProviderID         types.String `tfsdk:"ai_provider_id"`
+	ProviderType         types.String `tfsdk:"provider_type"`
+	Model                types.String `tfsdk:"model"`
+	DisplayName          types.String `tfsdk:"display_name"`
+	Enabled              types.Bool   `tfsdk:"enabled"`
+	ContextLimit         types.Int64  `tfsdk:"context_limit"`
+	CompressionThreshold types.Int64  `tfsdk:"compression_threshold"`
+	ModelConfig          types.String `tfsdk:"model_config"`
+	CreatedAt            types.Int64  `tfsdk:"created_at"`
+	UpdatedAt            types.Int64  `tfsdk:"updated_at"`
+}
+
+func (*legacyAgentsModelResource) Metadata(_ context.Context, req frameworkresource.MetadataRequest, resp *frameworkresource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_agents_model"
+}
+
+func (*legacyAgentsModelResource) Schema(_ context.Context, _ frameworkresource.SchemaRequest, resp *frameworkresource.SchemaResponse) {
+	resp.Schema = resourceschema.Schema{
+		Attributes: map[string]resourceschema.Attribute{
+			"id":                    resourceschema.StringAttribute{Computed: true},
+			"ai_provider_id":        resourceschema.StringAttribute{Required: true},
+			"provider_type":         resourceschema.StringAttribute{Computed: true},
+			"model":                 resourceschema.StringAttribute{Required: true},
+			"display_name":          resourceschema.StringAttribute{Optional: true, Computed: true},
+			"enabled":               resourceschema.BoolAttribute{Optional: true, Computed: true},
+			"context_limit":         resourceschema.Int64Attribute{Required: true},
+			"compression_threshold": resourceschema.Int64Attribute{Optional: true, Computed: true},
+			"model_config":          resourceschema.StringAttribute{Optional: true},
+			"created_at":            resourceschema.Int64Attribute{Computed: true},
+			"updated_at":            resourceschema.Int64Attribute{Computed: true},
+		},
+	}
+}
+
+func (r *legacyAgentsModelResource) Create(ctx context.Context, req frameworkresource.CreateRequest, resp *frameworkresource.CreateResponse) {
+	var plan legacyAgentsModelModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.ID = types.StringValue(r.model.ID.String())
+	plan.ProviderType = types.StringValue("anthropic")
+	plan.DisplayName = types.StringValue(r.model.DisplayName)
+	plan.Enabled = types.BoolValue(r.model.Enabled)
+	plan.CompressionThreshold = types.Int64Value(int64(r.model.CompressionThreshold))
+	plan.CreatedAt = types.Int64Value(r.model.CreatedAt.Unix())
+	plan.UpdatedAt = types.Int64Value(r.model.UpdatedAt.Unix())
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+func (*legacyAgentsModelResource) Read(context.Context, frameworkresource.ReadRequest, *frameworkresource.ReadResponse) {
+}
+
+func (*legacyAgentsModelResource) Update(context.Context, frameworkresource.UpdateRequest, *frameworkresource.UpdateResponse) {
+}
+
+func (*legacyAgentsModelResource) Delete(context.Context, frameworkresource.DeleteRequest, *frameworkresource.DeleteResponse) {
+}
+
+// fakeChatModelServer serves the provider Configure endpoints plus the
+// organization-scoped chat model routes the real provider uses after upgrade.
+func fakeChatModelServer(t *testing.T, orgID uuid.UUID, model codersdk.ChatModel, patched *atomic.Bool) *httptest.Server {
+	t.Helper()
+	writeJSON := func(w http.ResponseWriter, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(v))
+	}
+	modelPath := fmt.Sprintf("/api/v2/organizations/%s/chats/models/%s", orgID, model.ID)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Configure fetches the current user and entitlements; the user
+		// payload decodes acceptably for both.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"%s","username":"admin","organization_ids":["%s"]}`, uuid.NewString(), orgID)
+	})
+	mux.HandleFunc("GET "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, model)
+	})
+	mux.HandleFunc("PATCH "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		patched.Store(true)
+		writeJSON(w, model)
+	})
+	mux.HandleFunc("DELETE "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v2/ai/providers/"+model.AIProviderID.String(), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, codersdk.AIProvider{ID: model.AIProviderID, Type: "anthropic"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestAgentsModelLegacyStateAdoption upgrades state written by the
+// pre-organization-scoped schema: step 1 writes state without organization_id,
+// step 2 runs the real provider with organization_id added to config and must
+// adopt it via an in-place update (never a replace, which would delete against
+// an unknown organization).
+func TestAgentsModelLegacyStateAdoption(t *testing.T) {
+	t.Parallel()
+
+	orgID := uuid.New()
+	ts := time.Unix(1700000000, 0).UTC()
+	model := codersdk.ChatModel{
+		ID:                   uuid.New(),
+		OrganizationID:       orgID,
+		AIProviderID:         uuid.New(),
+		Model:                "claude-3-5-sonnet-20241022",
+		DisplayName:          "Claude Sonnet",
+		Enabled:              true,
+		ContextLimit:         200000,
+		CompressionThreshold: 70,
+		CreatedAt:            ts,
+		UpdatedAt:            ts,
+	}
+
+	var patched atomic.Bool
+	srv := fakeChatModelServer(t, orgID, model, &patched)
+
+	providerBlock := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+`
+	resourceArgs := `  ai_provider_id = "` + model.AIProviderID.String() + `"
+  model          = "` + model.Model + `"
+  context_limit  = 200000
+}
+`
+	legacyFactories := map[string]func() (tfprotov6.ProviderServer, error){
+		"coderd": providerserver.NewProtocol6WithError(&legacyCoderdProvider{model: model}),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest: true,
+		Steps: []resource.TestStep{
+			{
+				ProtoV6ProviderFactories: legacyFactories,
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+` + resourceArgs,
+			},
+			{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+  organization_id = "` + orgID.String() + `"
+` + resourceArgs,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgID.String())),
+				},
+			},
+		},
+	})
+
+	require.True(t, patched.Load(), "expected the adoption apply to PATCH the organization-scoped route")
 }

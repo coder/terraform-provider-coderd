@@ -51,23 +51,42 @@ func (r *AgentsModelResource) experimentalClient() *codersdk.ExperimentalClient 
 	return codersdk.NewExperimentalClient(r.data.Client)
 }
 
-// requireStateOrganizationID resolves organization_id from state. State
-// written by provider versions that predate organization-scoped chat models
-// lacks it, and Coder 2.37 removed the compatibility route that could recover
-// it (coder/coder#28632), so such state must be re-imported.
-func requireStateOrganizationID(value UUID, modelID uuid.UUID, diags *diag.Diagnostics) uuid.UUID {
-	if value.IsNull() || value.IsUnknown() {
-		diags.AddError(
-			"Legacy Agents Model State",
-			fmt.Sprintf(
-				"State for Agents model %[1]s predates organization-scoped chat models and cannot be upgraded automatically. "+
-					"Remove it from state and re-import it with the composite ID `<organization_id>/%[1]s`.",
-				modelID,
-			),
-		)
-		return uuid.Nil
+// resolveOrganizationID returns organization_id from state, falling back to
+// the planned (configured) value: state written by provider versions that
+// predate organization-scoped chat models lacks it, and Coder 2.37 removed the
+// compatibility route that could recover it server-side (coder/coder#28632).
+// Configuring organization_id adopts such a model in place; the org-scoped API
+// call then verifies the value and the state write-back records it.
+func resolveOrganizationID(state, plan UUID, modelID uuid.UUID, diags *diag.Diagnostics) uuid.UUID {
+	if !state.IsNull() && !state.IsUnknown() {
+		return state.ValueUUID()
 	}
-	return value.ValueUUID()
+	if !plan.IsNull() && !plan.IsUnknown() {
+		return plan.ValueUUID()
+	}
+	diags.AddError(
+		"Missing Organization ID",
+		legacyAgentsModelStateDetail(modelID),
+	)
+	return uuid.Nil
+}
+
+const agentsModelOrganizationRequiresReplaceDescription = "Requires replace if configured and the prior state already records an organization."
+
+// agentsModelOrganizationRequiresReplace forces replacement when a configured
+// organization_id changes, except when prior state records none: such state
+// predates organization-scoped chat models, and adopting the configured value
+// is an in-place update, not a move.
+func agentsModelOrganizationRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	resp.RequiresReplace = !req.ConfigValue.IsNull() && !req.StateValue.IsNull()
+}
+
+func legacyAgentsModelStateDetail(modelID uuid.UUID) string {
+	return fmt.Sprintf(
+		"State for Agents model %s predates organization-scoped chat models and does not record its organization. "+
+			"Set `organization_id` on the resource and run `terraform apply` to adopt it in place.",
+		modelID,
+	)
 }
 
 type AgentsModelResourceModel struct {
@@ -116,7 +135,11 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplaceIfConfigured(),
+					stringplanmodifier.RequiresReplaceIf(
+						agentsModelOrganizationRequiresReplace,
+						agentsModelOrganizationRequiresReplaceDescription,
+						agentsModelOrganizationRequiresReplaceDescription,
+					),
 				},
 			},
 			"ai_provider_id": schema.StringAttribute{
@@ -298,10 +321,17 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	modelConfigID := state.ID.ValueUUID()
-	organizationID := requireStateOrganizationID(state.OrganizationID, modelConfigID, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
+	if state.OrganizationID.IsNull() || state.OrganizationID.IsUnknown() {
+		// Legacy state predating organization-scoped chat models. Read can't
+		// see config, so skip the refresh and let the subsequent apply adopt
+		// the configured organization_id.
+		resp.Diagnostics.AddWarning(
+			"Legacy Agents Model State",
+			legacyAgentsModelStateDetail(modelConfigID),
+		)
 		return
 	}
+	organizationID := state.OrganizationID.ValueUUID()
 	config, err := r.experimentalClient().ChatModel(ctx, organizationID, modelConfigID)
 	if err != nil {
 		if isNotFound(err) {
@@ -337,7 +367,7 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	tflog.Info(ctx, "updating Agents model", map[string]any{"id": state.ID.ValueString()})
-	organizationID := requireStateOrganizationID(state.OrganizationID, state.ID.ValueUUID(), &resp.Diagnostics)
+	organizationID := resolveOrganizationID(state.OrganizationID, plan.OrganizationID, state.ID.ValueUUID(), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -366,7 +396,7 @@ func (r *AgentsModelResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	tflog.Info(ctx, "deleting Agents model", map[string]any{"id": state.ID.ValueString()})
-	organizationID := requireStateOrganizationID(state.OrganizationID, state.ID.ValueUUID(), &resp.Diagnostics)
+	organizationID := resolveOrganizationID(state.OrganizationID, NewUUIDNull(), state.ID.ValueUUID(), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
