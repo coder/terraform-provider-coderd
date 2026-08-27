@@ -7,7 +7,7 @@ description: |-
   ~> Warning
   This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
   -> _wo attributes are write-only https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments: their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.
-  Configures an organization-scoped MCP server for Coder Agents. Import IDs use <organization_id>/<id>. Changing url, auth_type, oauth2_token_url, oauth2_revocation_url, or oauth2_client_id invalidates users' stored OAuth tokens.
+  Configures an organization-scoped MCP server for Coder Agents. Import IDs use <organization-name>/<slug>. Changing url, auth_type, oauth2_token_url, oauth2_revocation_url, or oauth2_client_id invalidates users' stored OAuth tokens.
   Coder runs OAuth2 discovery and dynamic client registration only when a server is created with auth_type = "oauth2" and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with terraform apply -replace). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.
 ---
 
@@ -20,7 +20,7 @@ This resource is only compatible with Coder version [2.37.0](https://github.com/
 
 -> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.
 
-Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization_id>/<id>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.
+Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization-name>/<slug>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.
 
 Coder runs OAuth2 discovery and dynamic client registration only when a server is created with `auth_type = "oauth2"` and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with `terraform apply -replace`). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.
 
@@ -100,14 +100,14 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-# The ID must contain the organization UUID and MCP server configuration UUID.
-$ terraform import coderd_agents_mcp_server.example <organization-id>/<mcp-server-id>
+# The ID must contain the organization name and the MCP server slug.
+$ terraform import coderd_agents_mcp_server.example <organization-name>/<slug>
 ```
 Alternatively, in Terraform v1.5.0 and later, an [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used:
 
 ```terraform
 import {
   to = coderd_agents_mcp_server.example
-  id = "<organization-id>/<mcp-server-id>"
+  id = "<organization-name>/<slug>"
 }
 ```
