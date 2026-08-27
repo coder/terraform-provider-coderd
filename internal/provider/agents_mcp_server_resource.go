@@ -183,7 +183,7 @@ func (r *AgentsMCPServerResource) Schema(ctx context.Context, req resource.Schem
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsMCPServerMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsMCPServerMinVersion + ") and later.\n\n" +
 			"-> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.\n\n" +
-			"Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization_id>/<id>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.\n\n" +
+			"Configures an organization-scoped MCP server for Coder Agents. Import IDs use `<organization-name>/<slug>`. Changing `url`, `auth_type`, `oauth2_token_url`, `oauth2_revocation_url`, or `oauth2_client_id` invalidates users' stored OAuth tokens.\n\n" +
 			"Coder runs OAuth2 discovery and dynamic client registration only when a server is created with `auth_type = \"oauth2\"` and no manual endpoints; updates never re-run discovery. To switch an existing server from manual OAuth2 configuration back to discovery, replace the resource (for example with `terraform apply -replace`). Removing the manual OAuth2 attributes from configuration leaves the stored values unmanaged rather than clearing them.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -602,20 +602,33 @@ func (r *AgentsMCPServerResource) Delete(ctx context.Context, req resource.Delet
 func (r *AgentsMCPServerResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
 	if len(parts) != 2 {
-		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization_id>/<id>`.")
+		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization-name>/<slug>`.")
 		return
 	}
-	organizationID, err := uuid.Parse(parts[0])
+	org, err := r.data.Client.OrganizationByName(ctx, parts[0])
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse organization ID as UUID: %s", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization %q: %s", parts[0], err))
 		return
 	}
-	id, err := uuid.Parse(parts[1])
+	// Slugs are unique per organization, but the get-by-ID endpoint only
+	// accepts UUIDs, so resolve the slug from the organization's list.
+	configs, err := r.data.Client.MCPServerConfigs(ctx, org.ID)
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse MCP server ID as UUID: %s", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list MCP servers for organization %q: %s", parts[0], err))
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), organizationID.String())...)
+	var id uuid.UUID
+	for _, config := range configs {
+		if config.Slug == parts[1] {
+			id = config.ID
+			break
+		}
+	}
+	if id == uuid.Nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("No MCP server with slug %q exists in organization %q.", parts[1], parts[0]))
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), org.ID.String())...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id.String())...)
 }
 
