@@ -44,6 +44,52 @@ func TestAgentsDefaultModelStateFromModelConfig(t *testing.T) {
 	require.Equal(t, modelID.String(), state.ModelID.ValueString())
 }
 
+func TestAgentsDefaultModelMoveState(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	organizationID := uuid.New()
+	modelID := uuid.New()
+	r := &AgentsDefaultModelResource{data: &CoderdProviderData{DefaultOrganizationID: organizationID}}
+	movers := r.MoveState(ctx)
+	require.Len(t, movers, 1)
+	require.NotNil(t, movers[0].SourceSchema)
+
+	sourceSchema := *movers[0].SourceSchema
+	sourceState := tfsdk.State{
+		Schema: sourceSchema,
+		Raw:    tftypes.NewValue(sourceSchema.Type().TerraformType(ctx), nil),
+	}
+	require.False(t, sourceState.Set(ctx, legacyDefaultAgentsModelResourceModel{
+		ID:      types.StringValue("default"),
+		ModelID: types.StringValue(modelID.String()),
+	}).HasError())
+
+	var targetSchemaResp fwresource.SchemaResponse
+	r.Schema(ctx, fwresource.SchemaRequest{}, &targetSchemaResp)
+	require.False(t, targetSchemaResp.Diagnostics.HasError(), targetSchemaResp.Diagnostics)
+	targetSchema := targetSchemaResp.Schema
+	resp := &fwresource.MoveStateResponse{
+		TargetState: tfsdk.State{
+			Schema: targetSchema,
+			Raw:    tftypes.NewValue(targetSchema.Type().TerraformType(ctx), nil),
+		},
+	}
+	movers[0].StateMover(ctx, fwresource.MoveStateRequest{
+		SourceProviderAddress: "registry.example.com/coder/coderd",
+		SourceSchemaVersion:   0,
+		SourceState:           &sourceState,
+		SourceTypeName:        "coderd_default_agents_model",
+	}, resp)
+	require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
+
+	var got AgentsDefaultModelResourceModel
+	require.False(t, resp.TargetState.Get(ctx, &got).HasError())
+	require.Equal(t, organizationID, got.ID.ValueUUID())
+	require.Equal(t, organizationID, got.OrganizationID.ValueUUID())
+	require.Equal(t, modelID, got.ModelID.ValueUUID())
+}
+
 func TestAgentsDefaultModelIDPlanModifier(t *testing.T) {
 	t.Parallel()
 
@@ -159,7 +205,7 @@ func TestAgentsDefaultModelPatch404Diagnostics(t *testing.T) {
 			targetOrganizationID := uuid.New()
 			defaultOrganizationID := uuid.New()
 			modelID := uuid.New()
-			targetCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
+			targetCollectionPath := fmt.Sprintf("/api/v2/organizations/%s/chats/models", targetOrganizationID)
 			modelPath := fmt.Sprintf("%s/%s", targetCollectionPath, modelID)
 			organizationPath := fmt.Sprintf("/api/v2/organizations/%s", targetOrganizationID)
 			var requestCount atomic.Int32
@@ -235,7 +281,7 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 				defaultOrganizationID = targetOrganizationID
 			}
 			modelID := uuid.New()
-			targetCollectionPath := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
+			targetCollectionPath := fmt.Sprintf("/api/v2/organizations/%s/chats/models", targetOrganizationID)
 			var requestCount atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
