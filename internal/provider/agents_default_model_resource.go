@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -26,6 +28,7 @@ var (
 	_ resource.ResourceWithConfigure   = &AgentsDefaultModelResource{}
 	_ resource.ResourceWithImportState = &AgentsDefaultModelResource{}
 	_ resource.ResourceWithModifyPlan  = &AgentsDefaultModelResource{}
+	_ resource.ResourceWithMoveState   = &AgentsDefaultModelResource{}
 )
 
 func NewAgentsDefaultModelResource() resource.Resource {
@@ -46,6 +49,13 @@ type AgentsDefaultModelResourceModel struct {
 	ModelID        UUID `tfsdk:"model_id"`
 }
 
+// legacyDefaultAgentsModelResourceModel is the v0 state shape published by
+// coderd_default_agents_model in provider v0.0.23.
+type legacyDefaultAgentsModelResourceModel struct {
+	ID      types.String `tfsdk:"id"`
+	ModelID types.String `tfsdk:"model_id"`
+}
+
 func (r *AgentsDefaultModelResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_agents_default_model"
 }
@@ -62,6 +72,7 @@ func (r *AgentsDefaultModelResource) Schema(ctx context.Context, req resource.Sc
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsDefaultModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsDefaultModelMinVersion + ") and later.\n\n" +
 			"Selects which `coderd_agents_model` is the default chat model for Coder Agents in an organization.\n\n" +
+			"Existing `coderd_default_agents_model` state can be migrated with a Terraform `moved` block. The legacy deployment-wide selection is assigned to the provider's default organization.\n\n" +
 			"Coder enforces a single default model per organization: marking a model as default automatically demotes the " +
 			"previous default in the same operation. Only one `coderd_agents_default_model` resource should exist per organization.\n\n" +
 			"Destroying this resource does not clear the default server-side. Coder requires a default once models exist " +
@@ -88,6 +99,67 @@ func (r *AgentsDefaultModelResource) Schema(ctx context.Context, req resource.Sc
 				MarkdownDescription: "ID of the `coderd_agents_model` to mark as the organization's default. Usually this is `coderd_agents_model.<name>.id`.",
 				CustomType:          UUIDType,
 				Required:            true,
+			},
+		},
+	}
+}
+
+func (r *AgentsDefaultModelResource) MoveState(ctx context.Context) []resource.StateMover {
+	return []resource.StateMover{
+		{
+			SourceSchema: &schema.Schema{
+				Attributes: map[string]schema.Attribute{
+					"id": schema.StringAttribute{
+						Computed: true,
+					},
+					"model_id": schema.StringAttribute{
+						Required: true,
+					},
+				},
+			},
+			StateMover: func(ctx context.Context, req resource.MoveStateRequest, resp *resource.MoveStateResponse) {
+				if req.SourceTypeName != "coderd_default_agents_model" ||
+					req.SourceSchemaVersion != 0 ||
+					!strings.HasSuffix(req.SourceProviderAddress, "coder/coderd") {
+					return
+				}
+				if r.data == nil {
+					resp.Diagnostics.AddError(
+						"Unable to Move Default Agents Model State",
+						"The provider was not configured before Terraform attempted to move coderd_default_agents_model state.",
+					)
+					return
+				}
+
+				if req.SourceState == nil {
+					resp.Diagnostics.AddError(
+						"Unable to Move Default Agents Model State",
+						"Terraform did not provide state matching the coderd_default_agents_model schema.",
+					)
+					return
+				}
+
+				var source legacyDefaultAgentsModelResourceModel
+				resp.Diagnostics.Append(req.SourceState.Get(ctx, &source)...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				modelID, err := uuid.Parse(source.ModelID.ValueString())
+				if err != nil {
+					resp.Diagnostics.AddAttributeError(
+						path.Root("model_id"),
+						"Unable to Move Default Agents Model State",
+						fmt.Sprintf("The legacy model ID is not a valid UUID: %s", err),
+					)
+					return
+				}
+
+				organizationID := r.data.DefaultOrganizationID
+				resp.Diagnostics.Append(resp.TargetState.Set(ctx, AgentsDefaultModelResourceModel{
+					ID:             UUIDValue(organizationID),
+					OrganizationID: UUIDValue(organizationID),
+					ModelID:        UUIDValue(modelID),
+				})...)
 			},
 		},
 	}
@@ -225,7 +297,7 @@ func (r *AgentsDefaultModelResource) agentsDefaultModelDiag(ctx context.Context,
 		return diags
 	}
 
-	endpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models/%s", organizationID, modelID)
+	endpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models/%s", organizationID, modelID)
 	_, collectionErr := r.experimentalClient().ChatModels(ctx, organizationID)
 	if collectionErr == nil {
 		diags.AddError(
