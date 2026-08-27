@@ -72,7 +72,6 @@ func (r *AgentsDefaultModelResource) Schema(ctx context.Context, req resource.Sc
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsDefaultModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsDefaultModelMinVersion + ") and later.\n\n" +
 			"Selects which `coderd_agents_model` is the default chat model for Coder Agents in an organization.\n\n" +
-			"Existing `coderd_default_agents_model` state can be migrated with a Terraform `moved` block. The legacy deployment-wide selection is assigned to the provider's default organization.\n\n" +
 			"Coder enforces a single default model per organization: marking a model as default automatically demotes the " +
 			"previous default in the same operation. Only one `coderd_agents_default_model` resource should exist per organization.\n\n" +
 			"Destroying this resource does not clear the default server-side. Coder requires a default once models exist " +
