@@ -6,7 +6,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
@@ -208,7 +207,7 @@ resource "coderd_default_agents_model" "default" {
 				// detect the drift on refresh and plan to restore sonnet.
 				PreConfig: func() {
 					_, err := exp.UpdateChatModel(ctx, organizationID, opus.ID, codersdk.UpdateChatModelRequest{
-						IsDefault: ptr.Ref(true),
+						IsDefault: new(true),
 					})
 					require.NoError(t, err, "externally set opus as default")
 				},
@@ -237,7 +236,7 @@ func createAccChatModel(ctx context.Context, t *testing.T, client *codersdk.Clie
 	created, err := exp.CreateChatModel(ctx, organizationID, codersdk.CreateChatModelRequest{
 		AIProviderID: &aiProviderID,
 		Model:        model,
-		ContextLimit: ptr.Ref(int64(200000)),
+		ContextLimit: new(int64(200000)),
 	})
 	require.NoError(t, err, "create chat model config out-of-band")
 	// WithoutCancel: t.Context() is already cancelled by the time cleanup runs.

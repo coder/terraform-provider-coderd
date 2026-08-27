@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
@@ -443,8 +442,8 @@ func (r *AgentsModelResource) agentsModelCreateDiag(ctx context.Context, organiz
 		return diags
 	}
 
-	createEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", organizationID)
-	probeEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", r.data.DefaultOrganizationID)
+	createEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", organizationID)
+	probeEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", r.data.DefaultOrganizationID)
 	_, probeErr := r.experimentalClient().ChatModels(ctx, r.data.DefaultOrganizationID)
 	if probeErr == nil {
 		diags.AddError(
@@ -482,9 +481,9 @@ func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersd
 		AIProviderID:         &aiProviderID,
 		Model:                m.Model.ValueString(),
 		DisplayName:          m.DisplayName.ValueString(),
-		Enabled:              ptr.Ref(m.Enabled.ValueBool()),
-		ContextLimit:         ptr.Ref(m.ContextLimit.ValueInt64()),
-		CompressionThreshold: ptr.Ref(int32(m.CompressionThreshold.ValueInt64())),
+		Enabled:              new(m.Enabled.ValueBool()),
+		ContextLimit:         new(m.ContextLimit.ValueInt64()),
+		CompressionThreshold: new(int32(m.CompressionThreshold.ValueInt64())),
 		ModelConfig:          agentsModelDecodeConfig(m.ModelConfig, diags),
 	}
 	return req
@@ -503,13 +502,13 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 		req.DisplayName = m.DisplayName.ValueString()
 	}
 	if !m.Enabled.Equal(state.Enabled) {
-		req.Enabled = ptr.Ref(m.Enabled.ValueBool())
+		req.Enabled = new(m.Enabled.ValueBool())
 	}
 	if !m.ContextLimit.Equal(state.ContextLimit) {
-		req.ContextLimit = ptr.Ref(m.ContextLimit.ValueInt64())
+		req.ContextLimit = new(m.ContextLimit.ValueInt64())
 	}
 	if !m.CompressionThreshold.Equal(state.CompressionThreshold) {
-		req.CompressionThreshold = ptr.Ref(int32(m.CompressionThreshold.ValueInt64()))
+		req.CompressionThreshold = new(int32(m.CompressionThreshold.ValueInt64()))
 	}
 	if !m.ModelConfig.Equal(state.ModelConfig) {
 		if m.ModelConfig.IsNull() {

@@ -15,7 +15,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
@@ -113,8 +112,8 @@ func TestAgentsModelCreateDiag(t *testing.T) {
 
 			targetOrganizationID := uuid.New()
 			defaultOrganizationID := uuid.New()
-			targetEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", targetOrganizationID)
-			probeEndpoint := fmt.Sprintf("/api/experimental/organizations/%s/chats/models", defaultOrganizationID)
+			targetEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", targetOrganizationID)
+			probeEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", defaultOrganizationID)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
@@ -811,10 +810,10 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	created, err := exp.CreateChatModel(ctx, organizationID, codersdk.CreateChatModelRequest{
 		AIProviderID: &aiProvider.ID,
 		Model:        "claude-3-5-sonnet-20241022",
-		ContextLimit: ptr.Ref(int64(200000)),
+		ContextLimit: new(int64(200000)),
 		ModelConfig: &codersdk.ChatModelCallConfig{
-			TopP: ptr.Ref(0.9),
-			TopK: ptr.Ref(int64(40)),
+			TopP: new(0.9),
+			TopK: new(int64(40)),
 		},
 	})
 	require.NoError(t, err, "create chat model config out-of-band")

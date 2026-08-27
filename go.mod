@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	cdr.dev/slog/v3 v3.1.0
-	github.com/coder/coder/v2 v2.34.0-rc.0.0.20260824124824-3c89b09734d3
+	github.com/coder/coder/v2 v2.34.0-rc.0.0.20260827091847-26b9c8764f91
 	github.com/coder/retry v1.5.1
 	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.15
@@ -67,7 +67,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
-	github.com/brianvoe/gofakeit/v7 v7.15.0 // indirect
+	github.com/brianvoe/gofakeit/v7 v7.16.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

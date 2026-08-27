@@ -7,7 +7,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -36,14 +35,14 @@ func TestAccWorkspaceProxyResource(t *testing.T) {
 	cfg1 := testAccWorkspaceProxyResourceConfig{
 		URL:         client.URL.String(),
 		Token:       client.SessionToken(),
-		Name:        ptr.Ref("example"),
-		DisplayName: ptr.Ref("Example WS Proxy"),
-		Icon:        ptr.Ref("/emojis/1f407.png"),
+		Name:        new("example"),
+		DisplayName: new("Example WS Proxy"),
+		Icon:        new("/emojis/1f407.png"),
 	}
 
 	cfg2 := cfg1
-	cfg2.Name = ptr.Ref("example-new")
-	cfg2.DisplayName = ptr.Ref("Example WS Proxy New")
+	cfg2.Name = new("example-new")
+	cfg2.DisplayName = new("Example WS Proxy New")
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -78,9 +77,9 @@ func TestAccWorkspaceProxyResourceAGPL(t *testing.T) {
 	cfg1 := testAccWorkspaceProxyResourceConfig{
 		URL:         client.URL.String(),
 		Token:       client.SessionToken(),
-		Name:        ptr.Ref("example"),
-		DisplayName: ptr.Ref("Example WS Proxy"),
-		Icon:        ptr.Ref("/emojis/1f407.png"),
+		Name:        new("example"),
+		DisplayName: new("Example WS Proxy"),
+		Icon:        new("/emojis/1f407.png"),
 	}
 
 	resource.Test(t, resource.TestCase{

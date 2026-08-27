@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -172,7 +171,7 @@ func (r *DefaultAgentsModelResource) ImportState(ctx context.Context, req resour
 // previous default.
 func (r *DefaultAgentsModelResource) setDefault(ctx context.Context, modelID uuid.UUID) (DefaultAgentsModelResourceModel, error) {
 	updated, err := r.experimentalClient().UpdateChatModel(ctx, r.data.DefaultOrganizationID, modelID, codersdk.UpdateChatModelRequest{
-		IsDefault: ptr.Ref(true),
+		IsDefault: new(true),
 	})
 	if err != nil {
 		return DefaultAgentsModelResourceModel{}, err

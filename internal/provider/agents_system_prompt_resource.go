@@ -285,7 +285,7 @@ func agentsSystemPromptDiag(action string, err error) diag.Diagnostics {
 				"This endpoint requires Coder version %s or later and a token with site-wide permissions; "+
 				"upgrade the deployment or use a token with the required permissions. If neither is possible, "+
 				"remove `coderd_agents_system_prompt` from your configuration. Original error: %s",
-				action, "/api/experimental/chats/config/system-prompt", agentsSystemPromptMinVersion, err),
+				action, "/api/v2/chats/config/system-prompt", agentsSystemPromptMinVersion, err),
 		)
 		return diags
 	}

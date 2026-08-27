@@ -10,6 +10,8 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -22,10 +24,6 @@ import (
 	cp "github.com/otiai10/copy"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/mod/semver"
-
-	"github.com/coder/coder/v2/coderd/util/ptr"
-	"github.com/coder/coder/v2/codersdk"
-	"github.com/coder/terraform-provider-coderd/integration"
 )
 
 // mustVariablesToSet converts a []Variable to a types.Set for use in tests,
@@ -87,25 +85,25 @@ func TestTemplateResourceBoolRequests(t *testing.T) {
 			name:                    "classic unknown, agents true",
 			useClassicParameterFlow: types.BoolUnknown(),
 			agentsAllowed:           types.BoolValue(true),
-			wantAgents:              ptr.Ref(true),
+			wantAgents:              new(true),
 		},
 		{
 			name:                    "classic true, agents unknown",
 			useClassicParameterFlow: types.BoolValue(true),
 			agentsAllowed:           types.BoolUnknown(),
-			wantClassic:             ptr.Ref(true),
+			wantClassic:             new(true),
 		},
 		{
 			name:                    "classic null, agents false",
 			useClassicParameterFlow: types.BoolNull(),
 			agentsAllowed:           types.BoolValue(false),
-			wantAgents:              ptr.Ref(false),
+			wantAgents:              new(false),
 		},
 		{
 			name:                    "classic false, agents null",
 			useClassicParameterFlow: types.BoolValue(false),
 			agentsAllowed:           types.BoolNull(),
-			wantClassic:             ptr.Ref(false),
+			wantClassic:             new(false),
 		},
 	}
 	for _, tc := range cases {
@@ -145,18 +143,18 @@ func TestTemplateResourceACLRoleSchemaValidation(t *testing.T) {
 	cfg := testAccTemplateResourceConfig{
 		URL:   "http://127.0.0.1",
 		Token: "test-token",
-		Name:  ptr.Ref("example-template"),
-		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+		Name:  new("example-template"),
+		Versions: new([]testAccTemplateVersionConfig{
 			{
 				Directory: &directory,
-				Active:    ptr.Ref(true),
+				Active:    new(true),
 			},
 		}),
 		ACL: testAccTemplateACLConfig{
 			GroupACL: []testAccTemplateKeyValueConfig{
 				{
-					Key:   ptr.Ref("00000000-0000-0000-0000-000000000000"),
-					Value: ptr.Ref("owner"),
+					Key:   new("00000000-0000-0000-0000-000000000000"),
+					Value: new("owner"),
 				},
 			},
 		},
@@ -181,12 +179,12 @@ func TestTemplateResourceDescriptionSchemaValidation(t *testing.T) {
 	cfg := testAccTemplateResourceConfig{
 		URL:         "http://127.0.0.1",
 		Token:       "test-token",
-		Name:        ptr.Ref("example-template"),
-		Description: ptr.Ref(strings.Repeat("a", 128)),
-		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+		Name:        new("example-template"),
+		Description: new(strings.Repeat("a", 128)),
+		Versions: new([]testAccTemplateVersionConfig{
 			{
 				Directory: &directory,
-				Active:    ptr.Ref(true),
+				Active:    new(true),
 			},
 		}),
 		ACL: testAccTemplateACLConfig{
@@ -228,12 +226,12 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -242,36 +240,36 @@ func TestAccTemplateResource(t *testing.T) {
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
-		cfg2.Name = ptr.Ref("example-template-new")
+		cfg2.Versions = new(slices.Clone(*cfg2.Versions))
+		cfg2.Name = new("example-template-new")
 		(*cfg2.Versions)[0].Directory = &exTemplateTwo
-		(*cfg2.Versions)[0].Name = ptr.Ref("new")
+		(*cfg2.Versions)[0].Name = new("new")
 
 		cfg3 := cfg2
-		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
-		cfg3.Versions = ptr.Ref(append(*cfg3.Versions, testAccTemplateVersionConfig{
-			Name:      ptr.Ref("legacy-template"),
+		cfg3.Versions = new(slices.Clone(*cfg3.Versions))
+		cfg3.Versions = new(append(*cfg3.Versions, testAccTemplateVersionConfig{
+			Name:      new("legacy-template"),
 			Directory: &exTemplateOne,
-			Active:    ptr.Ref(false),
+			Active:    new(false),
 			TerraformVariables: []testAccTemplateKeyValueConfig{
 				{
-					Key:   ptr.Ref("name"),
-					Value: ptr.Ref("world"),
+					Key:   new("name"),
+					Value: new("world"),
 				},
 			},
 		}))
 
 		cfg4 := cfg3
-		cfg4.Versions = ptr.Ref(slices.Clone(*cfg4.Versions))
-		(*cfg4.Versions)[0].Active = ptr.Ref(false)
-		(*cfg4.Versions)[1].Active = ptr.Ref(true)
+		cfg4.Versions = new(slices.Clone(*cfg4.Versions))
+		(*cfg4.Versions)[0].Active = new(false)
+		(*cfg4.Versions)[1].Active = new(true)
 
 		cfg5 := cfg4
-		cfg5.Versions = ptr.Ref(slices.Clone(*cfg5.Versions))
+		cfg5.Versions = new(slices.Clone(*cfg5.Versions))
 		(*cfg5.Versions)[0], (*cfg5.Versions)[1] = (*cfg5.Versions)[1], (*cfg5.Versions)[0]
 
 		cfg6 := cfg4
-		cfg6.Versions = ptr.Ref(slices.Clone((*cfg6.Versions)[1:]))
+		cfg6.Versions = new(slices.Clone((*cfg6.Versions)[1:]))
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -427,29 +425,29 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template2"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template2"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   ptr.Ref("name"),
-							Value: ptr.Ref("world"),
+							Key:   new("name"),
+							Value: new("world"),
 						},
 					},
-					Active: ptr.Ref(true),
+					Active: new(true),
 				},
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   ptr.Ref("name"),
-							Value: ptr.Ref("world"),
+							Key:   new("name"),
+							Value: new("world"),
 						},
 					},
-					Active: ptr.Ref(false),
+					Active: new(false),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -458,29 +456,29 @@ func TestAccTemplateResource(t *testing.T) {
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
-		(*cfg2.Versions)[1].Name = ptr.Ref("new-name")
+		cfg2.Versions = new(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[1].Name = new("new-name")
 
 		cfg3 := cfg2
-		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
-		(*cfg3.Versions)[0].Name = ptr.Ref("new-name-one")
-		(*cfg3.Versions)[1].Name = ptr.Ref("new-name-two")
+		cfg3.Versions = new(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Name = new("new-name-one")
+		(*cfg3.Versions)[1].Name = new("new-name-two")
 		(*cfg3.Versions)[0], (*cfg3.Versions)[1] = (*cfg3.Versions)[1], (*cfg3.Versions)[0]
 
 		cfg4 := cfg1
-		cfg4.Versions = ptr.Ref(slices.Clone(*cfg4.Versions))
+		cfg4.Versions = new(slices.Clone(*cfg4.Versions))
 		(*cfg4.Versions)[0].Directory = &exTemplateOne
 
 		cfg5 := cfg4
-		cfg5.Versions = ptr.Ref(slices.Clone(*cfg5.Versions))
+		cfg5.Versions = new(slices.Clone(*cfg5.Versions))
 		(*cfg5.Versions)[1].Directory = &exTemplateOne
 
 		cfg6 := cfg5
-		cfg6.Versions = ptr.Ref(slices.Clone(*cfg6.Versions))
+		cfg6.Versions = new(slices.Clone(*cfg6.Versions))
 		(*cfg6.Versions)[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
-				Key:   ptr.Ref("name"),
-				Value: ptr.Ref("world2"),
+				Key:   new("name"),
+				Value: new("world2"),
 			},
 		}
 
@@ -556,18 +554,18 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template3"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template3"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateTwo,
 					TerraformVariables: []testAccTemplateKeyValueConfig{
 						{
-							Key:   ptr.Ref("name"),
-							Value: ptr.Ref("world"),
+							Key:   new("name"),
+							Value: new("world"),
 						},
 					},
-					Active: ptr.Ref(true),
+					Active: new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -576,11 +574,11 @@ func TestAccTemplateResource(t *testing.T) {
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
+		cfg2.Versions = new(slices.Clone(*cfg2.Versions))
 		(*cfg2.Versions)[0].TerraformVariables = []testAccTemplateKeyValueConfig{
 			{
-				Key:   ptr.Ref("name"),
-				Value: ptr.Ref("world2"),
+				Key:   new("name"),
+				Value: new("world2"),
 			},
 		}
 
@@ -609,12 +607,12 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(false),
+					Active:    new(false),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -643,12 +641,12 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -657,23 +655,23 @@ func TestAccTemplateResource(t *testing.T) {
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
-		(*cfg2.Versions)[0].Active = ptr.Ref(false)
+		cfg2.Versions = new(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = new(false)
 
 		cfg3 := cfg2
-		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
+		cfg3.Versions = new(slices.Clone(*cfg3.Versions))
 		(*cfg3.Versions)[0].Directory = &exTemplateTwo
 
 		cfg2b := cfg1
-		cfg2b.Versions = ptr.Ref(slices.Clone(*cfg2b.Versions))
-		cfg2b.Versions = ptr.Ref(append(*cfg2b.Versions, testAccTemplateVersionConfig{
+		cfg2b.Versions = new(slices.Clone(*cfg2b.Versions))
+		cfg2b.Versions = new(append(*cfg2b.Versions, testAccTemplateVersionConfig{
 			Directory: &exTemplateTwo,
-			Active:    ptr.Ref(false),
+			Active:    new(false),
 		}))
 
 		cfg3b := cfg2b
-		cfg3b.Versions = ptr.Ref(slices.Clone(*cfg3b.Versions))
-		(*cfg3b.Versions)[1].Active = ptr.Ref(true)
+		cfg3b.Versions = new(slices.Clone(*cfg3b.Versions))
+		(*cfg3b.Versions)[1].Active = new(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -711,12 +709,12 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -725,16 +723,16 @@ func TestAccTemplateResource(t *testing.T) {
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
-		(*cfg2.Versions)[0].Active = ptr.Ref(false)
-		cfg2.Versions = ptr.Ref(append(*cfg2.Versions, testAccTemplateVersionConfig{
+		cfg2.Versions = new(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = new(false)
+		cfg2.Versions = new(append(*cfg2.Versions, testAccTemplateVersionConfig{
 			Directory: &exTemplateTwo,
-			Active:    ptr.Ref(false),
+			Active:    new(false),
 		}))
 
 		cfg3 := cfg2
-		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
-		(*cfg3.Versions)[1].Active = ptr.Ref(true)
+		cfg3.Versions = new(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[1].Active = new(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -767,12 +765,12 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
@@ -781,13 +779,13 @@ func TestAccTemplateResource(t *testing.T) {
 		}
 
 		cfg2 := cfg1
-		cfg2.Versions = ptr.Ref(slices.Clone(*cfg2.Versions))
-		(*cfg2.Versions)[0].Active = ptr.Ref(false)
+		cfg2.Versions = new(slices.Clone(*cfg2.Versions))
+		(*cfg2.Versions)[0].Active = new(false)
 		(*cfg2.Versions)[0].Directory = &exTemplateTwo
 
 		cfg3 := cfg2
-		cfg3.Versions = ptr.Ref(slices.Clone(*cfg3.Versions))
-		(*cfg3.Versions)[0].Active = ptr.Ref(true)
+		cfg3.Versions = new(slices.Clone(*cfg3.Versions))
+		(*cfg3.Versions)[0].Active = new(true)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -829,15 +827,15 @@ func TestAccTemplateResource(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL:               testAccTemplateACLConfig{null: true},
-			MaxPortShareLevel: ptr.Ref("invalid"),
+			MaxPortShareLevel: new("invalid"),
 		}
 
 		resource.Test(t, resource.TestCase{
@@ -874,19 +872,19 @@ func TestAccTemplateResourceAgentsAllowed(t *testing.T) {
 	cfgOmitted := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
-		Name:  ptr.Ref("agents-allowed-template"),
-		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+		Name:  new("agents-allowed-template"),
+		Versions: new([]testAccTemplateVersionConfig{
 			{
 				Directory: &directory,
-				Active:    ptr.Ref(true),
+				Active:    new(true),
 			},
 		}),
 		ACL: testAccTemplateACLConfig{null: true},
 	}
 	cfgFalse := cfgOmitted
-	cfgFalse.AgentsAllowed = ptr.Ref(false)
+	cfgFalse.AgentsAllowed = new(false)
 	cfgTrue := cfgFalse
-	cfgTrue.AgentsAllowed = ptr.Ref(true)
+	cfgTrue.AgentsAllowed = new(true)
 	cfgOmittedAgain := cfgTrue
 	cfgOmittedAgain.AgentsAllowed = nil
 
@@ -937,7 +935,7 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 		cfg := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("no-versions-template"),
+			Name:  new("no-versions-template"),
 			ACL:   testAccTemplateACLConfig{null: true},
 		}
 
@@ -984,11 +982,11 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 		cfgManaged := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref(tpl.Name),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new(tpl.Name),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplate,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{null: true},
@@ -998,8 +996,8 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 		// version active. The template already has an active version on
 		// the server; this config is just adopting it, not creating it.
 		cfgReimported := cfgManaged
-		cfgReimported.Versions = ptr.Ref(slices.Clone(*cfgReimported.Versions))
-		(*cfgReimported.Versions)[0].Active = ptr.Ref(false)
+		cfgReimported.Versions = new(slices.Clone(*cfgReimported.Versions))
+		(*cfgReimported.Versions)[0].Active = new(false)
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -1041,11 +1039,11 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 		cfgManaged := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("settings-only-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("settings-only-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplate,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{null: true},
@@ -1055,7 +1053,7 @@ func TestAccTemplateResourceOptionalVersions(t *testing.T) {
 		cfgUnmanaged.Versions = nil
 
 		cfgUnmanagedWithNewDescription := cfgUnmanaged
-		cfgUnmanagedWithNewDescription.Description = ptr.Ref("now managed by an external pipeline")
+		cfgUnmanagedWithNewDescription.Description = new("now managed by an external pipeline")
 
 		// Captured from state in the first step's Check, then used both to
 		// simulate the pipeline's out-of-band push (PreConfig runs before a
@@ -1180,29 +1178,29 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		cfg1 := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					// Auto-generated version name
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 			ACL: testAccTemplateACLConfig{
 				GroupACL: []testAccTemplateKeyValueConfig{
 					{
-						Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
-						Value: ptr.Ref("use"),
+						Key:   new(firstUser.OrganizationIDs[0].String()),
+						Value: new("use"),
 					},
 					{
-						Key:   ptr.Ref(group.ID.String()),
-						Value: ptr.Ref("admin"),
+						Key:   new(group.ID.String()),
+						Value: new("admin"),
 					},
 				},
 				UserACL: []testAccTemplateKeyValueConfig{
 					{
-						Key:   ptr.Ref(firstUser.ID.String()),
-						Value: ptr.Ref("admin"),
+						Key:   new(firstUser.ID.String()),
+						Value: new("admin"),
 					},
 				},
 			},
@@ -1210,19 +1208,19 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 
 		cfg2 := cfg1
 		cfg2.ACL.GroupACL = slices.Clone(cfg2.ACL.GroupACL[1:])
-		cfg2.MaxPortShareLevel = ptr.Ref("owner")
-		cfg2.CORSBehavior = ptr.Ref("passthru")
+		cfg2.MaxPortShareLevel = new("owner")
+		cfg2.CORSBehavior = new("passthru")
 
 		cfg3 := cfg2
 		cfg3.ACL.null = true
-		cfg3.MaxPortShareLevel = ptr.Ref("public")
-		cfg3.CORSBehavior = ptr.Ref("simple")
+		cfg3.MaxPortShareLevel = new("public")
+		cfg3.CORSBehavior = new("simple")
 
 		cfg4 := cfg3
-		cfg4.AllowUserAutostart = ptr.Ref(false)
+		cfg4.AllowUserAutostart = new(false)
 		cfg4.AutostopRequirement = testAccAutostopRequirementConfig{
-			DaysOfWeek: ptr.Ref([]string{"monday", "tuesday"}),
-			Weeks:      ptr.Ref(int64(2)),
+			DaysOfWeek: new([]string{"monday", "tuesday"}),
+			Weeks:      new(int64(2)),
 		}
 
 		resource.Test(t, resource.TestCase{
@@ -1314,26 +1312,26 @@ func TestAccTemplateResourceEnterprise(t *testing.T) {
 		baseCfg := testAccTemplateResourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-template"),
-			Versions: ptr.Ref([]testAccTemplateVersionConfig{
+			Name:  new("example-template"),
+			Versions: new([]testAccTemplateVersionConfig{
 				{
 					Directory: &exTemplateOne,
-					Active:    ptr.Ref(true),
+					Active:    new(true),
 				},
 			}),
 		}
 
 		cfgOwner := baseCfg
-		cfgOwner.MaxPortShareLevel = ptr.Ref("owner")
+		cfgOwner.MaxPortShareLevel = new("owner")
 
 		cfgAuthenticated := baseCfg
-		cfgAuthenticated.MaxPortShareLevel = ptr.Ref("authenticated")
+		cfgAuthenticated.MaxPortShareLevel = new("authenticated")
 
 		cfgOrganization := baseCfg
-		cfgOrganization.MaxPortShareLevel = ptr.Ref("organization")
+		cfgOrganization.MaxPortShareLevel = new("organization")
 
 		cfgPublic := baseCfg
-		cfgPublic.MaxPortShareLevel = ptr.Ref("public")
+		cfgPublic.MaxPortShareLevel = new("public")
 
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -1377,11 +1375,11 @@ func TestAccTemplateResourceBackCompat(t *testing.T) {
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
-		Name:  ptr.Ref("example-template"),
-		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+		Name:  new("example-template"),
+		Versions: new([]testAccTemplateVersionConfig{
 			{
 				Directory: &exTemplateOne,
-				Active:    ptr.Ref(true),
+				Active:    new(true),
 			},
 		}),
 		ACL: testAccTemplateACLConfig{
@@ -1414,6 +1412,7 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 	client := integration.StartCoder(ctx, t, "template_resource_agpl_acc")
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
+	organizationID := firstUser.OrganizationIDs[0].String()
 
 	exTemplateOne := t.TempDir()
 	err = cp.Copy("../../integration/template-test/example-template", exTemplateOne)
@@ -1422,47 +1421,47 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 	cfg1 := testAccTemplateResourceConfig{
 		URL:   client.URL.String(),
 		Token: client.SessionToken(),
-		Name:  ptr.Ref("example-template"),
-		Versions: ptr.Ref([]testAccTemplateVersionConfig{
+		Name:  new("example-template"),
+		Versions: new([]testAccTemplateVersionConfig{
 			{
 				// Auto-generated version name
 				Directory: &exTemplateOne,
-				Active:    ptr.Ref(true),
+				Active:    new(true),
 			},
 		}),
-		AllowUserAutostart: ptr.Ref(false),
+		AllowUserAutostart: new(false),
 	}
 
 	cfg2 := cfg1
 	cfg2.AllowUserAutostart = nil
-	cfg2.AutostopRequirement.DaysOfWeek = ptr.Ref([]string{"monday", "tuesday"})
+	cfg2.AutostopRequirement.DaysOfWeek = new([]string{"monday", "tuesday"})
 
 	cfg3 := cfg2
 	cfg3.AutostopRequirement.null = true
-	cfg3.AutostartRequirement = ptr.Ref([]string{})
+	cfg3.AutostartRequirement = new([]string{})
 
 	cfg4 := cfg3
-	cfg4.FailureTTL = ptr.Ref(int64(1))
+	cfg4.FailureTTL = new(int64(1))
 
 	cfg5 := cfg4
 	cfg5.FailureTTL = nil
 	cfg5.AutostartRequirement = nil
-	cfg5.RequireActiveVersion = ptr.Ref(true)
+	cfg5.RequireActiveVersion = new(true)
 
 	cfg6 := cfg5
 	cfg6.RequireActiveVersion = nil
 	cfg6.ACL = testAccTemplateACLConfig{
 		GroupACL: []testAccTemplateKeyValueConfig{
 			{
-				Key:   ptr.Ref(firstUser.OrganizationIDs[0].String()),
-				Value: ptr.Ref("use"),
+				Key:   &organizationID,
+				Value: new("use"),
 			},
 		},
 	}
 
 	cfg7 := cfg6
 	cfg7.ACL.null = true
-	cfg7.MaxPortShareLevel = ptr.Ref("owner")
+	cfg7.MaxPortShareLevel = new("owner")
 
 	for _, cfg := range []testAccTemplateResourceConfig{cfg1, cfg2, cfg3, cfg4} {
 		resource.Test(t, resource.TestCase{

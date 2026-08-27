@@ -60,7 +60,7 @@ type fakeCoderd struct {
 	putEcho *bool
 
 	// putEchoOmit makes a successful PUT answer with the field absent. The real
-	// endpoint always sets it (`ptr.Ref(resolvedEnabled)`), so this is a
+	// endpoint always sets it (`new(resolvedEnabled)`), so this is a
 	// contract violation by construction -- it exists to pin down which value
 	// the provider falls back to, which is the difference between a clean apply
 	// and a spurious "inconsistent result after apply".

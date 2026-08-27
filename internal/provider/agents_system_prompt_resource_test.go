@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const agentsSystemPromptPath = "/api/experimental/chats/config/system-prompt"
+const agentsSystemPromptPath = "/api/v2/chats/config/system-prompt"
 
 const agentsSystemPromptResourceAddr = "coderd_agents_system_prompt.test"
 

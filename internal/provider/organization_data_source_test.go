@@ -7,7 +7,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -79,7 +78,7 @@ func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, first
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    ptr.Ref(firstUser.OrganizationIDs[0].String()),
+			ID:    new(firstUser.OrganizationIDs[0].String()),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -97,7 +96,7 @@ func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, first
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("coder"),
+			Name:  new("coder"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -115,7 +114,7 @@ func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, first
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:       client.URL.String(),
 			Token:     client.SessionToken(),
-			IsDefault: ptr.Ref(true),
+			IsDefault: new(true),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -133,8 +132,8 @@ func runOrganizationDataSourceTests(t *testing.T, client *codersdk.Client, first
 		cfg := testAccOrganizationDataSourceConfig{
 			URL:       client.URL.String(),
 			Token:     client.SessionToken(),
-			IsDefault: ptr.Ref(true),
-			Name:      ptr.Ref("coder"),
+			IsDefault: new(true),
+			Name:      new("coder"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
