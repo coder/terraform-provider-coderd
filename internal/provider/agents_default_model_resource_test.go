@@ -444,7 +444,8 @@ func TestAccAgentsDefaultModelResource(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_default_model_acc", integration.UseLicense)
-	organizationID := accDefaultOrganizationID(ctx, t, client)
+	organization := accDefaultOrganization(ctx, t, client)
+	organizationID := organization.ID
 	skipIfAgentsDefaultModelUnsupported(ctx, t, client, organizationID)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
@@ -503,11 +504,11 @@ resource "coderd_agents_default_model" "default" {
 				PlanOnly: true,
 			},
 			{
-				// Import by organization UUID; Read resolves its current default.
+				// Import by organization name; Read resolves its current default.
 				ResourceName:      "coderd_agents_default_model.default",
 				ImportState:       true,
 				ImportStateVerify: true,
-				ImportStateId:     organizationID.String(),
+				ImportStateId:     organization.Name,
 			},
 		},
 	})

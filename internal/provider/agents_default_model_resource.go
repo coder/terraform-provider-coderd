@@ -258,10 +258,15 @@ func (r *AgentsDefaultModelResource) Delete(ctx context.Context, req resource.De
 }
 
 func (r *AgentsDefaultModelResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by organization ID. Read resolves the organization's current
-	// default model without promoting or otherwise modifying any model.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), req.ID)...)
+	// Import by organization name (or ID). Read resolves the organization's
+	// current default model without promoting or otherwise modifying any model.
+	org, err := r.data.Client.OrganizationByName(ctx, req.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization %q: %s", req.ID, err))
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), org.ID.String())...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), org.ID.String())...)
 }
 
 // setDefault marks the given model config as the default for its organization
