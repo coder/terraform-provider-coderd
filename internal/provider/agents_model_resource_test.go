@@ -1365,3 +1365,123 @@ resource "coderd_agents_model" "test" {
 
 	require.True(t, patched.Load(), "expected the adoption apply to PATCH the organization-scoped route")
 }
+
+// TestAgentsModelUnknownOrganizationReplacement moves a model to an
+// organization_id that is unknown at plan time (a terraform_data output). The
+// plan must conservatively force replacement — matching the framework's stock
+// RequiresReplaceIfConfigured, which has no unknown guard either — because
+// deferring on unknown would downgrade a real organization move to an
+// in-place update that PATCHes the old organization and silently ignores the
+// configured one. The apply must delete the model from the old organization
+// and recreate it in the resolved one.
+func TestAgentsModelUnknownOrganizationReplacement(t *testing.T) {
+	t.Parallel()
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+	providerID := uuid.New()
+	ts := time.Unix(1700000000, 0).UTC()
+	newModel := func(orgID uuid.UUID) codersdk.ChatModel {
+		return codersdk.ChatModel{
+			ID:                   uuid.New(),
+			OrganizationID:       orgID,
+			AIProviderID:         providerID,
+			Model:                "claude-3-5-sonnet-20241022",
+			DisplayName:          "Claude Sonnet",
+			Enabled:              true,
+			ContextLimit:         200000,
+			CompressionThreshold: 70,
+			CreatedAt:            ts,
+			UpdatedAt:            ts,
+		}
+	}
+	modelA := newModel(orgA)
+	modelB := newModel(orgB)
+
+	writeJSON := func(w http.ResponseWriter, status int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		require.NoError(t, json.NewEncoder(w).Encode(v))
+	}
+	var deletedFromA, createdInB atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		// Configure fetches the current user and entitlements; the user
+		// payload decodes acceptably for both.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"%s","username":"admin","organization_ids":["%s"]}`, uuid.NewString(), orgA)
+	})
+	mux.HandleFunc(fmt.Sprintf("POST /api/v2/organizations/%s/chats/models", orgA), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, modelA)
+	})
+	mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/chats/models/%s", orgA, modelA.ID), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, modelA)
+	})
+	mux.HandleFunc(fmt.Sprintf("DELETE /api/v2/organizations/%s/chats/models/%s", orgA, modelA.ID), func(w http.ResponseWriter, _ *http.Request) {
+		deletedFromA.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc(fmt.Sprintf("POST /api/v2/organizations/%s/chats/models", orgB), func(w http.ResponseWriter, _ *http.Request) {
+		createdInB.Store(true)
+		writeJSON(w, http.StatusCreated, modelB)
+	})
+	mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/chats/models/%s", orgB, modelB.ID), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, modelB)
+	})
+	mux.HandleFunc(fmt.Sprintf("DELETE /api/v2/organizations/%s/chats/models/%s", orgB, modelB.ID), func(w http.ResponseWriter, _ *http.Request) {
+		// Post-test destroy cleanup.
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v2/ai/providers/"+providerID.String(), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, codersdk.AIProvider{ID: providerID, Type: "anthropic"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	providerBlock := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+`
+	resourceArgs := `  ai_provider_id = "` + providerID.String() + `"
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+  organization_id = "` + orgA.String() + `"
+` + resourceArgs,
+			},
+			{
+				// terraform_data.org is new in this step, so its output is
+				// unknown while the move is planned.
+				Config: providerBlock + `
+resource "terraform_data" "org" {
+  input = "` + orgB.String() + `"
+}
+
+resource "coderd_agents_model" "test" {
+  organization_id = terraform_data.org.output
+` + resourceArgs,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.test", plancheck.ResourceActionReplace),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgB.String())),
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("id"), knownvalue.StringExact(modelB.ID.String())),
+				},
+			},
+		},
+	})
+
+	require.True(t, deletedFromA.Load(), "expected the replace to DELETE the model in the prior organization")
+	require.True(t, createdInB.Load(), "expected the replace to recreate the model in the resolved organization")
+}
