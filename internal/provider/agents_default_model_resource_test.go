@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,19 +11,27 @@ import (
 	"os"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,9 +57,8 @@ func TestAgentsDefaultModelMoveState(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	organizationID := uuid.New()
 	modelID := uuid.New()
-	r := &AgentsDefaultModelResource{data: &CoderdProviderData{DefaultOrganizationID: organizationID}}
+	r := &AgentsDefaultModelResource{}
 	movers := r.MoveState(ctx)
 	require.Len(t, movers, 1)
 	require.NotNil(t, movers[0].SourceSchema)
@@ -85,9 +93,56 @@ func TestAgentsDefaultModelMoveState(t *testing.T) {
 
 	var got AgentsDefaultModelResourceModel
 	require.False(t, resp.TargetState.Get(ctx, &got).HasError())
-	require.Equal(t, organizationID, got.ID.ValueUUID())
-	require.Equal(t, organizationID, got.OrganizationID.ValueUUID())
+	require.True(t, got.ID.IsNull())
+	require.True(t, got.OrganizationID.IsNull())
 	require.Equal(t, modelID, got.ModelID.ValueUUID())
+
+	for _, tc := range []struct {
+		name string
+		req  fwresource.MoveStateRequest
+	}{
+		{
+			name: "wrong source type",
+			req: fwresource.MoveStateRequest{
+				SourceProviderAddress: "registry.example.com/coder/coderd",
+				SourceSchemaVersion:   0,
+				SourceState:           &sourceState,
+				SourceTypeName:        "coderd_other",
+			},
+		},
+		{
+			name: "wrong schema version",
+			req: fwresource.MoveStateRequest{
+				SourceProviderAddress: "registry.example.com/coder/coderd",
+				SourceSchemaVersion:   1,
+				SourceState:           &sourceState,
+				SourceTypeName:        "coderd_default_agents_model",
+			},
+		},
+		{
+			name: "wrong provider address",
+			req: fwresource.MoveStateRequest{
+				SourceProviderAddress: "registry.example.com/hashicorp/coderd",
+				SourceSchemaVersion:   0,
+				SourceState:           &sourceState,
+				SourceTypeName:        "coderd_default_agents_model",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := &fwresource.MoveStateResponse{
+				TargetState: tfsdk.State{
+					Schema: targetSchema,
+					Raw:    tftypes.NewValue(targetSchema.Type().TerraformType(ctx), nil),
+				},
+			}
+			movers[0].StateMover(ctx, tc.req, resp)
+			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
+			require.True(t, resp.TargetState.Raw.IsNull())
+		})
+	}
 }
 
 func TestAgentsDefaultModelIDPlanModifier(t *testing.T) {
@@ -435,6 +490,169 @@ resource "coderd_agents_default_model" "default" {
 			},
 		},
 	})
+}
+
+// TestAgentsDefaultModelMovedBlockMigration reproduces the coder/dogfood
+// v0.0.23 -> v0.0.24 upgrade (coder/dogfood#453): step 1 writes real
+// coderd_default_agents_model state with the legacy schema, step 2 runs the
+// real provider with a `moved` block to coderd_agents_default_model, an
+// adopted coderd_agents_model, and organization_id sourced from
+// data.coderd_organization (is_default = true). Terraform core invokes the
+// MoveResourceState RPC before ConfigureProvider (hashicorp/terraform#35922),
+// so the mover must work without provider data; before the fix this plan
+// failed with "The provider was not configured before Terraform attempted to
+// move coderd_default_agents_model state.".
+func TestAgentsDefaultModelMovedBlockMigration(t *testing.T) {
+	// The state mover only accepts source addresses from coder/coderd, and the
+	// test framework defaults to the hashicorp namespace. t.Setenv also
+	// prevents t.Parallel().
+	t.Setenv(resource.EnvTfAccProviderNamespace, "coder")
+
+	orgID := uuid.New()
+	ts := time.Unix(1700000000, 0).UTC()
+	model := codersdk.ChatModel{
+		ID:                   uuid.New(),
+		OrganizationID:       orgID,
+		AIProviderID:         uuid.New(),
+		Model:                "claude-3-5-sonnet-20241022",
+		DisplayName:          "Claude Sonnet",
+		Enabled:              true,
+		ContextLimit:         200000,
+		CompressionThreshold: 70,
+		CreatedAt:            ts,
+		UpdatedAt:            ts,
+	}
+
+	var modelPatched, defaultPatched atomic.Bool
+	srv := fakeAgentsDefaultModelMigrationServer(t, orgID, model, &modelPatched, &defaultPatched)
+
+	providerBlock := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+`
+	modelArgs := `  ai_provider_id = "` + model.AIProviderID.String() + `"
+  model          = "` + model.Model + `"
+  context_limit  = 200000
+}
+`
+	legacyFactories := map[string]func() (tfprotov6.ProviderServer, error){
+		"coderd": providerserver.NewProtocol6WithError(&legacyCoderdProvider{model: model}),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest: true,
+		// Cross-resource-type moved blocks (the MoveResourceState RPC) require
+		// Terraform 1.8+; older versions reject the moved block with "Resource
+		// type mismatch".
+		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+			tfversion.SkipBelow(tfversion.Version1_8_0),
+		},
+		Steps: []resource.TestStep{
+			{
+				ProtoV6ProviderFactories: legacyFactories,
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+` + modelArgs + `
+resource "coderd_default_agents_model" "this" {
+  model_id = coderd_agents_model.test.id
+}
+`,
+			},
+			{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Config: providerBlock + `
+data "coderd_organization" "default" {
+  is_default = true
+}
+
+resource "coderd_agents_model" "test" {
+  organization_id = data.coderd_organization.default.id
+` + modelArgs + `
+moved {
+  from = coderd_default_agents_model.this
+  to   = coderd_agents_default_model.this
+}
+
+resource "coderd_agents_default_model" "this" {
+  organization_id = data.coderd_organization.default.id
+  model_id        = coderd_agents_model.test.id
+}
+`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.test", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("coderd_agents_default_model.this", plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_agents_default_model.this", tfjsonpath.New("id"), knownvalue.StringExact(orgID.String())),
+					statecheck.ExpectKnownValue("coderd_agents_default_model.this", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgID.String())),
+					statecheck.ExpectKnownValue("coderd_agents_default_model.this", tfjsonpath.New("model_id"), knownvalue.StringExact(model.ID.String())),
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgID.String())),
+				},
+			},
+		},
+	})
+
+	require.True(t, modelPatched.Load(), "expected the model adoption apply to PATCH the organization-scoped route")
+	require.True(t, defaultPatched.Load(), "expected the moved default model apply to PATCH is_default on the organization-scoped route")
+}
+
+// fakeAgentsDefaultModelMigrationServer serves everything the moved-block
+// migration exercises: provider Configure, the coderd_organization data
+// source, and the organization-scoped chat model routes. PATCHes carrying
+// is_default are recorded separately from model updates because both
+// resources share the same route.
+func fakeAgentsDefaultModelMigrationServer(t *testing.T, orgID uuid.UUID, model codersdk.ChatModel, modelPatched, defaultPatched *atomic.Bool) *httptest.Server {
+	t.Helper()
+
+	defaultModel := model
+	defaultModel.IsDefault = true
+	modelPath := fmt.Sprintf("/api/v2/organizations/%s/chats/models/%s", orgID, model.ID)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		// Configure fetches the current user and entitlements; the user
+		// payload decodes acceptably for both.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"%s","username":"admin","organization_ids":["%s"]}`, uuid.NewString(), orgID)
+	})
+	mux.HandleFunc("GET /api/v2/organizations/default", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, codersdk.Organization{
+			MinimalOrganization: codersdk.MinimalOrganization{ID: orgID, Name: "default"},
+			IsDefault:           true,
+		})
+	})
+	mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/members/", orgID), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, []codersdk.OrganizationMemberWithUserData{})
+	})
+	mux.HandleFunc("GET /api/v2/ai/providers/"+model.AIProviderID.String(), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, codersdk.AIProvider{ID: model.AIProviderID, Type: "anthropic"})
+	})
+	mux.HandleFunc("GET "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, model)
+	})
+	mux.HandleFunc("PATCH "+modelPath, func(w http.ResponseWriter, r *http.Request) {
+		var req codersdk.UpdateChatModelRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if req.IsDefault != nil && *req.IsDefault {
+			defaultPatched.Store(true)
+			writeJSON(w, http.StatusOK, defaultModel)
+			return
+		}
+		modelPatched.Store(true)
+		writeJSON(w, http.StatusOK, model)
+	})
+	mux.HandleFunc("DELETE "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		// Post-test destroy cleanup.
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/chats/models", orgID), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, codersdk.OrganizationChatModelsResponse{Models: []codersdk.ChatModel{defaultModel}})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 func TestAccAgentsDefaultModelResource(t *testing.T) {

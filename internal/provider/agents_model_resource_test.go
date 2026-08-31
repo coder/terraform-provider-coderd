@@ -1190,6 +1190,7 @@ func (*legacyCoderdProvider) DataSources(context.Context) []func() datasource.Da
 func (p *legacyCoderdProvider) Resources(context.Context) []func() frameworkresource.Resource {
 	return []func() frameworkresource.Resource{
 		func() frameworkresource.Resource { return &legacyAgentsModelResource{model: p.model} },
+		func() frameworkresource.Resource { return &legacyDefaultAgentsModelResource{} },
 	}
 }
 
@@ -1260,6 +1261,49 @@ func (*legacyAgentsModelResource) Update(context.Context, frameworkresource.Upda
 }
 
 func (*legacyAgentsModelResource) Delete(context.Context, frameworkresource.DeleteRequest, *frameworkresource.DeleteResponse) {
+}
+
+// legacyDefaultAgentsModelResource reproduces the v0.0.23
+// coderd_default_agents_model schema and writes its state without a server.
+type legacyDefaultAgentsModelResource struct{}
+
+var _ frameworkresource.Resource = (*legacyDefaultAgentsModelResource)(nil)
+
+type legacyDefaultAgentsModelModel struct {
+	ID      types.String `tfsdk:"id"`
+	ModelID types.String `tfsdk:"model_id"`
+}
+
+func (*legacyDefaultAgentsModelResource) Metadata(_ context.Context, req frameworkresource.MetadataRequest, resp *frameworkresource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_default_agents_model"
+}
+
+func (*legacyDefaultAgentsModelResource) Schema(_ context.Context, _ frameworkresource.SchemaRequest, resp *frameworkresource.SchemaResponse) {
+	resp.Schema = resourceschema.Schema{
+		Attributes: map[string]resourceschema.Attribute{
+			"id":       resourceschema.StringAttribute{Computed: true},
+			"model_id": resourceschema.StringAttribute{Required: true},
+		},
+	}
+}
+
+func (*legacyDefaultAgentsModelResource) Create(ctx context.Context, req frameworkresource.CreateRequest, resp *frameworkresource.CreateResponse) {
+	var plan legacyDefaultAgentsModelModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.ID = types.StringValue("default")
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+func (*legacyDefaultAgentsModelResource) Read(context.Context, frameworkresource.ReadRequest, *frameworkresource.ReadResponse) {
+}
+
+func (*legacyDefaultAgentsModelResource) Update(context.Context, frameworkresource.UpdateRequest, *frameworkresource.UpdateResponse) {
+}
+
+func (*legacyDefaultAgentsModelResource) Delete(context.Context, frameworkresource.DeleteRequest, *frameworkresource.DeleteResponse) {
 }
 
 // fakeChatModelServer serves the provider Configure endpoints plus the
