@@ -19,9 +19,10 @@ resource "coderd_agents_model" "sonnet" {
   context_limit  = 200000
 }
 
-# Mark the Sonnet model as the deployment-wide default for Coder Agents.
-# Setting a new default automatically demotes the previous one, so only a single
-# coderd_default_agents_model resource should exist per deployment.
-resource "coderd_default_agents_model" "default" {
-  model_id = coderd_agents_model.sonnet.id
+# Mark the Sonnet model as the default for Coder Agents in its organization.
+# Setting a new default automatically demotes the previous one in that
+# organization, so use one resource per organization.
+resource "coderd_agents_default_model" "default" {
+  organization_id = coderd_agents_model.sonnet.organization_id
+  model_id        = coderd_agents_model.sonnet.id
 }

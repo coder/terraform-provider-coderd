@@ -700,7 +700,7 @@ resource "terraform_data" "nullendpoint" {
 					if !ok {
 						return "", fmt.Errorf("coderd_agents_mcp_server.test not found in state")
 					}
-					return rs.Primary.Attributes["organization_id"] + "/" + rs.Primary.ID, nil
+					return organizations[0].Name + "/" + rs.Primary.Attributes["slug"], nil
 				},
 				ImportStateVerifyIgnore: []string{
 					"oauth2_client_secret_wo",

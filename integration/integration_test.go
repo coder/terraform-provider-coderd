@@ -292,7 +292,7 @@ func TestIntegration(t *testing.T) {
 						t.Errorf("model_config for %s mismatch (-want +got):\n%s", m.Model, diff)
 					}
 				}
-				// coderd_default_agents_model.default points at claude_sonnet, which
+				// coderd_agents_default_model.default points at claude_sonnet, which
 				// demotes the auto-promoted claude_opus, so Sonnet is the sole default.
 				assert.Equal(t, []string{"claude-sonnet-4-6"}, defaults)
 			},
