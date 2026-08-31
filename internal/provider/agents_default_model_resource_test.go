@@ -31,6 +31,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	"github.com/stretchr/testify/require"
 )
 
@@ -541,6 +542,12 @@ func TestAgentsDefaultModelMovedBlockMigration(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest: true,
+		// Cross-resource-type moved blocks (the MoveResourceState RPC) require
+		// Terraform 1.8+; older versions reject the moved block with "Resource
+		// type mismatch".
+		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+			tfversion.SkipBelow(tfversion.Version1_8_0),
+		},
 		Steps: []resource.TestStep{
 			{
 				ProtoV6ProviderFactories: legacyFactories,
