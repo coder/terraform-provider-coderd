@@ -56,6 +56,14 @@ type legacyDefaultAgentsModelResourceModel struct {
 	ModelID types.String `tfsdk:"model_id"`
 }
 
+func legacyDefaultAgentsModelStateDetail(modelID uuid.UUID) string {
+	return fmt.Sprintf(
+		"State moved from coderd_default_agents_model for model %s predates organization scoping and does not record its organization. "+
+			"Run `terraform apply` to adopt the configured `organization_id` in place.",
+		modelID,
+	)
+}
+
 func (r *AgentsDefaultModelResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_agents_default_model"
 }
@@ -91,7 +99,11 @@ func (r *AgentsDefaultModelResource) Schema(ctx context.Context, req resource.Sc
 				CustomType:          UUIDType,
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.RequiresReplaceIf(
+						agentsModelOrganizationRequiresReplace,
+						agentsModelOrganizationRequiresReplaceDescription,
+						agentsModelOrganizationRequiresReplaceDescription,
+					),
 				},
 			},
 			"model_id": schema.StringAttribute{
@@ -122,14 +134,6 @@ func (r *AgentsDefaultModelResource) MoveState(ctx context.Context) []resource.S
 					!strings.HasSuffix(req.SourceProviderAddress, "coder/coderd") {
 					return
 				}
-				if r.data == nil {
-					resp.Diagnostics.AddError(
-						"Unable to Move Default Agents Model State",
-						"The provider was not configured before Terraform attempted to move coderd_default_agents_model state.",
-					)
-					return
-				}
-
 				if req.SourceState == nil {
 					resp.Diagnostics.AddError(
 						"Unable to Move Default Agents Model State",
@@ -153,10 +157,12 @@ func (r *AgentsDefaultModelResource) MoveState(ctx context.Context) []resource.S
 					return
 				}
 
-				organizationID := r.data.DefaultOrganizationID
+				// MoveResourceState runs before provider configuration, so the
+				// default organization cannot be resolved here. Leave it null and
+				// let the subsequent apply adopt the configured organization_id.
 				resp.Diagnostics.Append(resp.TargetState.Set(ctx, AgentsDefaultModelResourceModel{
-					ID:             UUIDValue(organizationID),
-					OrganizationID: UUIDValue(organizationID),
+					ID:             NewUUIDNull(),
+					OrganizationID: NewUUIDNull(),
 					ModelID:        UUIDValue(modelID),
 				})...)
 			},
@@ -204,6 +210,16 @@ func (r *AgentsDefaultModelResource) Read(ctx context.Context, req resource.Read
 		return
 	}
 
+	if state.OrganizationID.IsNull() || state.OrganizationID.IsUnknown() {
+		// State moved from coderd_default_agents_model lacks an organization.
+		// Read cannot see config, so preserve it until apply adopts the
+		// configured organization_id.
+		resp.Diagnostics.AddWarning(
+			"Legacy Default Agents Model State",
+			legacyDefaultAgentsModelStateDetail(state.ModelID.ValueUUID()),
+		)
+		return
+	}
 	organizationID := state.OrganizationID.ValueUUID()
 	configs, err := r.experimentalClient().ChatModels(ctx, organizationID)
 	if err != nil {
@@ -239,11 +255,14 @@ func (r *AgentsDefaultModelResource) Update(ctx context.Context, req resource.Up
 		return
 	}
 
+	organizationID := resolveOrganizationID(state.OrganizationID, plan.OrganizationID, plan.ModelID.ValueUUID(), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	tflog.Info(ctx, "updating default Agents model", map[string]any{
-		"organization_id": state.OrganizationID.ValueString(),
+		"organization_id": organizationID.String(),
 		"model_id":        plan.ModelID.ValueString(),
 	})
-	organizationID := state.OrganizationID.ValueUUID()
 	updated, err := r.setDefault(ctx, organizationID, plan.ModelID.ValueUUID())
 	if err != nil {
 		resp.Diagnostics.Append(r.agentsDefaultModelDiag(ctx, "update", organizationID, plan.ModelID.ValueUUID(), err)...)
