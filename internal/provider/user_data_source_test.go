@@ -12,7 +12,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
@@ -123,7 +122,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:      client.URL.String(),
 			Token:    client.SessionToken(),
-			Username: ptr.Ref(user.Username),
+			Username: new(user.Username),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -142,7 +141,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    ptr.Ref(user.ID.String()),
+			ID:    new(user.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -161,7 +160,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Email: ptr.Ref(user.Email),
+			Email: new(user.Email),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -179,7 +178,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Email: ptr.Ref("missing@coder.com"),
+			Email: new("missing@coder.com"),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -216,7 +215,7 @@ func TestAccUserDataSource(t *testing.T) {
 		cfg := testAccUserDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    ptr.Ref("invalid-uuid"),
+			ID:    new("invalid-uuid"),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,
@@ -256,7 +255,7 @@ func TestAccUserDataSourceServiceAccount(t *testing.T) {
 	cfg := testAccUserDataSourceConfig{
 		URL:      client.URL.String(),
 		Token:    client.SessionToken(),
-		Username: ptr.Ref(user.Username),
+		Username: &user.Username,
 	}
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,

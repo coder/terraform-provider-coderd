@@ -24,8 +24,8 @@ var _ resource.Resource = &AgentsSystemPromptResource{}
 var _ resource.ResourceWithImportState = &AgentsSystemPromptResource{}
 var _ resource.ResourceWithModifyPlan = &AgentsSystemPromptResource{}
 
-// First release with the chat system prompt endpoint (coder/coder#22857).
-const agentsSystemPromptMinVersion = "2.32.0"
+// First release serving the chat API under /api/v2 (coder/coder#28496).
+const agentsSystemPromptMinVersion = "2.37.0"
 
 // Mirrors coderd/exp_chats.go.
 const maxAgentsSystemPromptBytes = 131072
@@ -285,7 +285,7 @@ func agentsSystemPromptDiag(action string, err error) diag.Diagnostics {
 				"This endpoint requires Coder version %s or later and a token with site-wide permissions; "+
 				"upgrade the deployment or use a token with the required permissions. If neither is possible, "+
 				"remove `coderd_agents_system_prompt` from your configuration. Original error: %s",
-				action, "/api/experimental/chats/config/system-prompt", agentsSystemPromptMinVersion, err),
+				action, "/api/v2/chats/config/system-prompt", agentsSystemPromptMinVersion, err),
 		)
 		return diags
 	}

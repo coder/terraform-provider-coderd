@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -118,13 +117,13 @@ func (r *DefaultAgentsModelResource) Read(ctx context.Context, req resource.Read
 		return
 	}
 
-	configs, err := r.experimentalClient().ListChatModelConfigs(ctx)
+	configs, err := r.experimentalClient().ChatModels(ctx, r.data.DefaultOrganizationID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read default Agents model, got error: %s", err))
 		return
 	}
 
-	for _, config := range configs {
+	for _, config := range configs.Models {
 		if config.IsDefault {
 			state = stateFromDefaultModelConfig(config)
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -135,7 +134,7 @@ func (r *DefaultAgentsModelResource) Read(ctx context.Context, req resource.Read
 	// Coder keeps a default model whenever any model exists, so reaching here
 	// means there are no models at all. Treat the pointer as deleted.
 	resp.Diagnostics.AddWarning("Client Warning",
-		fmt.Sprintf("No default Agents model found among %d model config(s). Marking as deleted.", len(configs)))
+		fmt.Sprintf("No default Agents model found among %d model config(s). Marking as deleted.", len(configs.Models)))
 	resp.State.RemoveResource(ctx)
 }
 
@@ -171,8 +170,8 @@ func (r *DefaultAgentsModelResource) ImportState(ctx context.Context, req resour
 // Coder merges it into the existing model config and atomically demotes the
 // previous default.
 func (r *DefaultAgentsModelResource) setDefault(ctx context.Context, modelID uuid.UUID) (DefaultAgentsModelResourceModel, error) {
-	updated, err := r.experimentalClient().UpdateChatModelConfig(ctx, modelID, codersdk.UpdateChatModelConfigRequest{
-		IsDefault: ptr.Ref(true),
+	updated, err := r.experimentalClient().UpdateChatModel(ctx, r.data.DefaultOrganizationID, modelID, codersdk.UpdateChatModelRequest{
+		IsDefault: new(true),
 	})
 	if err != nil {
 		return DefaultAgentsModelResourceModel{}, err
@@ -183,7 +182,7 @@ func (r *DefaultAgentsModelResource) setDefault(ctx context.Context, modelID uui
 // stateFromDefaultModelConfig maps the model config that Coder reports as the
 // default into resource state. The resource ID is a constant because the default
 // is a global singleton.
-func stateFromDefaultModelConfig(config codersdk.ChatModelConfig) DefaultAgentsModelResourceModel {
+func stateFromDefaultModelConfig(config codersdk.ChatModel) DefaultAgentsModelResourceModel {
 	return DefaultAgentsModelResourceModel{
 		ID:      types.StringValue(defaultAgentsModelID),
 		ModelID: UUIDValue(config.ID),

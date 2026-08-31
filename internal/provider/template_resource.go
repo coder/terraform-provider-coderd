@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"cdr.dev/slog/v3"
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/retry"
@@ -1516,12 +1515,12 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBoolPointer(),
 		DeprecationMessage:             r.DeprecationMessage.ValueStringPointer(),
-		MaxPortShareLevel:              ptr.Ref(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
+		MaxPortShareLevel:              new(codersdk.WorkspaceAgentPortShareLevel(r.MaxPortShareLevel.ValueString())),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
 		UseClassicParameterFlow:        boolPtrOrNil(r.UseClassicParameterFlow),
 		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		// If we're managing ACL, we want to delete the everyone group.
-		DisableEveryoneGroupAccess: ptr.Ref(!r.ACL.IsNull()),
+		DisableEveryoneGroupAccess: new(!r.ACL.IsNull()),
 	}
 }
 

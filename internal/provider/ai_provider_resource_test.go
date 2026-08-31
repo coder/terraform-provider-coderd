@@ -2,7 +2,6 @@ package provider
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"regexp"
 	"testing"
@@ -820,7 +819,7 @@ func TestAIProviderUpdatePreservesBedrockCredentialsWhenVersionRemoved(t *testin
 // aiProviderPlanWithRoleARN builds a plan with only settings.bedrock.role_arn set.
 func aiProviderPlanWithRoleARN(t *testing.T, roleARN tftypes.Value) tfsdk.Plan {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	schemaResp := &fwresource.SchemaResponse{}
 	(&AIProviderResource{}).Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
 	require.Empty(t, schemaResp.Diagnostics)
@@ -874,7 +873,7 @@ func TestBedrockExternalIDPlanModifier(t *testing.T) {
 				PlanValue:   tc.planSeed,
 			}
 			resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
-			bedrockExternalIDPlanModifier{}.PlanModifyString(context.Background(), req, resp)
+			bedrockExternalIDPlanModifier{}.PlanModifyString(t.Context(), req, resp)
 			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics.Errors())
 			require.Equal(t, tc.want, resp.PlanValue)
 		})

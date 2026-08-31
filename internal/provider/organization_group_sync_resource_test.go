@@ -7,7 +7,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -45,8 +44,8 @@ func TestAccOrganizationGroupSyncResource(t *testing.T) {
 
 	cfg2 := cfg1
 	cfg2.Field = "updated_groups"
-	cfg2.RegexFilter = ptr.Ref(".*test.*")
-	cfg2.AutoCreateMissing = ptr.Ref(true)
+	cfg2.RegexFilter = new(".*test.*")
+	cfg2.AutoCreateMissing = new(true)
 	cfg2.Mapping = map[string][]string{
 		"test_group": {"6e57187f-6543-46ab-a62c-a10065dd4314"},
 	}
@@ -130,7 +129,7 @@ func TestAccOrganizationGroupSyncResource(t *testing.T) {
 			Token:          client.SessionToken(),
 			OrganizationID: org.ID.String(),
 			Field:          "invalid_regex",
-			RegexFilter:    ptr.Ref("[invalid"),
+			RegexFilter:    new("[invalid"),
 			Mapping:        map[string][]string{},
 		}
 		resource.Test(t, resource.TestCase{

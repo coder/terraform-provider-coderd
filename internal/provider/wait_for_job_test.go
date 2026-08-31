@@ -53,7 +53,7 @@ func TestWaitForJobOnce_Success(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	logs, done, err := waitForJobOnce(context.Background(), client, version, 0)
+	logs, done, err := waitForJobOnce(t.Context(), client, version, 0)
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Len(t, logs, 1)
@@ -92,7 +92,7 @@ func TestWaitForJobOnce_JobFailed(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	_, done, err := waitForJobOnce(context.Background(), client, version, 0)
+	_, done, err := waitForJobOnce(t.Context(), client, version, 0)
 	require.Error(t, err)
 	require.False(t, done)
 	require.Contains(t, err.Error(), "provisioner job did not succeed")
@@ -130,7 +130,7 @@ func TestWaitForJobOnce_StillActive(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	_, done, err := waitForJobOnce(context.Background(), client, version, 0)
+	_, done, err := waitForJobOnce(t.Context(), client, version, 0)
 	require.NoError(t, err)
 	require.False(t, done)
 }
@@ -187,7 +187,7 @@ func TestWaitForJob_UsesAfterCursorAcrossRetries(t *testing.T) {
 	client := codersdk.New(srvURL)
 
 	version := &codersdk.TemplateVersion{ID: versionID}
-	logs, err := waitForJob(context.Background(), client, version)
+	logs, err := waitForJob(t.Context(), client, version)
 	require.NoError(t, err)
 	require.Len(t, logs, 5)
 	for i, log := range logs {
@@ -205,7 +205,7 @@ func TestWaitForJob_UsesAfterCursorAcrossRetries(t *testing.T) {
 func TestWaitForJob_ContextCanceledDuringBackoff(t *testing.T) {
 	t.Parallel()
 	versionID := uuid.New()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	var statusCallCount atomic.Int32
 	firstStatusSeen := make(chan struct{}, 1)

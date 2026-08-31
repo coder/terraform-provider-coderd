@@ -7,7 +7,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -28,25 +27,25 @@ func TestAccUserResource(t *testing.T) {
 	cfg1 := testAccUserResourceConfig{
 		URL:       client.URL.String(),
 		Token:     client.SessionToken(),
-		Username:  ptr.Ref("example"),
-		Name:      ptr.Ref("Example User"),
-		Email:     ptr.Ref("example@coder.com"),
-		Roles:     ptr.Ref([]string{"owner", "auditor"}),
-		LoginType: ptr.Ref("password"),
-		Password:  ptr.Ref("SomeSecurePassword!"),
+		Username:  new("example"),
+		Name:      new("Example User"),
+		Email:     new("example@coder.com"),
+		Roles:     new([]string{"owner", "auditor"}),
+		LoginType: new("password"),
+		Password:  new("SomeSecurePassword!"),
 	}
 
 	cfg2 := cfg1
-	cfg2.Username = ptr.Ref("exampleNew")
+	cfg2.Username = new("exampleNew")
 
 	cfg3 := cfg2
-	cfg3.Name = ptr.Ref("Example New")
+	cfg3.Name = new("Example New")
 
 	cfgEmailChanged := cfg3
-	cfgEmailChanged.Email = ptr.Ref("example-new@coder.com")
+	cfgEmailChanged.Email = new("example-new@coder.com")
 
 	cfg4 := cfgEmailChanged
-	cfg4.LoginType = ptr.Ref("github")
+	cfg4.LoginType = new("github")
 	cfg4.Password = nil
 
 	cfg5 := cfg4
@@ -153,12 +152,12 @@ func TestAccUserResource(t *testing.T) {
 		cfg := testAccUserResourceConfig{
 			URL:       client.URL.String(),
 			Token:     client.SessionToken(),
-			Username:  ptr.Ref("unmanaged"),
-			Name:      ptr.Ref("Unmanaged User"),
-			Email:     ptr.Ref("unmanaged@coder.com"),
+			Username:  new("unmanaged"),
+			Name:      new("Unmanaged User"),
+			Email:     new("unmanaged@coder.com"),
 			Roles:     nil, // Start with unmanaged roles
-			LoginType: ptr.Ref("password"),
-			Password:  ptr.Ref("SomeSecurePassword!"),
+			LoginType: new("password"),
+			Password:  new("SomeSecurePassword!"),
 		}
 
 		resource.Test(t, resource.TestCase{
@@ -189,10 +188,10 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 	cfg := testAccUserResourceConfig{
 		URL:              client.URL.String(),
 		Token:            client.SessionToken(),
-		Username:         ptr.Ref("service-account"),
-		Name:             ptr.Ref("Service Account"),
-		Roles:            ptr.Ref([]string{"template-admin"}),
-		IsServiceAccount: ptr.Ref(true),
+		Username:         new("service-account"),
+		Name:             new("Service Account"),
+		Roles:            new([]string{"template-admin"}),
+		IsServiceAccount: new(true),
 	}
 
 	// Changing an unrelated attribute (name) on a service account exercises the
@@ -200,17 +199,17 @@ func TestAccUserResourceServiceAccount(t *testing.T) {
 	// for `email` would be "(known after apply)" on every update, producing
 	// spurious plan churn for SAs (which have no email).
 	cfgRenamed := cfg
-	cfgRenamed.Name = ptr.Ref("Service Account v2")
+	cfgRenamed.Name = new("Service Account v2")
 
 	// Flipping `is_service_account` explicitly from true to false is the
 	// supported way to "convert" an SA into a regular user; it is immutable
 	// server-side, so RequiresReplaceIfConfigured triggers a replacement when
 	// the value is set in config.
 	cfgRegular := cfgRenamed
-	cfgRegular.IsServiceAccount = ptr.Ref(false)
-	cfgRegular.Email = ptr.Ref("service-account@coder.com")
-	cfgRegular.LoginType = ptr.Ref("password")
-	cfgRegular.Password = ptr.Ref("SomeSecurePassword!")
+	cfgRegular.IsServiceAccount = new(false)
+	cfgRegular.Email = new("service-account@coder.com")
+	cfgRegular.LoginType = new("password")
+	cfgRegular.Password = new("SomeSecurePassword!")
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -306,28 +305,28 @@ func TestAccUserResourceValidateConfig(t *testing.T) {
 	// Regular user (not a service account) must still provide an email, even
 	// though the attribute is now Optional in the schema.
 	noEmail := base
-	noEmail.Username = ptr.Ref("no-email")
+	noEmail.Username = new("no-email")
 
 	// Service accounts must not carry an email, password, or non-none login_type.
 	saWithEmail := base
-	saWithEmail.Username = ptr.Ref("sa-email")
-	saWithEmail.IsServiceAccount = ptr.Ref(true)
-	saWithEmail.Email = ptr.Ref("sa@coder.com")
+	saWithEmail.Username = new("sa-email")
+	saWithEmail.IsServiceAccount = new(true)
+	saWithEmail.Email = new("sa@coder.com")
 
 	saWithPassword := base
-	saWithPassword.Username = ptr.Ref("sa-password")
-	saWithPassword.IsServiceAccount = ptr.Ref(true)
-	saWithPassword.Password = ptr.Ref("SomeSecurePassword!")
+	saWithPassword.Username = new("sa-password")
+	saWithPassword.IsServiceAccount = new(true)
+	saWithPassword.Password = new("SomeSecurePassword!")
 
 	saWithEmptyPassword := base
-	saWithEmptyPassword.Username = ptr.Ref("sa-empty-password")
-	saWithEmptyPassword.IsServiceAccount = ptr.Ref(true)
-	saWithEmptyPassword.Password = ptr.Ref("")
+	saWithEmptyPassword.Username = new("sa-empty-password")
+	saWithEmptyPassword.IsServiceAccount = new(true)
+	saWithEmptyPassword.Password = new("")
 
 	saWithLoginType := base
-	saWithLoginType.Username = ptr.Ref("sa-login")
-	saWithLoginType.IsServiceAccount = ptr.Ref(true)
-	saWithLoginType.LoginType = ptr.Ref("password")
+	saWithLoginType.Username = new("sa-login")
+	saWithLoginType.IsServiceAccount = new(true)
+	saWithLoginType.LoginType = new("password")
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,

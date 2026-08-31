@@ -6,7 +6,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
@@ -20,7 +19,7 @@ func TestDefaultAgentsModelStateFromModelConfig(t *testing.T) {
 	t.Parallel()
 
 	id := uuid.New()
-	state := stateFromDefaultModelConfig(codersdk.ChatModelConfig{ID: id, IsDefault: true})
+	state := stateFromDefaultModelConfig(codersdk.ChatModel{ID: id, IsDefault: true})
 	require.Equal(t, defaultAgentsModelID, state.ID.ValueString())
 	require.Equal(t, id, state.ModelID.ValueUUID())
 	require.Equal(t, id.String(), state.ModelID.ValueString())
@@ -74,6 +73,7 @@ func TestAccDefaultAgentsModelResource(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "default_agents_model_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg := func(defaultModel string) string {
@@ -159,10 +159,12 @@ func TestAccDefaultAgentsModelResourceDriftAndDelete(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "default_agents_model_drift_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
+	organizationID := accDefaultOrganizationID(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
-	sonnet := createAccChatModelConfig(ctx, t, client, aiProvider.ID, "claude-3-5-sonnet-20241022")
-	opus := createAccChatModelConfig(ctx, t, client, aiProvider.ID, "claude-3-opus-20240229")
+	sonnet := createAccChatModel(ctx, t, client, aiProvider.ID, "claude-3-5-sonnet-20241022")
+	opus := createAccChatModel(ctx, t, client, aiProvider.ID, "claude-3-opus-20240229")
 	exp := codersdk.NewExperimentalClient(client)
 
 	cfg := fmt.Sprintf(`
@@ -204,8 +206,8 @@ resource "coderd_default_agents_model" "default" {
 				// Externally re-point the default to opus, then expect Terraform to
 				// detect the drift on refresh and plan to restore sonnet.
 				PreConfig: func() {
-					_, err := exp.UpdateChatModelConfig(ctx, opus.ID, codersdk.UpdateChatModelConfigRequest{
-						IsDefault: ptr.Ref(true),
+					_, err := exp.UpdateChatModel(ctx, organizationID, opus.ID, codersdk.UpdateChatModelRequest{
+						IsDefault: new(true),
 					})
 					require.NoError(t, err, "externally set opus as default")
 				},
@@ -225,19 +227,20 @@ resource "coderd_default_agents_model" "default" {
 	})
 }
 
-// createAccChatModelConfig creates a chat model config directly via the SDK so it
+// createAccChatModel creates a chat model config directly via the SDK so it
 // exists independently of any Terraform-managed resource.
-func createAccChatModelConfig(ctx context.Context, t *testing.T, client *codersdk.Client, aiProviderID uuid.UUID, model string) codersdk.ChatModelConfig {
+func createAccChatModel(ctx context.Context, t *testing.T, client *codersdk.Client, aiProviderID uuid.UUID, model string) codersdk.ChatModel {
 	t.Helper()
+	organizationID := accDefaultOrganizationID(ctx, t, client)
 	exp := codersdk.NewExperimentalClient(client)
-	created, err := exp.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
+	created, err := exp.CreateChatModel(ctx, organizationID, codersdk.CreateChatModelRequest{
 		AIProviderID: &aiProviderID,
 		Model:        model,
-		ContextLimit: ptr.Ref(int64(200000)),
+		ContextLimit: new(int64(200000)),
 	})
 	require.NoError(t, err, "create chat model config out-of-band")
 	// WithoutCancel: t.Context() is already cancelled by the time cleanup runs.
-	t.Cleanup(func() { _ = exp.DeleteChatModelConfig(context.WithoutCancel(t.Context()), created.ID) })
+	t.Cleanup(func() { _ = exp.DeleteChatModel(context.WithoutCancel(t.Context()), organizationID, created.ID) })
 	return created
 }
 
@@ -245,11 +248,12 @@ func createAccChatModelConfig(ctx context.Context, t *testing.T, client *codersd
 // Coder enforces a single default, so a healthy deployment returns one ID.
 func serverDefaultModelIDs(ctx context.Context, t *testing.T, client *codersdk.Client) []uuid.UUID {
 	t.Helper()
+	organizationID := accDefaultOrganizationID(ctx, t, client)
 	exp := codersdk.NewExperimentalClient(client)
-	configs, err := exp.ListChatModelConfigs(ctx)
-	require.NoError(t, err, "list chat model configs")
+	configs, err := exp.ChatModels(ctx, organizationID)
+	require.NoError(t, err, "list chat models")
 	var defaults []uuid.UUID
-	for _, c := range configs {
+	for _, c := range configs.Models {
 		if c.IsDefault {
 			defaults = append(defaults, c.ID)
 		}

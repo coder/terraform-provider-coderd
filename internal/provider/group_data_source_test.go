@@ -7,7 +7,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -75,7 +74,7 @@ func TestAccGroupDataSource(t *testing.T) {
 		cfg := testAccGroupDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			ID:    ptr.Ref(group.ID.String()),
+			ID:    new(group.ID.String()),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -93,8 +92,8 @@ func TestAccGroupDataSource(t *testing.T) {
 		cfg := testAccGroupDataSourceConfig{
 			URL:            client.URL.String(),
 			Token:          client.SessionToken(),
-			OrganizationID: ptr.Ref(firstUser.OrganizationIDs[0].String()),
-			Name:           ptr.Ref("example-group"),
+			OrganizationID: new(firstUser.OrganizationIDs[0].String()),
+			Name:           new("example-group"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -112,7 +111,7 @@ func TestAccGroupDataSource(t *testing.T) {
 		cfg := testAccGroupDataSourceConfig{
 			URL:   client.URL.String(),
 			Token: client.SessionToken(),
-			Name:  ptr.Ref("example-group"),
+			Name:  new("example-group"),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -130,7 +129,7 @@ func TestAccGroupDataSource(t *testing.T) {
 		cfg := testAccGroupDataSourceConfig{
 			URL:            client.URL.String(),
 			Token:          client.SessionToken(),
-			OrganizationID: ptr.Ref(firstUser.OrganizationIDs[0].String()),
+			OrganizationID: new(firstUser.OrganizationIDs[0].String()),
 		}
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },

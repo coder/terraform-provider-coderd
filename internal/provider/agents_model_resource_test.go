@@ -4,36 +4,201 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"testing"
 	"text/template"
 	"time"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
+	"sync/atomic"
+
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/stretchr/testify/require"
 )
 
+func TestAgentsModelResolveOrganizationID(t *testing.T) {
+	t.Parallel()
+
+	stateOrganizationID := uuid.New()
+	planOrganizationID := uuid.New()
+	modelID := uuid.New()
+
+	var diags diag.Diagnostics
+	got := resolveOrganizationID(UUIDValue(stateOrganizationID), UUIDValue(planOrganizationID), modelID, &diags)
+	require.False(t, diags.HasError())
+	require.Equal(t, stateOrganizationID, got)
+
+	// Legacy state written before models became organization-scoped lacks
+	// organization_id; the configured (planned) value adopts the model.
+	diags = nil
+	got = resolveOrganizationID(NewUUIDNull(), UUIDValue(planOrganizationID), modelID, &diags)
+	require.False(t, diags.HasError())
+	require.Equal(t, planOrganizationID, got)
+
+	diags = nil
+	resolveOrganizationID(NewUUIDNull(), NewUUIDNull(), modelID, &diags)
+	require.True(t, diags.HasError())
+	require.Contains(t, diags.Errors()[0].Detail(), modelID.String())
+	require.Contains(t, diags.Errors()[0].Detail(), "organization_id")
+}
+
+func TestAgentsModelOrganizationRequiresReplace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		config, state   types.String
+		requiresReplace bool
+	}{
+		// Adopting an organization into legacy state is an in-place update.
+		{"adopt legacy state", types.StringValue(uuid.NewString()), types.StringNull(), false},
+		{"change organization", types.StringValue(uuid.NewString()), types.StringValue(uuid.NewString()), true},
+		{"unset from config", types.StringNull(), types.StringValue(uuid.NewString()), false},
+		{"unknown config", types.StringUnknown(), types.StringValue(uuid.NewString()), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp := &stringplanmodifier.RequiresReplaceIfFuncResponse{}
+			agentsModelOrganizationRequiresReplace(t.Context(), planmodifier.StringRequest{
+				ConfigValue: tt.config,
+				StateValue:  tt.state,
+			}, resp)
+			require.Equal(t, tt.requiresReplace, resp.RequiresReplace)
+		})
+	}
+}
+
+func TestAgentsModelCreateDiag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		probeStatus     int
+		probeMessage    string
+		wantSummary     string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:        "supported endpoint identifies invalid organization",
+			probeStatus: http.StatusOK,
+			wantSummary: "Invalid Agents Model Organization",
+			wantContains: []string{
+				"target organization not found",
+				"may not exist or the token may not have access",
+			},
+			wantNotContains: []string{agentsModelMinVersion},
+		},
+		{
+			name:         "probe 404 identifies unsupported endpoint",
+			probeStatus:  http.StatusNotFound,
+			probeMessage: "endpoint not found",
+			wantSummary:  "Agents Model Endpoint Unavailable",
+			wantContains: []string{
+				"target organization not found",
+				"endpoint not found",
+				agentsModelMinVersion,
+			},
+		},
+		{
+			name:         "other probe failure remains generic",
+			probeStatus:  http.StatusInternalServerError,
+			probeMessage: "probe failed",
+			wantSummary:  "Client Error",
+			wantContains: []string{
+				"target organization not found",
+				"probe failed",
+				"unable to determine whether the endpoint is supported",
+			},
+			wantNotContains: []string{agentsModelMinVersion},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			targetOrganizationID := uuid.New()
+			defaultOrganizationID := uuid.New()
+			targetEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", targetOrganizationID)
+			probeEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", defaultOrganizationID)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case req.Method == http.MethodPost && req.URL.Path == targetEndpoint:
+					w.WriteHeader(http.StatusNotFound)
+					require.NoError(t, json.NewEncoder(w).Encode(codersdk.Response{Message: "target organization not found"}))
+				case req.Method == http.MethodGet && req.URL.Path == probeEndpoint:
+					w.WriteHeader(tt.probeStatus)
+					if tt.probeStatus == http.StatusOK {
+						require.NoError(t, json.NewEncoder(w).Encode(codersdk.OrganizationChatModelsResponse{}))
+						return
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(codersdk.Response{Message: tt.probeMessage}))
+				default:
+					http.NotFound(w, req)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			srvURL, err := url.Parse(srv.URL)
+			require.NoError(t, err)
+			r := &AgentsModelResource{data: &CoderdProviderData{
+				Client:                codersdk.New(srvURL),
+				DefaultOrganizationID: defaultOrganizationID,
+			}}
+
+			_, createErr := r.experimentalClient().CreateChatModel(t.Context(), targetOrganizationID, codersdk.CreateChatModelRequest{})
+			require.Error(t, createErr)
+
+			diags := r.agentsModelCreateDiag(t.Context(), targetOrganizationID, createErr)
+			require.Len(t, diags, 1)
+			require.Equal(t, tt.wantSummary, diags[0].Summary())
+			for _, want := range append(tt.wantContains, targetOrganizationID.String(), "Original error") {
+				require.Contains(t, diags[0].Detail(), want)
+			}
+			for _, notWant := range tt.wantNotContains {
+				require.NotContains(t, diags[0].Detail(), notWant)
+			}
+		})
+	}
+}
+
 func TestAgentsModelCreateRequest(t *testing.T) {
 	t.Parallel()
 
+	organizationID := uuid.New()
 	aiProviderID := uuid.New()
 	plan := AgentsModelResourceModel{
+		OrganizationID:       UUIDValue(organizationID),
 		AIProviderID:         UUIDValue(aiProviderID),
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
@@ -65,6 +230,7 @@ func TestAgentsModelUpdateRequestClearsModelConfig(t *testing.T) {
 	t.Parallel()
 
 	state := AgentsModelResourceModel{
+		OrganizationID:       UUIDValue(uuid.New()),
 		AIProviderID:         UUIDValue(uuid.New()),
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
@@ -95,6 +261,7 @@ func TestAgentsModelUpdateRequestChangedFields(t *testing.T) {
 	t.Parallel()
 
 	state := AgentsModelResourceModel{
+		OrganizationID:       UUIDValue(uuid.New()),
 		AIProviderID:         UUIDValue(uuid.New()),
 		Model:                types.StringValue("claude-3-5-sonnet-20241022"),
 		DisplayName:          types.StringValue("Claude 3.5 Sonnet"),
@@ -117,6 +284,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	t.Parallel()
 
 	modelConfigID := uuid.New()
+	organizationID := uuid.New()
 	aiProviderID := uuid.New()
 	createdAt := time.Unix(1700000000, 0)
 	updatedAt := time.Unix(1700000600, 0)
@@ -127,8 +295,9 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	remote := decodeAgentsModelConfigForTest(t, `{"top_p":0.9,"max_output_tokens":9223372036854775807,"top_k":40}`)
 
 	var diags diag.Diagnostics
-	state := stateFromModelConfig(codersdk.ChatModelConfig{
+	state := stateFromModelConfig(codersdk.ChatModel{
 		ID:                   modelConfigID,
+		OrganizationID:       organizationID,
 		AIProviderID:         aiProviderID,
 		Model:                "claude-3-5-sonnet-20241022",
 		DisplayName:          "Claude 3.5 Sonnet",
@@ -141,6 +310,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	}, "anthropic", &diags)
 	require.False(t, diags.HasError(), diags.Errors())
 	require.Equal(t, modelConfigID, state.ID.ValueUUID())
+	require.Equal(t, organizationID, state.OrganizationID.ValueUUID())
 	require.Equal(t, aiProviderID, state.AIProviderID.ValueUUID())
 	require.Equal(t, "anthropic", state.ProviderType.ValueString())
 	require.Equal(t, "claude-3-5-sonnet-20241022", state.Model.ValueString())
@@ -456,6 +626,52 @@ resource "coderd_agents_model" "sonnet" {
 	})
 }
 
+func TestAgentsModelResourcePlanDefersUnknownOrganizationID(t *testing.T) {
+	t.Parallel()
+
+	// PlanOnly reaches provider Configure(), which fetches the current user
+	// and entitlements, so use a mock server instead of an unreachable URL.
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	cfg := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+
+variable "organization_id" {
+  type = string
+}
+
+resource "terraform_data" "organization" {
+  input = var.organization_id
+}
+
+resource "coderd_agents_model" "sonnet" {
+  organization_id = terraform_data.organization.output
+  ai_provider_id   = "` + uuid.NewString() + `"
+  model            = "claude-3-5-sonnet-20241022"
+  context_limit    = 200000
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// terraform_data.output remains unknown in the initial plan even
+				// though ConfigVariables supplies a concrete input value.
+				Config: cfg,
+				ConfigVariables: config.Variables{
+					"organization_id": config.StringVariable(uuid.NewString()),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
 func TestAccAgentsModelResource(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -463,11 +679,19 @@ func TestAccAgentsModelResource(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
+	organization, err := client.CreateOrganization(ctx, codersdk.CreateOrganizationRequest{
+		Name:        "agents-model-acc",
+		DisplayName: "Agents Model Acceptance",
+	})
+	require.NoError(t, err, "create non-default organization")
+	t.Cleanup(func() { _ = client.DeleteOrganization(context.WithoutCancel(t.Context()), organization.ID.String()) })
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg1 := testAccAgentsModelResourceConfig{
 		URL:                  client.URL.String(),
 		Token:                client.SessionToken(),
+		OrganizationID:       organization.ID.String(),
 		AIProviderID:         aiProvider.ID.String(),
 		Model:                "claude-3-5-sonnet-20241022",
 		DisplayName:          "Claude 3.5 Sonnet",
@@ -495,6 +719,7 @@ func TestAccAgentsModelResource(t *testing.T) {
 				Config: cfg1.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("coderd_agents_model.sonnet", "id"),
+					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "organization_id", organization.ID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "ai_provider_id", aiProvider.ID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "provider_type", "anthropic"),
 					resource.TestCheckResourceAttr("coderd_agents_model.sonnet", "model", cfg1.Model),
@@ -513,6 +738,13 @@ func TestAccAgentsModelResource(t *testing.T) {
 				ResourceName:      "coderd_agents_model.sonnet",
 				ImportState:       true,
 				ImportStateVerify: true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources["coderd_agents_model.sonnet"]
+					if !ok {
+						return "", fmt.Errorf("coderd_agents_model.sonnet not found in state")
+					}
+					return rs.Primary.Attributes["organization_id"] + "/" + rs.Primary.ID, nil
+				},
 				// Coder serializes model_config fields in struct order while jsonencode sorts them
 				// alphabetically, so ImportStateVerify's byte comparison can't match it. Compare it
 				// semantically via ImportStateCheck instead.
@@ -545,6 +777,7 @@ func TestAccAgentsModelResourceModelConfigNoDrift(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_drift_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg := fmt.Sprintf(`
@@ -604,22 +837,25 @@ func TestAccAgentsModelResourceImportNoDrift(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_import_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	// Create the model out-of-band so state is first populated by import (Read).
+	organization := accDefaultOrganization(ctx, t, client)
+	organizationID := organization.ID
 	exp := codersdk.NewExperimentalClient(client)
-	created, err := exp.CreateChatModelConfig(ctx, codersdk.CreateChatModelConfigRequest{
+	created, err := exp.CreateChatModel(ctx, organizationID, codersdk.CreateChatModelRequest{
 		AIProviderID: &aiProvider.ID,
 		Model:        "claude-3-5-sonnet-20241022",
-		ContextLimit: ptr.Ref(int64(200000)),
+		ContextLimit: new(int64(200000)),
 		ModelConfig: &codersdk.ChatModelCallConfig{
-			TopP: ptr.Ref(0.9),
-			TopK: ptr.Ref(int64(40)),
+			TopP: new(0.9),
+			TopK: new(int64(40)),
 		},
 	})
 	require.NoError(t, err, "create chat model config out-of-band")
 	// WithoutCancel: t.Context() is already cancelled by the time cleanup runs.
-	t.Cleanup(func() { _ = exp.DeleteChatModelConfig(context.WithoutCancel(t.Context()), created.ID) })
+	t.Cleanup(func() { _ = exp.DeleteChatModel(context.WithoutCancel(t.Context()), organizationID, created.ID) })
 
 	cfg := fmt.Sprintf(`
 provider "coderd" {
@@ -649,7 +885,7 @@ resource "coderd_agents_model" "sonnet" {
 				Config:             cfg,
 				ResourceName:       "coderd_agents_model.sonnet",
 				ImportState:        true,
-				ImportStateId:      created.ID.String(),
+				ImportStateId:      organization.Name + "/" + created.ID.String(),
 				ImportStatePersist: true,
 			},
 			{
@@ -673,6 +909,7 @@ func TestAccAgentsModelResourceEmptyModelConfig(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_empty_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
 
 	cfg := fmt.Sprintf(`
@@ -706,6 +943,7 @@ resource "coderd_agents_model" "sonnet" {
 type testAccAgentsModelResourceConfig struct {
 	URL                  string
 	Token                string
+	OrganizationID       string
 	AIProviderID         string
 	Model                string
 	DisplayName          string
@@ -724,6 +962,9 @@ provider "coderd" {
 }
 
 resource "coderd_agents_model" "sonnet" {
+{{- if .OrganizationID }}
+  organization_id       = "{{.OrganizationID}}"
+{{- end }}
   ai_provider_id         = "{{.AIProviderID}}"
   model                  = "{{.Model}}"
   display_name           = "{{.DisplayName}}"
@@ -753,6 +994,7 @@ func TestAccAgentsModelResourceProviderTypeRederive(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_model_provider_type_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
 	anthropic := createAccAgentsModelAIProvider(ctx, t, client)
 	openai := createAccAgentsModelAIProviderOfType(ctx, t, client, codersdk.CreateAIProviderRequest{
 		Type:        codersdk.AIProviderTypeOpenAI,
@@ -816,6 +1058,31 @@ resource "coderd_agents_model" "sonnet" {
 			},
 		},
 	})
+}
+
+func skipUnlessAgentsModelEndpoint(ctx context.Context, t *testing.T, client *codersdk.Client) {
+	t.Helper()
+	organizationID := accDefaultOrganizationID(ctx, t, client)
+	_, err := codersdk.NewExperimentalClient(client).ChatModels(ctx, organizationID)
+	if err != nil {
+		var sdkErr *codersdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
+			t.Skipf("deployment does not support org-scoped chat models: %s", err)
+		}
+		require.NoError(t, err, "probe org-scoped chat models")
+	}
+}
+
+func accDefaultOrganization(ctx context.Context, t *testing.T, client *codersdk.Client) codersdk.Organization {
+	t.Helper()
+	organizations, err := client.Organizations(ctx)
+	require.NoError(t, err, "list organizations")
+	require.NotEmpty(t, organizations, "first user must belong to an organization")
+	return organizations[0]
+}
+
+func accDefaultOrganizationID(ctx context.Context, t *testing.T, client *codersdk.Client) uuid.UUID {
+	return accDefaultOrganization(ctx, t, client).ID
 }
 
 func createAccAgentsModelAIProviderOfType(ctx context.Context, t *testing.T, client *codersdk.Client, req codersdk.CreateAIProviderRequest) codersdk.AIProvider {
@@ -889,4 +1156,332 @@ func testCheckAgentsModelConfig(maxOutputTokens int64, temperature float64) reso
 		}
 		return nil
 	})
+}
+
+// legacyCoderdProvider mimics the pre-organization-scoped provider (<= 0.0.23)
+// closely enough to write state whose coderd_agents_model lacks
+// organization_id, without talking to any server.
+type legacyCoderdProvider struct {
+	model codersdk.ChatModel
+}
+
+var _ provider.Provider = (*legacyCoderdProvider)(nil)
+
+func (*legacyCoderdProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+	resp.TypeName = "coderd"
+}
+
+func (*legacyCoderdProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
+	resp.Schema = providerschema.Schema{
+		Attributes: map[string]providerschema.Attribute{
+			"url":   providerschema.StringAttribute{Optional: true},
+			"token": providerschema.StringAttribute{Optional: true},
+		},
+	}
+}
+
+func (*legacyCoderdProvider) Configure(context.Context, provider.ConfigureRequest, *provider.ConfigureResponse) {
+}
+
+func (*legacyCoderdProvider) DataSources(context.Context) []func() datasource.DataSource {
+	return nil
+}
+
+func (p *legacyCoderdProvider) Resources(context.Context) []func() frameworkresource.Resource {
+	return []func() frameworkresource.Resource{
+		func() frameworkresource.Resource { return &legacyAgentsModelResource{model: p.model} },
+	}
+}
+
+// legacyAgentsModelResource reproduces the old coderd_agents_model schema:
+// the current one minus organization_id, with server-computed values canned.
+type legacyAgentsModelResource struct {
+	model codersdk.ChatModel
+}
+
+var _ frameworkresource.Resource = (*legacyAgentsModelResource)(nil)
+
+type legacyAgentsModelModel struct {
+	ID                   types.String `tfsdk:"id"`
+	AIProviderID         types.String `tfsdk:"ai_provider_id"`
+	ProviderType         types.String `tfsdk:"provider_type"`
+	Model                types.String `tfsdk:"model"`
+	DisplayName          types.String `tfsdk:"display_name"`
+	Enabled              types.Bool   `tfsdk:"enabled"`
+	ContextLimit         types.Int64  `tfsdk:"context_limit"`
+	CompressionThreshold types.Int64  `tfsdk:"compression_threshold"`
+	ModelConfig          types.String `tfsdk:"model_config"`
+	CreatedAt            types.Int64  `tfsdk:"created_at"`
+	UpdatedAt            types.Int64  `tfsdk:"updated_at"`
+}
+
+func (*legacyAgentsModelResource) Metadata(_ context.Context, req frameworkresource.MetadataRequest, resp *frameworkresource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_agents_model"
+}
+
+func (*legacyAgentsModelResource) Schema(_ context.Context, _ frameworkresource.SchemaRequest, resp *frameworkresource.SchemaResponse) {
+	resp.Schema = resourceschema.Schema{
+		Attributes: map[string]resourceschema.Attribute{
+			"id":                    resourceschema.StringAttribute{Computed: true},
+			"ai_provider_id":        resourceschema.StringAttribute{Required: true},
+			"provider_type":         resourceschema.StringAttribute{Computed: true},
+			"model":                 resourceschema.StringAttribute{Required: true},
+			"display_name":          resourceschema.StringAttribute{Optional: true, Computed: true},
+			"enabled":               resourceschema.BoolAttribute{Optional: true, Computed: true},
+			"context_limit":         resourceschema.Int64Attribute{Required: true},
+			"compression_threshold": resourceschema.Int64Attribute{Optional: true, Computed: true},
+			"model_config":          resourceschema.StringAttribute{Optional: true},
+			"created_at":            resourceschema.Int64Attribute{Computed: true},
+			"updated_at":            resourceschema.Int64Attribute{Computed: true},
+		},
+	}
+}
+
+func (r *legacyAgentsModelResource) Create(ctx context.Context, req frameworkresource.CreateRequest, resp *frameworkresource.CreateResponse) {
+	var plan legacyAgentsModelModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.ID = types.StringValue(r.model.ID.String())
+	plan.ProviderType = types.StringValue("anthropic")
+	plan.DisplayName = types.StringValue(r.model.DisplayName)
+	plan.Enabled = types.BoolValue(r.model.Enabled)
+	plan.CompressionThreshold = types.Int64Value(int64(r.model.CompressionThreshold))
+	plan.CreatedAt = types.Int64Value(r.model.CreatedAt.Unix())
+	plan.UpdatedAt = types.Int64Value(r.model.UpdatedAt.Unix())
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+func (*legacyAgentsModelResource) Read(context.Context, frameworkresource.ReadRequest, *frameworkresource.ReadResponse) {
+}
+
+func (*legacyAgentsModelResource) Update(context.Context, frameworkresource.UpdateRequest, *frameworkresource.UpdateResponse) {
+}
+
+func (*legacyAgentsModelResource) Delete(context.Context, frameworkresource.DeleteRequest, *frameworkresource.DeleteResponse) {
+}
+
+// fakeChatModelServer serves the provider Configure endpoints plus the
+// organization-scoped chat model routes the real provider uses after upgrade.
+func fakeChatModelServer(t *testing.T, orgID uuid.UUID, model codersdk.ChatModel, patched *atomic.Bool) *httptest.Server {
+	t.Helper()
+	writeJSON := func(w http.ResponseWriter, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(v))
+	}
+	modelPath := fmt.Sprintf("/api/v2/organizations/%s/chats/models/%s", orgID, model.ID)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Configure fetches the current user and entitlements; the user
+		// payload decodes acceptably for both.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"%s","username":"admin","organization_ids":["%s"]}`, uuid.NewString(), orgID)
+	})
+	mux.HandleFunc("GET "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, model)
+	})
+	mux.HandleFunc("PATCH "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		patched.Store(true)
+		writeJSON(w, model)
+	})
+	mux.HandleFunc("DELETE "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v2/ai/providers/"+model.AIProviderID.String(), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, codersdk.AIProvider{ID: model.AIProviderID, Type: "anthropic"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestAgentsModelLegacyStateAdoption upgrades state written by the
+// pre-organization-scoped schema: step 1 writes state without organization_id,
+// step 2 runs the real provider with organization_id added to config and must
+// adopt it via an in-place update (never a replace, which would delete against
+// an unknown organization).
+func TestAgentsModelLegacyStateAdoption(t *testing.T) {
+	t.Parallel()
+
+	orgID := uuid.New()
+	ts := time.Unix(1700000000, 0).UTC()
+	model := codersdk.ChatModel{
+		ID:                   uuid.New(),
+		OrganizationID:       orgID,
+		AIProviderID:         uuid.New(),
+		Model:                "claude-3-5-sonnet-20241022",
+		DisplayName:          "Claude Sonnet",
+		Enabled:              true,
+		ContextLimit:         200000,
+		CompressionThreshold: 70,
+		CreatedAt:            ts,
+		UpdatedAt:            ts,
+	}
+
+	var patched atomic.Bool
+	srv := fakeChatModelServer(t, orgID, model, &patched)
+
+	providerBlock := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+`
+	resourceArgs := `  ai_provider_id = "` + model.AIProviderID.String() + `"
+  model          = "` + model.Model + `"
+  context_limit  = 200000
+}
+`
+	legacyFactories := map[string]func() (tfprotov6.ProviderServer, error){
+		"coderd": providerserver.NewProtocol6WithError(&legacyCoderdProvider{model: model}),
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest: true,
+		Steps: []resource.TestStep{
+			{
+				ProtoV6ProviderFactories: legacyFactories,
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+` + resourceArgs,
+			},
+			{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+  organization_id = "` + orgID.String() + `"
+` + resourceArgs,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgID.String())),
+				},
+			},
+		},
+	})
+
+	require.True(t, patched.Load(), "expected the adoption apply to PATCH the organization-scoped route")
+}
+
+// TestAgentsModelUnknownOrganizationReplacement moves a model to an
+// organization_id that is unknown at plan time (a terraform_data output). The
+// plan must conservatively force replacement — matching the framework's stock
+// RequiresReplaceIfConfigured, which has no unknown guard either — because
+// deferring on unknown would downgrade a real organization move to an
+// in-place update that PATCHes the old organization and silently ignores the
+// configured one. The apply must delete the model from the old organization
+// and recreate it in the resolved one.
+func TestAgentsModelUnknownOrganizationReplacement(t *testing.T) {
+	t.Parallel()
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+	providerID := uuid.New()
+	ts := time.Unix(1700000000, 0).UTC()
+	newModel := func(orgID uuid.UUID) codersdk.ChatModel {
+		return codersdk.ChatModel{
+			ID:                   uuid.New(),
+			OrganizationID:       orgID,
+			AIProviderID:         providerID,
+			Model:                "claude-3-5-sonnet-20241022",
+			DisplayName:          "Claude Sonnet",
+			Enabled:              true,
+			ContextLimit:         200000,
+			CompressionThreshold: 70,
+			CreatedAt:            ts,
+			UpdatedAt:            ts,
+		}
+	}
+	modelA := newModel(orgA)
+	modelB := newModel(orgB)
+
+	writeJSON := func(w http.ResponseWriter, status int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		require.NoError(t, json.NewEncoder(w).Encode(v))
+	}
+	var deletedFromA, createdInB atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		// Configure fetches the current user and entitlements; the user
+		// payload decodes acceptably for both.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"%s","username":"admin","organization_ids":["%s"]}`, uuid.NewString(), orgA)
+	})
+	mux.HandleFunc(fmt.Sprintf("POST /api/v2/organizations/%s/chats/models", orgA), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, modelA)
+	})
+	mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/chats/models/%s", orgA, modelA.ID), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, modelA)
+	})
+	mux.HandleFunc(fmt.Sprintf("DELETE /api/v2/organizations/%s/chats/models/%s", orgA, modelA.ID), func(w http.ResponseWriter, _ *http.Request) {
+		deletedFromA.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc(fmt.Sprintf("POST /api/v2/organizations/%s/chats/models", orgB), func(w http.ResponseWriter, _ *http.Request) {
+		createdInB.Store(true)
+		writeJSON(w, http.StatusCreated, modelB)
+	})
+	mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/chats/models/%s", orgB, modelB.ID), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, modelB)
+	})
+	mux.HandleFunc(fmt.Sprintf("DELETE /api/v2/organizations/%s/chats/models/%s", orgB, modelB.ID), func(w http.ResponseWriter, _ *http.Request) {
+		// Post-test destroy cleanup.
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/v2/ai/providers/"+providerID.String(), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, codersdk.AIProvider{ID: providerID, Type: "anthropic"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	providerBlock := `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+`
+	resourceArgs := `  ai_provider_id = "` + providerID.String() + `"
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+}
+`
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: providerBlock + `
+resource "coderd_agents_model" "test" {
+  organization_id = "` + orgA.String() + `"
+` + resourceArgs,
+			},
+			{
+				// terraform_data.org is new in this step, so its output is
+				// unknown while the move is planned.
+				Config: providerBlock + `
+resource "terraform_data" "org" {
+  input = "` + orgB.String() + `"
+}
+
+resource "coderd_agents_model" "test" {
+  organization_id = terraform_data.org.output
+` + resourceArgs,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.test", plancheck.ResourceActionReplace),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgB.String())),
+					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("id"), knownvalue.StringExact(modelB.ID.String())),
+				},
+			},
+		},
+	})
+
+	require.True(t, deletedFromA.Load(), "expected the replace to DELETE the model in the prior organization")
+	require.True(t, createdInB.Load(), "expected the replace to recreate the model in the resolved organization")
 }

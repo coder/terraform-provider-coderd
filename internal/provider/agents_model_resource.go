@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -26,6 +27,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
+
+// agentsModelMinVersion is the first Coder release that includes the
+// organization-scoped chat model API.
+const agentsModelMinVersion = "2.37.0"
 
 var (
 	_ resource.Resource                = &AgentsModelResource{}
@@ -46,8 +51,47 @@ func (r *AgentsModelResource) experimentalClient() *codersdk.ExperimentalClient 
 	return codersdk.NewExperimentalClient(r.data.Client)
 }
 
+// resolveOrganizationID returns organization_id from state, falling back to
+// the planned (configured) value: state written by provider versions that
+// predate organization-scoped chat models lacks it, and Coder 2.37 removed the
+// compatibility route that could recover it server-side (coder/coder#28632).
+// Configuring organization_id adopts such a model in place; the org-scoped API
+// call then verifies the value and the state write-back records it.
+func resolveOrganizationID(state, plan UUID, modelID uuid.UUID, diags *diag.Diagnostics) uuid.UUID {
+	if !state.IsNull() && !state.IsUnknown() {
+		return state.ValueUUID()
+	}
+	if !plan.IsNull() && !plan.IsUnknown() {
+		return plan.ValueUUID()
+	}
+	diags.AddError(
+		"Missing Organization ID",
+		legacyAgentsModelStateDetail(modelID),
+	)
+	return uuid.Nil
+}
+
+const agentsModelOrganizationRequiresReplaceDescription = "Requires replace if configured and the prior state already records an organization."
+
+// agentsModelOrganizationRequiresReplace forces replacement when a configured
+// organization_id changes, except when prior state records none: such state
+// predates organization-scoped chat models, and adopting the configured value
+// is an in-place update, not a move.
+func agentsModelOrganizationRequiresReplace(_ context.Context, req planmodifier.StringRequest, resp *stringplanmodifier.RequiresReplaceIfFuncResponse) {
+	resp.RequiresReplace = !req.ConfigValue.IsNull() && !req.StateValue.IsNull()
+}
+
+func legacyAgentsModelStateDetail(modelID uuid.UUID) string {
+	return fmt.Sprintf(
+		"State for Agents model %s predates organization-scoped chat models and does not record its organization. "+
+			"Set `organization_id` on the resource and run `terraform apply` to adopt it in place.",
+		modelID,
+	)
+}
+
 type AgentsModelResourceModel struct {
 	ID                   UUID                   `tfsdk:"id"`
+	OrganizationID       UUID                   `tfsdk:"organization_id"`
 	AIProviderID         UUID                   `tfsdk:"ai_provider_id"`
 	ProviderType         types.String           `tfsdk:"provider_type"`
 	Model                types.String           `tfsdk:"model"`
@@ -74,7 +118,8 @@ func (r *AgentsModelResource) ModifyPlan(ctx context.Context, req resource.Modif
 func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are to be expected, and we recommend using it with caution in production environments.\n\n" +
-			"Configures an admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings.",
+			"~> **Warning**\nThis resource is only compatible with Coder version [" + agentsModelMinVersion + "](https://github.com/coder/coder/releases/tag/v" + agentsModelMinVersion + ") and later.\n\n" +
+			"Configures an organization-scoped, admin-managed chat model for Coder Agents, binding a model identifier to a configured AI provider (see `coderd_ai_provider`) along with context, compression, and optional JSON tuning settings. Import IDs use `<organization-name>/<id>`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Agents model configuration ID.",
@@ -82,6 +127,19 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"organization_id": schema.StringAttribute{
+				MarkdownDescription: "Organization ID that owns the Agents model configuration. Defaults to the provider default organization ID.",
+				CustomType:          UUIDType,
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIf(
+						agentsModelOrganizationRequiresReplace,
+						agentsModelOrganizationRequiresReplaceDescription,
+						agentsModelOrganizationRequiresReplaceDescription,
+					),
 				},
 			},
 			"ai_provider_id": schema.StringAttribute{
@@ -194,15 +252,19 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if plan.OrganizationID.IsNull() || plan.OrganizationID.IsUnknown() {
+		plan.OrganizationID = UUIDValue(r.data.DefaultOrganizationID)
+	}
 	createReq := plan.createRequest(&resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	tflog.Info(ctx, "creating Agents model")
-	modelConfig, err := r.createChatModelConfigWithRetry(ctx, createReq)
+	organizationID := plan.OrganizationID.ValueUUID()
+	modelConfig, err := r.createChatModelWithRetry(ctx, organizationID, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", err))
+		resp.Diagnostics.Append(r.agentsModelCreateDiag(ctx, organizationID, err)...)
 		return
 	}
 
@@ -217,7 +279,7 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config codersdk.ChatModelConfig, diags *diag.Diagnostics) string {
+func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config codersdk.ChatModel, diags *diag.Diagnostics) string {
 	provider, err := r.data.Client.AIProvider(ctx, config.AIProviderID.String())
 	if err != nil {
 		diags.AddError("Client Error", fmt.Sprintf("Unable to read AI provider %s to derive provider_type, got error: %s", config.AIProviderID, err))
@@ -226,30 +288,29 @@ func (r *AgentsModelResource) lookupProviderType(ctx context.Context, config cod
 	return string(provider.Type)
 }
 
-// createChatModelConfigWithRetry retries CreateChatModelConfig on the 409
-// default-election race (the only unique constraint is the single-default one,
-// so a 409 can only be that race). Required until Linear CODAGT-736 is fixed
-// server-side; remove this and call CreateChatModelConfig directly once it is.
-func (r *AgentsModelResource) createChatModelConfigWithRetry(ctx context.Context, req codersdk.CreateChatModelConfigRequest) (codersdk.ChatModelConfig, error) {
+// createChatModelWithRetry retries CreateChatModel on the 409
+// default-election race. coder/coder#27968 now serializes default election
+// server-side, so the retry is likely vestigial but harmless.
+func (r *AgentsModelResource) createChatModelWithRetry(ctx context.Context, organizationID uuid.UUID, req codersdk.CreateChatModelRequest) (codersdk.ChatModel, error) {
 	const maxAttempts = 10
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		config, err := r.experimentalClient().CreateChatModelConfig(ctx, req)
+		config, err := r.experimentalClient().CreateChatModel(ctx, organizationID, req)
 		if err == nil {
 			return config, nil
 		}
 		var sdkErr *codersdk.Error
 		if !errors.As(err, &sdkErr) || sdkErr.StatusCode() != http.StatusConflict {
-			return codersdk.ChatModelConfig{}, err
+			return codersdk.ChatModel{}, err
 		}
 		lastErr = err
 		select {
 		case <-ctx.Done():
-			return codersdk.ChatModelConfig{}, ctx.Err()
+			return codersdk.ChatModel{}, ctx.Err()
 		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
 		}
 	}
-	return codersdk.ChatModelConfig{}, lastErr
+	return codersdk.ChatModel{}, lastErr
 }
 
 func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -260,29 +321,37 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	modelConfigID := state.ID.ValueUUID()
-	configs, err := r.experimentalClient().ListChatModelConfigs(ctx)
+	if state.OrganizationID.IsNull() || state.OrganizationID.IsUnknown() {
+		// Legacy state predating organization-scoped chat models. Read can't
+		// see config, so skip the refresh and let the subsequent apply adopt
+		// the configured organization_id.
+		resp.Diagnostics.AddWarning(
+			"Legacy Agents Model State",
+			legacyAgentsModelStateDetail(modelConfigID),
+		)
+		return
+	}
+	organizationID := state.OrganizationID.ValueUUID()
+	config, err := r.experimentalClient().ChatModel(ctx, organizationID, modelConfigID)
 	if err != nil {
+		if isNotFound(err) {
+			resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Agents model with ID %s not found. Marking as deleted.", modelConfigID.String()))
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read Agents model, got error: %s", err))
 		return
 	}
 
-	for _, config := range configs {
-		if config.ID == modelConfigID {
-			providerType := r.lookupProviderType(ctx, config, &resp.Diagnostics)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			refreshed := stateFromModelConfig(config, providerType, &resp.Diagnostics)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			resp.Diagnostics.Append(resp.State.Set(ctx, &refreshed)...)
-			return
-		}
+	providerType := r.lookupProviderType(ctx, config, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-
-	resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Agents model with ID %s not found. Marking as deleted.", modelConfigID.String()))
-	resp.State.RemoveResource(ctx)
+	refreshed := stateFromModelConfig(config, providerType, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &refreshed)...)
 }
 
 func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -298,7 +367,11 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	tflog.Info(ctx, "updating Agents model", map[string]any{"id": state.ID.ValueString()})
-	modelConfig, err := r.experimentalClient().UpdateChatModelConfig(ctx, state.ID.ValueUUID(), updateReq)
+	organizationID := resolveOrganizationID(state.OrganizationID, plan.OrganizationID, state.ID.ValueUUID(), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	modelConfig, err := r.experimentalClient().UpdateChatModel(ctx, organizationID, state.ID.ValueUUID(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update Agents model, got error: %s", err))
 		return
@@ -323,32 +396,94 @@ func (r *AgentsModelResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	tflog.Info(ctx, "deleting Agents model", map[string]any{"id": state.ID.ValueString()})
-	if err := r.experimentalClient().DeleteChatModelConfig(ctx, state.ID.ValueUUID()); err != nil && !isNotFound(err) {
+	organizationID := resolveOrganizationID(state.OrganizationID, NewUUIDNull(), state.ID.ValueUUID(), &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if err := r.experimentalClient().DeleteChatModel(ctx, organizationID, state.ID.ValueUUID()); err != nil && !isNotFound(err) {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete Agents model, got error: %s", err))
 		return
 	}
 }
 
 func (r *AgentsModelResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	parts := strings.Split(req.ID, "/")
+	if len(parts) != 2 {
+		resp.Diagnostics.AddError("Invalid Import ID", "Expected `<organization-name>/<id>`.")
+		return
+	}
+	org, err := r.data.Client.OrganizationByName(ctx, parts[0])
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization %q: %s", parts[0], err))
+		return
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid Import ID", fmt.Sprintf("Unable to parse Agents model ID as UUID: %s", err))
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), org.ID.String())...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id.String())...)
 }
 
-func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersdk.CreateChatModelConfigRequest {
+func (r *AgentsModelResource) agentsModelCreateDiag(ctx context.Context, organizationID uuid.UUID, createErr error) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var sdkErr *codersdk.Error
+	if !errors.As(createErr, &sdkErr) || sdkErr.StatusCode() != http.StatusNotFound {
+		diags.AddError("Client Error", fmt.Sprintf("Unable to create Agents model, got error: %s", createErr))
+		return diags
+	}
+
+	createEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", organizationID)
+	probeEndpoint := fmt.Sprintf("/api/v2/organizations/%s/chats/models", r.data.DefaultOrganizationID)
+	_, probeErr := r.experimentalClient().ChatModels(ctx, r.data.DefaultOrganizationID)
+	if probeErr == nil {
+		diags.AddError(
+			"Invalid Agents Model Organization",
+			fmt.Sprintf("Unable to create the Agents model: the deployment returned 404 for %s, but the same endpoint is available for the provider's default organization. "+
+				"Organization %s may not exist or the token may not have access to it. Original error: %s",
+				createEndpoint, organizationID, createErr),
+		)
+		return diags
+	}
+
+	var probeSDKErr *codersdk.Error
+	if errors.As(probeErr, &probeSDKErr) && probeSDKErr.StatusCode() == http.StatusNotFound {
+		diags.AddError(
+			"Agents Model Endpoint Unavailable",
+			fmt.Sprintf("Unable to create the Agents model: the deployment returned 404 for %s, and the capability probe returned 404 for %s. "+
+				"This resource requires Coder version %s or later; upgrade the deployment, or remove "+
+				"`coderd_agents_model` from your configuration. Original error: %s. Probe error: %s",
+				createEndpoint, probeEndpoint, agentsModelMinVersion, createErr, probeErr),
+		)
+		return diags
+	}
+
+	diags.AddError(
+		"Client Error",
+		fmt.Sprintf("Unable to create the Agents model, and unable to determine whether the endpoint is supported because the capability probe for %s also failed. Original error: %s. Probe error: %s",
+			probeEndpoint, createErr, probeErr),
+	)
+	return diags
+}
+
+func (m AgentsModelResourceModel) createRequest(diags *diag.Diagnostics) codersdk.CreateChatModelRequest {
 	aiProviderID := m.AIProviderID.ValueUUID()
-	req := codersdk.CreateChatModelConfigRequest{
+	req := codersdk.CreateChatModelRequest{
 		AIProviderID:         &aiProviderID,
 		Model:                m.Model.ValueString(),
 		DisplayName:          m.DisplayName.ValueString(),
-		Enabled:              ptr.Ref(m.Enabled.ValueBool()),
-		ContextLimit:         ptr.Ref(m.ContextLimit.ValueInt64()),
-		CompressionThreshold: ptr.Ref(int32(m.CompressionThreshold.ValueInt64())),
+		Enabled:              new(m.Enabled.ValueBool()),
+		ContextLimit:         new(m.ContextLimit.ValueInt64()),
+		CompressionThreshold: new(int32(m.CompressionThreshold.ValueInt64())),
 		ModelConfig:          agentsModelDecodeConfig(m.ModelConfig, diags),
 	}
 	return req
 }
 
-func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, diags *diag.Diagnostics) codersdk.UpdateChatModelConfigRequest {
-	var req codersdk.UpdateChatModelConfigRequest
+func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, diags *diag.Diagnostics) codersdk.UpdateChatModelRequest {
+	var req codersdk.UpdateChatModelRequest
 	if !m.AIProviderID.Equal(state.AIProviderID) {
 		aiProviderID := m.AIProviderID.ValueUUID()
 		req.AIProviderID = &aiProviderID
@@ -360,13 +495,13 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 		req.DisplayName = m.DisplayName.ValueString()
 	}
 	if !m.Enabled.Equal(state.Enabled) {
-		req.Enabled = ptr.Ref(m.Enabled.ValueBool())
+		req.Enabled = new(m.Enabled.ValueBool())
 	}
 	if !m.ContextLimit.Equal(state.ContextLimit) {
-		req.ContextLimit = ptr.Ref(m.ContextLimit.ValueInt64())
+		req.ContextLimit = new(m.ContextLimit.ValueInt64())
 	}
 	if !m.CompressionThreshold.Equal(state.CompressionThreshold) {
-		req.CompressionThreshold = ptr.Ref(int32(m.CompressionThreshold.ValueInt64()))
+		req.CompressionThreshold = new(int32(m.CompressionThreshold.ValueInt64()))
 	}
 	if !m.ModelConfig.Equal(state.ModelConfig) {
 		if m.ModelConfig.IsNull() {
@@ -379,9 +514,10 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 	return req
 }
 
-func stateFromModelConfig(config codersdk.ChatModelConfig, providerType string, diags *diag.Diagnostics) AgentsModelResourceModel {
+func stateFromModelConfig(config codersdk.ChatModel, providerType string, diags *diag.Diagnostics) AgentsModelResourceModel {
 	return AgentsModelResourceModel{
 		ID:                   UUIDValue(config.ID),
+		OrganizationID:       UUIDValue(config.OrganizationID),
 		AIProviderID:         UUIDValue(config.AIProviderID),
 		ProviderType:         types.StringValue(providerType),
 		Model:                types.StringValue(config.Model),

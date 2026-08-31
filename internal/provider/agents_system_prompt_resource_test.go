@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const agentsSystemPromptPath = "/api/experimental/chats/config/system-prompt"
+const agentsSystemPromptPath = "/api/v2/chats/config/system-prompt"
 
 const agentsSystemPromptResourceAddr = "coderd_agents_system_prompt.test"
 
@@ -301,6 +303,7 @@ func TestAccAgentsSystemPromptRealCoderNoDrift(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_system_prompt_acc")
+	skipUnlessAgentsSystemPromptEndpoint(ctx, t, client)
 	experimental := codersdk.NewExperimentalClient(client)
 
 	messyPrompt := "You are a helpful agent.\r\nBe concise.\u200b\n\n\n\nAlways cite sources.\n"
@@ -344,6 +347,21 @@ resource "coderd_agents_system_prompt" "test" {
 	require.True(t, live.IncludeDefaultSystemPrompt)
 }
 
+// skipUnlessAgentsSystemPromptEndpoint skips the test when the target
+// deployment does not serve the promoted chat system prompt endpoint under
+// /api/v2 (Coder < 2.37).
+func skipUnlessAgentsSystemPromptEndpoint(ctx context.Context, t *testing.T, client *codersdk.Client) {
+	t.Helper()
+	_, err := codersdk.NewExperimentalClient(client).GetChatSystemPrompt(ctx)
+	if err != nil {
+		var sdkErr *codersdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
+			t.Skipf("deployment does not support the chat system prompt endpoint: %s", err)
+		}
+		require.NoError(t, err, "probe chat system prompt endpoint")
+	}
+}
+
 func TestAccAgentsSystemPromptRealCoderImportNoDrift(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -351,6 +369,7 @@ func TestAccAgentsSystemPromptRealCoderImportNoDrift(t *testing.T) {
 	}
 	ctx := t.Context()
 	client := integration.StartCoder(ctx, t, "agents_system_prompt_import_acc")
+	skipUnlessAgentsSystemPromptEndpoint(ctx, t, client)
 	experimental := codersdk.NewExperimentalClient(client)
 
 	includeDefault := true

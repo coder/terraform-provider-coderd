@@ -12,7 +12,7 @@ description: |-
   ~> Warning
   terraform destroy resets the prompt to empty and include_default_system_prompt to true, the defaults of a never-configured deployment. The API has no delete operation for this setting.
   ~> Warning
-  This resource requires Coder version 2.32.0 https://github.com/coder/coder/releases/tag/v2.32.0 or later, and a token with site-wide owner permissions.
+  This resource requires Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 or later, and a token with site-wide owner permissions.
 ---
 
 # coderd_agents_system_prompt (Resource)
@@ -32,7 +32,7 @@ If a system prompt was configured out of band, `terraform import` this resource 
 `terraform destroy` resets the prompt to empty and `include_default_system_prompt` to `true`, the defaults of a never-configured deployment. The API has no delete operation for this setting.
 
 ~> **Warning**
-This resource requires Coder version [2.32.0](https://github.com/coder/coder/releases/tag/v2.32.0) or later, and a token with site-wide `owner` permissions.
+This resource requires Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) or later, and a token with site-wide `owner` permissions.
 
 ## Example Usage
 

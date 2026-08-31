@@ -6,7 +6,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
@@ -70,15 +69,15 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 	cfg1 := testAccOrganizationResourceConfig{
 		URL:         client.URL.String(),
 		Token:       client.SessionToken(),
-		Name:        ptr.Ref("example-org"),
-		DisplayName: ptr.Ref("Example Organization"),
-		Description: ptr.Ref("This is an example organization"),
-		Icon:        ptr.Ref("/icon/coder.svg"),
+		Name:        new("example-org"),
+		DisplayName: new("Example Organization"),
+		Description: new("This is an example organization"),
+		Icon:        new("/icon/coder.svg"),
 	}
 
 	cfg2 := cfg1
-	cfg2.Name = ptr.Ref("example-org-new")
-	cfg2.DisplayName = ptr.Ref("Example Organization New")
+	cfg2.Name = new("example-org-new")
+	cfg2.DisplayName = new("Example Organization New")
 
 	cfg3 := cfg2
 	cfg3.OrgSyncIdpGroups = []string{"wibble", "wobble"}
@@ -87,13 +86,13 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 	cfg4.OrgSyncIdpGroups = []string{"wibbley", "wobbley"}
 
 	cfg5 := cfg4
-	cfg5.GroupSync = ptr.Ref(codersdk.GroupSyncSettings{
+	cfg5.GroupSync = new(codersdk.GroupSyncSettings{
 		Field: "wibble",
 		Mapping: map[string][]uuid.UUID{
 			"wibble": {uuid.MustParse("6e57187f-6543-46ab-a62c-a10065dd4314")},
 		},
 	})
-	cfg5.RoleSync = ptr.Ref(codersdk.RoleSyncSettings{
+	cfg5.RoleSync = new(codersdk.RoleSyncSettings{
 		Field: "wobble",
 		Mapping: map[string][]string{
 			"wobble": {"wobbly"},
@@ -161,10 +160,10 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 				}
 				if enableExperimentalSteps {
 					cfg6 := cfg5
-					cfg6.WorkspaceSharing = ptr.Ref("none")
+					cfg6.WorkspaceSharing = new("none")
 
 					cfg7 := cfg6
-					cfg7.WorkspaceSharing = ptr.Ref("everyone")
+					cfg7.WorkspaceSharing = new("everyone")
 
 					steps = append(steps,
 						// Disable workspace sharing for org
@@ -192,9 +191,9 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 		cfg1 := testAccOrganizationResourceConfig{
 			URL:         client.URL.String(),
 			Token:       client.SessionToken(),
-			Name:        ptr.Ref("example-org"),
-			Description: ptr.Ref("This is an example organization"),
-			Icon:        ptr.Ref("/icon/coder.svg"),
+			Name:        new("example-org"),
+			Description: new("This is an example organization"),
+			Icon:        new("/icon/coder.svg"),
 		}
 		resource.Test(t, resource.TestCase{
 			IsUnitTest:               true,

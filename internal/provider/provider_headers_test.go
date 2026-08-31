@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -43,11 +42,11 @@ func configureProvider(t *testing.T, cfgVal tftypes.Value) *provider.ConfigureRe
 	t.Helper()
 	p := &CoderdProvider{version: "test"}
 	schemaResp := &provider.SchemaResponse{}
-	p.Schema(context.Background(), provider.SchemaRequest{}, schemaResp)
+	p.Schema(t.Context(), provider.SchemaRequest{}, schemaResp)
 	require.Empty(t, schemaResp.Diagnostics)
 
 	configResp := &provider.ConfigureResponse{}
-	p.Configure(context.Background(), provider.ConfigureRequest{
+	p.Configure(t.Context(), provider.ConfigureRequest{
 		Config: tfsdkConfig(t, schemaResp.Schema, cfgVal),
 	}, configResp)
 	return configResp

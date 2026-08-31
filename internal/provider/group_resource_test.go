@@ -7,7 +7,6 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -45,17 +44,17 @@ func TestAccGroupResource(t *testing.T) {
 	cfg1 := testAccGroupResourceconfig{
 		URL:            client.URL.String(),
 		Token:          client.SessionToken(),
-		Name:           ptr.Ref("example-group"),
-		DisplayName:    ptr.Ref("Example Group"),
-		AvatarUrl:      ptr.Ref("https://google.com"),
-		QuotaAllowance: ptr.Ref(int32(100)),
-		Members:        ptr.Ref([]string{user1.ID.String()}),
+		Name:           new("example-group"),
+		DisplayName:    new("Example Group"),
+		AvatarUrl:      new("https://google.com"),
+		QuotaAllowance: new(int32(100)),
+		Members:        new([]string{user1.ID.String()}),
 	}
 
 	cfg2 := cfg1
-	cfg2.Name = ptr.Ref("example-group-new")
-	cfg2.DisplayName = ptr.Ref("Example Group New")
-	cfg2.Members = ptr.Ref([]string{user2.ID.String()})
+	cfg2.Name = new("example-group-new")
+	cfg2.DisplayName = new("Example Group New")
+	cfg2.Members = new([]string{user2.ID.String()})
 
 	cfg3 := cfg2
 	cfg3.Members = nil
@@ -145,11 +144,11 @@ func TestAccGroupResourceAGPL(t *testing.T) {
 	cfg1 := testAccGroupResourceconfig{
 		URL:            client.URL.String(),
 		Token:          client.SessionToken(),
-		Name:           ptr.Ref("example-group"),
-		DisplayName:    ptr.Ref("Example Group"),
-		AvatarUrl:      ptr.Ref("https://google.com"),
-		QuotaAllowance: ptr.Ref(int32(100)),
-		Members:        ptr.Ref([]string{firstUser.ID.String()}),
+		Name:           new("example-group"),
+		DisplayName:    new("Example Group"),
+		AvatarUrl:      new("https://google.com"),
+		QuotaAllowance: new(int32(100)),
+		Members:        &[]string{firstUser.ID.String()},
 	}
 
 	resource.Test(t, resource.TestCase{
