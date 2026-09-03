@@ -52,6 +52,7 @@ resource "coderd_group" "example" {
 ### Read-Only
 
 - `created_at` (Number) Unix timestamp when the organization was created.
+- `default_org_member_roles` (Set of String) Built-in organization role names unioned into every member's effective roles in this organization. Null when the Coder deployment does not support default org member roles.
 - `members` (Set of String) Members of the organization, by ID
 - `updated_at` (Number) Unix timestamp when the organization was last updated.
 - `workspace_sharing` (String) Workspace sharing setting for the organization. Valid values are `everyone` and `none`.

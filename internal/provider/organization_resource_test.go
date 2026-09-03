@@ -25,7 +25,7 @@ func TestAccOrganizationResource(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "organization_acc", integration.UseLicense, integration.CoderExperiments("workspace-sharing"))
+	client := integration.StartCoder(ctx, t, "organization_acc", integration.UseLicense, integration.CoderExperiments("workspace-sharing,minimum-implicit-member"))
 	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	runOrganizationResourceTest(t, client, true)
@@ -165,6 +165,12 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 					cfg7 := cfg6
 					cfg7.WorkspaceSharing = new("everyone")
 
+					cfg8 := cfg7
+					cfg8.DefaultOrgMemberRoles = ptr.Ref([]string{"organization-workspace-access", "organization-auditor"})
+
+					cfg9 := cfg8
+					cfg9.DefaultOrgMemberRoles = ptr.Ref([]string{})
+
 					steps = append(steps,
 						// Disable workspace sharing for org
 						resource.TestStep{
@@ -178,6 +184,23 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 							Config: cfg7.String(t),
 							ConfigStateChecks: []statecheck.StateCheck{
 								statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("workspace_sharing"), knownvalue.StringExact("everyone")),
+							},
+						},
+						// Set default org member roles
+						resource.TestStep{
+							Config: cfg8.String(t),
+							ConfigStateChecks: []statecheck.StateCheck{
+								statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("default_org_member_roles"), knownvalue.SetExact([]knownvalue.Check{
+									knownvalue.StringExact("organization-workspace-access"),
+									knownvalue.StringExact("organization-auditor"),
+								})),
+							},
+						},
+						// Clear default org member roles
+						resource.TestStep{
+							Config: cfg9.String(t),
+							ConfigStateChecks: []statecheck.StateCheck{
+								statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("default_org_member_roles"), knownvalue.SetExact([]knownvalue.Check{})),
 							},
 						},
 					)
@@ -221,6 +244,8 @@ type testAccOrganizationResourceConfig struct {
 	Icon             *string
 	WorkspaceSharing *string
 
+	DefaultOrgMemberRoles *[]string
+
 	OrgSyncIdpGroups []string
 	GroupSync        *codersdk.GroupSyncSettings
 	RoleSync         *codersdk.RoleSyncSettings
@@ -240,6 +265,14 @@ resource "coderd_organization" "test" {
 	description       = {{orNull .Description}}
 	icon              = {{orNull .Icon}}
 	workspace_sharing = {{orNull .WorkspaceSharing}}
+
+	{{- if .DefaultOrgMemberRoles}}
+	default_org_member_roles = [
+		{{- range $role := .DefaultOrgMemberRoles }}
+		"{{$role}}",
+		{{- end}}
+	]
+	{{- end}}
 
 	{{- if .OrgSyncIdpGroups}}
 	org_sync_idp_groups = [

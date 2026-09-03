@@ -4,6 +4,12 @@ resource "coderd_organization" "blueberry" {
   description  = "The organization for blueberries"
   icon         = "/emojis/1fad0.png"
 
+  # Requires the `minimum-implicit-member` experiment when set to
+  # anything other than the deployment default.
+  default_org_member_roles = [
+    "organization-workspace-access",
+  ]
+
   org_sync_idp_groups = [
     "wibble",
     "wobble",

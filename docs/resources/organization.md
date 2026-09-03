@@ -24,6 +24,12 @@ resource "coderd_organization" "blueberry" {
   description  = "The organization for blueberries"
   icon         = "/emojis/1fad0.png"
 
+  # Requires the `minimum-implicit-member` experiment when set to
+  # anything other than the deployment default.
+  default_org_member_roles = [
+    "organization-workspace-access",
+  ]
+
   org_sync_idp_groups = [
     "wibble",
     "wobble",
@@ -54,6 +60,7 @@ resource "coderd_organization" "blueberry" {
 
 ### Optional
 
+- `default_org_member_roles` (Set of String) Built-in organization role names unioned into every member's effective roles in this organization (e.g. `organization-workspace-access`, `organization-auditor`). New organizations default to `["organization-workspace-access"]`. When null, this facet is left unmanaged by Terraform. Setting any value other than the deployment default requires the `minimum-implicit-member` experiment to be enabled on the Coder deployment.
 - `description` (String)
 - `display_name` (String) Display name of the organization. Defaults to name.
 - `group_sync` (Block, Optional, Deprecated) Group sync settings to sync groups from an IdP.
