@@ -33,9 +33,10 @@ type OrganizationDataSourceModel struct {
 	IsDefault types.Bool   `tfsdk:"is_default"`
 	Name      types.String `tfsdk:"name"`
 
-	CreatedAt        types.Int64  `tfsdk:"created_at"`
-	UpdatedAt        types.Int64  `tfsdk:"updated_at"`
-	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
+	CreatedAt             types.Int64  `tfsdk:"created_at"`
+	UpdatedAt             types.Int64  `tfsdk:"updated_at"`
+	WorkspaceSharing      types.String `tfsdk:"workspace_sharing"`
+	DefaultOrgMemberRoles types.Set    `tfsdk:"default_org_member_roles"`
 	// TODO: This could reasonably store some User object - though we may need to make additional queries depending on what fields we
 	// want, or to have one consistent user type for all data sources.
 	Members types.Set `tfsdk:"members"`
@@ -82,6 +83,13 @@ This data source is only compatible with Coder version [2.13.0](https://github.c
 				MarkdownDescription: "Workspace sharing setting for the organization. " +
 					"Valid values are `everyone` and `none`.",
 				Computed: true,
+			},
+			"default_org_member_roles": schema.SetAttribute{
+				MarkdownDescription: "Built-in organization role names unioned into every member's " +
+					"effective roles in this organization. Null when the Coder deployment does not " +
+					"support default org member roles.",
+				Computed:    true,
+				ElementType: types.StringType,
 			},
 
 			"members": schema.SetAttribute{
@@ -188,6 +196,12 @@ func (d *OrganizationDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 	data.WorkspaceSharing = workspaceSharing
+	defaultOrgMemberRoles, diags := defaultOrgMemberRolesValue(ctx, org.DefaultOrgMemberRoles)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.DefaultOrgMemberRoles = defaultOrgMemberRoles
 	members, err := client.OrganizationMembers(ctx, org.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get organization members, got error: %s", err))

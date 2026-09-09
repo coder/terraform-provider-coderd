@@ -12,6 +12,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -44,6 +45,8 @@ type OrganizationResourceModel struct {
 	Description      types.String `tfsdk:"description"`
 	Icon             types.String `tfsdk:"icon"`
 	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
+
+	DefaultOrgMemberRoles types.Set `tfsdk:"default_org_member_roles"`
 
 	OrgSyncIdpGroups types.Set    `tfsdk:"org_sync_idp_groups"`
 	GroupSync        types.Object `tfsdk:"group_sync"`
@@ -146,6 +149,20 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				Computed: true,
 				Validators: []validator.String{
 					stringvalidator.OneOf(workspaceSharingNone, workspaceSharingEveryone),
+				},
+			},
+
+			"default_org_member_roles": schema.SetAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+				MarkdownDescription: "Built-in organization role names unioned into every member's " +
+					"effective roles in this organization (e.g. `organization-workspace-access`, " +
+					"`organization-auditor`). New organizations default to `[\"organization-workspace-access\"]`. " +
+					"When null, this facet is left unmanaged by Terraform. Setting any value other than the " +
+					"deployment default requires the `minimum-implicit-member` experiment to be enabled on " +
+					"the Coder deployment.",
+				Validators: []validator.Set{
+					setvalidator.ValueStringsAre(stringvalidator.LengthAtLeast(1)),
 				},
 			},
 
@@ -352,6 +369,17 @@ func (r *OrganizationResource) Read(ctx context.Context, req resource.ReadReques
 	data.Icon = types.StringValue(org.Icon)
 	data.WorkspaceSharing = workspaceSharing
 
+	// `default_org_member_roles` is null when unmanaged; only sync it from the
+	// backend when it is managed by this resource.
+	if !data.DefaultOrgMemberRoles.IsNull() {
+		roles, diags := defaultOrgMemberRolesValue(ctx, org.DefaultOrgMemberRoles)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.DefaultOrgMemberRoles = roles
+	}
+
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -395,6 +423,18 @@ func (r *OrganizationResource) Create(ctx context.Context, req resource.CreateRe
 	data.DisplayName = types.StringValue(org.DisplayName)
 
 	orgID := data.ID.ValueUUID()
+
+	// Apply default org member roles, if specified. CreateOrganizationRequest
+	// has no field for them, so they are set with a follow-up PATCH.
+	if !data.DefaultOrgMemberRoles.IsNull() && !data.DefaultOrgMemberRoles.IsUnknown() {
+		tflog.Trace(ctx, "updating default org member roles", map[string]any{
+			"orgID": orgID,
+		})
+		resp.Diagnostics.Append(r.patchDefaultOrgMemberRoles(ctx, orgID, data.DefaultOrgMemberRoles)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 
 	// Apply org sync patches, if specified
 	if !data.OrgSyncIdpGroups.IsNull() {
@@ -488,14 +528,23 @@ func (r *OrganizationResource) Update(ctx context.Context, req resource.UpdateRe
 		"new_description":  data.Description.ValueString(),
 		"new_icon":         data.Icon.ValueString(),
 	})
+	defaultOrgMemberRoles := defaultOrgMemberRolesPtr(ctx, data.DefaultOrgMemberRoles, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	org, err := r.Client.UpdateOrganization(ctx, orgID.String(), codersdk.UpdateOrganizationRequest{
-		Name:        data.Name.ValueString(),
-		DisplayName: data.DisplayName.ValueString(),
-		Description: data.Description.ValueStringPointer(),
-		Icon:        data.Icon.ValueStringPointer(),
+		Name:                  data.Name.ValueString(),
+		DisplayName:           data.DisplayName.ValueString(),
+		Description:           data.Description.ValueStringPointer(),
+		Icon:                  data.Icon.ValueStringPointer(),
+		DefaultOrgMemberRoles: defaultOrgMemberRoles,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update organization %s, got error: %s", orgID, err))
+		return
+	}
+	if !data.DefaultOrgMemberRoles.IsNull() && org.DefaultOrgMemberRoles == nil {
+		resp.Diagnostics.AddError(defaultOrgMemberRolesNotFoundSummary, defaultOrgMemberRolesNotFoundDetail)
 		return
 	}
 
@@ -750,6 +799,68 @@ const (
 	workspaceSharingNotFoundSummary = "Workspace Sharing Unsupported"
 	workspaceSharingNotFoundDetail  = "Workspace sharing is not available on this Coder deployment. Remove the workspace_sharing attribute or upgrade the deployment."
 )
+
+const (
+	defaultOrgMemberRolesNotFoundSummary = "Default Org Member Roles Unsupported"
+	defaultOrgMemberRolesNotFoundDetail  = "Default org member roles are not available on this Coder deployment. Remove the default_org_member_roles attribute or upgrade the deployment."
+)
+
+// defaultOrgMemberRolesPtr converts the Terraform set into the pointer
+// used by UpdateOrganizationRequest. A null or unknown set returns nil,
+// which omits the field from the PATCH so the server preserves the
+// current value.
+func defaultOrgMemberRolesPtr(ctx context.Context, set types.Set, diags *diag.Diagnostics) *[]string {
+	if set.IsNull() || set.IsUnknown() {
+		return nil
+	}
+	roles := []string{}
+	diags.Append(set.ElementsAs(ctx, &roles, false)...)
+	if diags.HasError() {
+		return nil
+	}
+	return &roles
+}
+
+// defaultOrgMemberRolesValue converts the roles returned by the server
+// into a Terraform set. A nil slice means the deployment does not
+// return the field (it predates the feature) and maps to null.
+func defaultOrgMemberRolesValue(ctx context.Context, roles []string) (types.Set, diag.Diagnostics) {
+	if roles == nil {
+		return types.SetNull(types.StringType), nil
+	}
+	return types.SetValueFrom(ctx, types.StringType, roles)
+}
+
+func (r *OrganizationResource) patchDefaultOrgMemberRoles(
+	ctx context.Context,
+	orgID uuid.UUID,
+	rolesSet types.Set,
+) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	roles := defaultOrgMemberRolesPtr(ctx, rolesSet, &diags)
+	if diags.HasError() {
+		return diags
+	}
+
+	org, err := r.Client.UpdateOrganization(ctx, orgID.String(), codersdk.UpdateOrganizationRequest{
+		DefaultOrgMemberRoles: roles,
+	})
+	if err != nil {
+		// If the minimum-implicit-member experiment is not enabled, the
+		// endpoint returns a user-friendly 403 message that we show as is.
+		diags.AddError("Default Org Member Roles Update error", err.Error())
+		return diags
+	}
+	// An older deployment ignores the field entirely and returns no
+	// value for it.
+	if org.DefaultOrgMemberRoles == nil {
+		diags.AddError(defaultOrgMemberRolesNotFoundSummary, defaultOrgMemberRolesNotFoundDetail)
+		return diags
+	}
+
+	return diags
+}
 
 func workspaceSharingValueFromSettings(settings codersdk.WorkspaceSharingSettings) string {
 	if settings.SharingDisabled {
