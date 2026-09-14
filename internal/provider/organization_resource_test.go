@@ -166,7 +166,7 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 					cfg7.WorkspaceSharing = new("everyone")
 
 					cfg8 := cfg7
-					cfg8.DefaultOrgMemberRoles = ptr.Ref([]string{"organization-template-admin", "organization-workspace-access"})
+					cfg8.DefaultOrgMemberRoles = new([]string{"organization-template-admin", "organization-workspace-access"})
 
 					steps = append(steps,
 						// Disable workspace sharing for org
