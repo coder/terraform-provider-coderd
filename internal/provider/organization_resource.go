@@ -8,9 +8,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/coder/coder/v2/coderd/util/slice"
-	"github.com/coder/coder/v2/codersdk"
-	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -25,6 +22,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"github.com/coder/coder/v2/coderd/util/slice"
+	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/terraform-provider-coderd/internal/codersdkvalidator"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -151,11 +152,10 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 				},
 			},
 
-			"default_org_member_roles": schema.ListAttribute{
+			"default_org_member_roles": schema.SetAttribute{
 				ElementType: types.StringType,
 				MarkdownDescription: "Built-in organization role names that are unioned into every member's effective roles. " +
-					"Changes propagate to members on their next request. Setting any value other than the deployment defaults " +
-					"requires the `minimum-implicit-member` experiment to be enabled on the Coder Deployment.",
+					"Changes propagate to members on their next request.",
 				Optional: true,
 				Computed: true,
 			},
