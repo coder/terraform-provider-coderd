@@ -187,7 +187,7 @@ func runOrganizationResourceTest(t *testing.T, client *codersdk.Client, enableEx
 						resource.TestStep{
 							Config: cfg8.String(t),
 							ConfigStateChecks: []statecheck.StateCheck{
-								statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("default_org_member_roles"), knownvalue.ListExact([]knownvalue.Check{
+								statecheck.ExpectKnownValue("coderd_organization.test", tfjsonpath.New("default_org_member_roles"), knownvalue.SetExact([]knownvalue.Check{
 									knownvalue.StringExact("organization-template-admin"),
 									knownvalue.StringExact("organization-workspace-access"),
 								})),

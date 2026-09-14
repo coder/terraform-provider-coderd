@@ -46,7 +46,7 @@ type OrganizationResourceModel struct {
 	Icon             types.String `tfsdk:"icon"`
 	WorkspaceSharing types.String `tfsdk:"workspace_sharing"`
 
-	DefaultOrgMemberRoles types.List `tfsdk:"default_org_member_roles"`
+	DefaultOrgMemberRoles types.Set `tfsdk:"default_org_member_roles"`
 
 	OrgSyncIdpGroups types.Set    `tfsdk:"org_sync_idp_groups"`
 	GroupSync        types.Object `tfsdk:"group_sync"`
@@ -856,11 +856,11 @@ func isWorkspaceSharingExperimentOff(err error) bool {
 }
 
 // defaultOrgMemberRolesValueFromAPI converts the API's []string into a
-// types.List[string]. A nil slice from an older server is treated as an
-// empty list so the attribute always has a known value.
-func defaultOrgMemberRolesValueFromAPI(ctx context.Context, roles []string) (types.List, diag.Diagnostics) {
+// types.Set[string]. A nil slice from an older server is treated as an
+// empty set so the attribute always has a known value.
+func defaultOrgMemberRolesValueFromAPI(ctx context.Context, roles []string) (types.Set, diag.Diagnostics) {
 	if roles == nil {
 		roles = []string{}
 	}
-	return types.ListValueFrom(ctx, types.StringType, roles)
+	return types.SetValueFrom(ctx, types.StringType, roles)
 }
