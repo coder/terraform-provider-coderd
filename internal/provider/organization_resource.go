@@ -155,7 +155,7 @@ This resource is only compatible with Coder version [2.16.0](https://github.com/
 			"default_org_member_roles": schema.SetAttribute{
 				ElementType: types.StringType,
 				MarkdownDescription: "Built-in organization role names that are unioned into every member's effective roles. " +
-					"Changes propagate to members on their next request.",
+					"Changes propagate to members on their next request. Requires a Coder Deployment running v2.37.0 or later.",
 				Optional: true,
 				Computed: true,
 			},

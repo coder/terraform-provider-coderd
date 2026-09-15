@@ -54,7 +54,7 @@ resource "coderd_organization" "blueberry" {
 
 ### Optional
 
-- `default_org_member_roles` (Set of String) Built-in organization role names that are unioned into every member's effective roles. Changes propagate to members on their next request.
+- `default_org_member_roles` (Set of String) Built-in organization role names that are unioned into every member's effective roles. Changes propagate to members on their next request. Requires a Coder Deployment running v2.37.0 or later.
 - `description` (String)
 - `display_name` (String) Display name of the organization. Defaults to name.
 - `group_sync` (Block, Optional, Deprecated) Group sync settings to sync groups from an IdP.

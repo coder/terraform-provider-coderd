@@ -25,7 +25,7 @@ func TestAccOrganizationResource(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	client := integration.StartCoder(ctx, t, "organization_acc", integration.UseLicense, integration.CoderExperiments("workspace-sharing,minimum-implicit-member"))
+	client := integration.StartCoder(ctx, t, "organization_acc", integration.UseLicense, integration.CoderExperiments("workspace-sharing"))
 	_, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	runOrganizationResourceTest(t, client, true)
