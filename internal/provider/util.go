@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
@@ -84,6 +85,34 @@ func computeDirectoryHash(directory string) (string, error) {
 		hash.Write(data)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// computeFilesHash hashes a map of relative path to file content, as provided
+// by a template version's `files` attribute. Paths are sorted so the hash
+// doesn't depend on map iteration order, and each path is hashed alongside its
+// contents so that renaming a file produces a new hash.
+func computeFilesHash(files map[string]string) string {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	hash := sha256.New()
+	for _, path := range paths {
+		hash.Write([]byte(path))
+		hash.Write([]byte{0})
+		hash.Write([]byte(files[path]))
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// computeBytesHash hashes raw contents, as provided by a template version's
+// `archive_base64` attribute.
+func computeBytesHash(contents []byte) string {
+	sum := sha256.Sum256(contents)
+	return hex.EncodeToString(sum[:])
 }
 
 // memberDiff returns the members to add and remove from the group, given the
