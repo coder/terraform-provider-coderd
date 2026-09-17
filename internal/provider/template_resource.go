@@ -742,8 +742,6 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	}
 	data.reconcileVersionedMetadata(&authoritativeTemplate)
 
-	// Any hash left unknown at plan time (because its contents weren't known
-	// yet) has to be resolved before it's written to state.
 	resp.Diagnostics.Append(data.Versions.resolveContentHashes(ctx)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -1271,9 +1269,6 @@ const (
 const versionSourceAttrs = "`directory`, `files`, `archive_base64`, or `archive_file`"
 
 // versionSource reports which content attribute is set on a version.
-// `stringvalidator.ExactlyOneOf` enforces the same rule at validate time, but
-// it defers whenever one of them is unknown, so the invariant is checked here
-// too rather than silently picking one of the configured sources.
 func versionSource(version *TemplateVersion) (versionSourceKind, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	kind := versionSourceNone
@@ -1301,8 +1296,7 @@ func versionSource(version *TemplateVersion) (versionSourceKind, diag.Diagnostic
 
 // filesFromMap converts a version's `files` attribute into a map of relative
 // path to content. It returns a nil map, without diagnostics, when the map or
-// any of its elements is still unknown: the contents can neither be hashed nor
-// uploaded yet, and callers treat that as "not known".
+// any of its elements is still unknown.
 func filesFromMap(ctx context.Context, files types.Map) (map[string]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if files.IsNull() || files.IsUnknown() {
@@ -1327,10 +1321,7 @@ func filesFromMap(ctx context.Context, files types.Map) (map[string]string, diag
 }
 
 // filesHaveTerraform reports whether a `files` map contains a Terraform file at
-// the root of the template. The files are archived through
-// `provisionersdk.Tar`, which rejects a directory without one, but its error
-// refers to the temporary directory they're written to, so this is checked up
-// front instead.
+// the root of the template.
 func filesHaveTerraform(files map[string]string) bool {
 	for name := range files {
 		rel := filepath.Clean(filepath.FromSlash(name))
@@ -1344,8 +1335,7 @@ func filesHaveTerraform(files map[string]string) bool {
 	return false
 }
 
-// writeFiles materializes a `files` map into dir so that it can be archived and
-// have its variable files discovered exactly like a configured `directory`.
+// writeFiles materializes a `files` map into dir.
 func writeFiles(dir string, files map[string]string) error {
 	for name, content := range files {
 		rel := filepath.Clean(filepath.FromSlash(name))
@@ -1372,9 +1362,7 @@ var (
 
 // normalizeArchive sanity-checks raw archive contents and returns the bytes to
 // upload along with the content type to upload them as. An uncompressed tar, a
-// gzipped tar, or a zip archive is accepted: the Coder API takes tar and zip
-// directly, and gzip is decompressed here so that archives produced by e.g. the
-// `archive_file` data source can be used without a conversion step.
+// gzipped tar, or a zip archive is accepted; a gzipped tar is decompressed.
 func normalizeArchive(raw []byte) (string, []byte, error) {
 	switch {
 	case bytes.HasPrefix(raw, gzipMagic):
@@ -1417,9 +1405,8 @@ func validateTarArchive(payload []byte) error {
 	return err
 }
 
-// gunzipArchive decompresses a gzipped archive, refusing to buffer more than
-// the archive size limit so that a small, highly compressed archive can't be
-// expanded into an unbounded amount of memory.
+// gunzipArchive decompresses a gzipped archive, buffering at most the archive
+// size limit.
 func gunzipArchive(raw []byte) ([]byte, error) {
 	reader, err := gzip.NewReader(bytes.NewReader(raw))
 	if err != nil {
@@ -1439,8 +1426,7 @@ func gunzipArchive(raw []byte) ([]byte, error) {
 }
 
 // decodeArchive decodes and sanity-checks a version's `archive_base64`
-// attribute. It's called from the plan modifier as well as at apply time, so a
-// malformed archive fails the plan instead of a partially applied change.
+// attribute.
 func decodeArchive(archiveBase64 string) (string, []byte, error) {
 	raw, err := base64.StdEncoding.DecodeString(archiveBase64)
 	if err != nil {
@@ -1450,9 +1436,7 @@ func decodeArchive(archiveBase64 string) (string, []byte, error) {
 }
 
 // readArchiveFile reads and sanity-checks the archive a version's
-// `archive_file` attribute points at. Like `computeDirectoryHash`, it reads
-// from disk while planning, so the archive has to exist by then, and a missing
-// or malformed one fails the plan instead of a partially applied change.
+// `archive_file` attribute points at.
 func readArchiveFile(filename string) (string, []byte, error) {
 	raw, err := os.ReadFile(filename)
 	if err != nil {
@@ -1462,9 +1446,8 @@ func readArchiveFile(filename string) (string, []byte, error) {
 }
 
 // versionContentHash hashes a version's contents, from whichever content
-// attribute is set. The hash is what decides whether a new template version
-// needs to be created, so it returns an unknown string when the configured
-// source isn't known yet, which plans the version as new.
+// attribute is set. It returns an unknown string when the configured source
+// isn't known yet.
 func versionContentHash(ctx context.Context, version *TemplateVersion) (types.String, diag.Diagnostics) {
 	source, diags := versionSource(version)
 	if diags.HasError() {
@@ -1521,8 +1504,7 @@ func versionContentHash(ctx context.Context, version *TemplateVersion) (types.St
 }
 
 // resolveContentHashes fills in any version hash that was left unknown at plan
-// time, so that the hashes written to state (and to the private state that
-// matches versions across plans) are always known.
+// time.
 func (v Versions) resolveContentHashes(ctx context.Context) (diags diag.Diagnostics) {
 	for i := range v {
 		if !v[i].DirectoryHash.IsUnknown() {
@@ -1578,10 +1560,6 @@ func uploadVersionContents(ctx context.Context, client *codersdk.Client, version
 		if files == nil {
 			return uuid.Nil, nil, errors.New("the contents of `files` are not known")
 		}
-		// The files are written out and then archived like any other directory,
-		// so that a version built from `files` behaves identically to the same
-		// contents on disk (hidden file handling, variable file discovery, and
-		// the archive size limit all included).
 		dir, err := os.MkdirTemp("", "coderd-template-version-")
 		if err != nil {
 			return uuid.Nil, nil, fmt.Errorf("failed to create temporary directory for `files`: %s", err)
@@ -1616,10 +1594,8 @@ func uploadVersionContents(ctx context.Context, client *codersdk.Client, version
 	}
 }
 
-// uploadTemplateArchive uploads an already-built archive as-is, and returns the
-// ID of the uploaded file. It reports no variable values: they can't be
-// discovered without extracting the archive, so `tf_vars` is the only way to
-// set them for the archive sources.
+// uploadTemplateArchive uploads an already-built archive and returns the ID of
+// the uploaded file.
 func uploadTemplateArchive(ctx context.Context, client *codersdk.Client, contentType string, archive []byte) (uuid.UUID, error) {
 	tflog.Info(ctx, "uploading archive")
 	uploadResp, err := client.Upload(ctx, contentType, bytes.NewReader(archive))
