@@ -1,21 +1,28 @@
 package provider
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"text/template"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/config"
@@ -2496,10 +2503,14 @@ func TestReconcileVersionIDs(t *testing.T) {
 func versionObjectType() types.ObjectType {
 	return types.ObjectType{
 		AttrTypes: map[string]attr.Type{
-			"id":             UUIDType,
-			"name":           types.StringType,
-			"message":        types.StringType,
-			"directory":      types.StringType,
+			"id":        UUIDType,
+			"name":      types.StringType,
+			"message":   types.StringType,
+			"directory": types.StringType,
+			"files": types.MapType{
+				ElemType: types.StringType,
+			},
+			"archive_base64": types.StringType,
 			"directory_hash": types.StringType,
 			"active":         types.BoolType,
 			"tf_vars": types.SetType{
@@ -2528,6 +2539,8 @@ func TestValidateListUnknownTFVars(t *testing.T) {
 		"name":             types.StringValue("main"),
 		"message":          types.StringValue(""),
 		"directory":        types.StringValue("./template"),
+		"files":            types.MapNull(types.StringType),
+		"archive_base64":   types.StringNull(),
 		"directory_hash":   types.StringUnknown(),
 		"active":           types.BoolValue(true),
 		"tf_vars":          types.SetUnknown(variableSetElemType),
@@ -2566,6 +2579,8 @@ func TestUnknownTFVarsDeserialization(t *testing.T) {
 			"name":             types.StringValue("stable-1"),
 			"message":          types.StringValue(""),
 			"directory":        types.StringValue("/tmp/test"),
+			"files":            types.MapNull(types.StringType),
+			"archive_base64":   types.StringNull(),
 			"directory_hash":   types.StringUnknown(),
 			"active":           types.BoolValue(true),
 			"tf_vars":          tfVars,
@@ -2642,4 +2657,556 @@ func TestUnknownTFVarsDeserialization(t *testing.T) {
 		require.False(t, d.HasError())
 		require.Empty(t, vars)
 	})
+}
+
+// mustTarBase64 builds a base64-encoded tar archive from a map of file path to
+// content, for use as a version's `archive_base64`.
+func mustTarBase64(t *testing.T, files map[string]string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     path,
+			Typeflag: tar.TypeReg,
+			Mode:     0o644,
+			Size:     int64(len(files[path])),
+		}))
+		_, err := tw.Write([]byte(files[path]))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// mustFilesMap converts a map of file path to content into the types.Map used
+// by a version's `files` attribute.
+func mustFilesMap(t *testing.T, files map[string]string) types.Map {
+	t.Helper()
+	m, diags := types.MapValueFrom(context.Background(), types.StringType, files)
+	require.False(t, diags.HasError(), "building files map: %v", diags.Errors())
+	return m
+}
+
+func TestComputeFilesHash(t *testing.T) {
+	t.Parallel()
+
+	base := computeFilesHash(map[string]string{
+		"main.tf":          "resource \"null_resource\" \"a\" {}",
+		"build/Dockerfile": "FROM ubuntu",
+	})
+
+	t.Run("StableAcrossMaps", func(t *testing.T) {
+		t.Parallel()
+		// A different map with the same entries must hash identically,
+		// otherwise map iteration order would create a new version on
+		// every plan.
+		other := computeFilesHash(map[string]string{
+			"build/Dockerfile": "FROM ubuntu",
+			"main.tf":          "resource \"null_resource\" \"a\" {}",
+		})
+		require.Equal(t, base, other)
+	})
+
+	t.Run("ContentChanges", func(t *testing.T) {
+		t.Parallel()
+		require.NotEqual(t, base, computeFilesHash(map[string]string{
+			"main.tf":          "resource \"null_resource\" \"a\" {}",
+			"build/Dockerfile": "FROM debian",
+		}))
+	})
+
+	t.Run("RenameChanges", func(t *testing.T) {
+		t.Parallel()
+		// Paths are hashed alongside contents, so moving a file is a change
+		// even though the bytes are identical.
+		require.NotEqual(t, base, computeFilesHash(map[string]string{
+			"main.tf":             "resource \"null_resource\" \"a\" {}",
+			"build/Containerfile": "FROM ubuntu",
+		}))
+	})
+
+	t.Run("ConcatenationIsUnambiguous", func(t *testing.T) {
+		t.Parallel()
+		require.NotEqual(t,
+			computeFilesHash(map[string]string{"a": "bc"}),
+			computeFilesHash(map[string]string{"ab": "c"}),
+		)
+	})
+}
+
+func TestVersionContentHash(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte("resource \"null_resource\" \"a\" {}"), 0o644))
+
+	t.Run("Directory", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringValue(dir),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		expected, err := computeDirectoryHash(dir)
+		require.NoError(t, err)
+		require.Equal(t, expected, hash.ValueString())
+	})
+
+	t.Run("Files", func(t *testing.T) {
+		t.Parallel()
+		files := map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         mustFilesMap(t, files),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.Equal(t, computeFilesHash(files), hash.ValueString())
+	})
+
+	t.Run("Archive", func(t *testing.T) {
+		t.Parallel()
+		archive := mustTarBase64(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringValue(archive),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		decoded, err := base64.StdEncoding.DecodeString(archive)
+		require.NoError(t, err)
+		require.Equal(t, computeBytesHash(decoded), hash.ValueString())
+	})
+
+	// A source that isn't known yet must plan as a new version rather than
+	// failing, since the contents can come from another resource.
+	t.Run("UnknownFiles", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapUnknown(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	t.Run("UnknownFileContent", func(t *testing.T) {
+		t.Parallel()
+		files, diags := types.MapValue(types.StringType, map[string]attr.Value{
+			"main.tf": types.StringUnknown(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         files,
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	t.Run("UnknownDirectory", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringUnknown(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	t.Run("NoSource", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	// `stringvalidator.ExactlyOneOf` defers whenever one of the three is
+	// unknown, so this has to be caught here as well.
+	t.Run("MultipleSources", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringValue(dir),
+			Files:         mustFilesMap(t, map[string]string{"main.tf": ""}),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	t.Run("NoTerraformFiles", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         mustFilesMap(t, map[string]string{"nested/main.tf": ""}),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	t.Run("InvalidArchive", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringValue("not base64!"),
+		})
+		require.True(t, diags.HasError())
+	})
+}
+
+func TestDecodeArchive(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Tar", func(t *testing.T) {
+		t.Parallel()
+		archive, err := decodeArchive(mustTarBase64(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}))
+		require.NoError(t, err)
+		require.NotEmpty(t, archive)
+	})
+
+	t.Run("NotBase64", func(t *testing.T) {
+		t.Parallel()
+		_, err := decodeArchive("not base64!")
+		require.ErrorContains(t, err, "not valid base64")
+	})
+
+	t.Run("NotATar", func(t *testing.T) {
+		t.Parallel()
+		_, err := decodeArchive(base64.StdEncoding.EncodeToString([]byte("resource \"null_resource\" \"a\" {}")))
+		require.ErrorContains(t, err, "uncompressed tar archive")
+	})
+
+	t.Run("TooBig", func(t *testing.T) {
+		t.Parallel()
+		_, err := decodeArchive(mustTarBase64(t, map[string]string{
+			"main.tf": strings.Repeat("a", provisionersdk.TemplateArchiveLimit),
+		}))
+		require.ErrorContains(t, err, "too big")
+	})
+}
+
+func TestWriteFiles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NestedPaths", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		require.NoError(t, writeFiles(dir, map[string]string{
+			"main.tf":          "resource \"null_resource\" \"a\" {}",
+			"build/Dockerfile": "FROM ubuntu",
+		}))
+		content, err := os.ReadFile(filepath.Join(dir, "build", "Dockerfile"))
+		require.NoError(t, err)
+		require.Equal(t, "FROM ubuntu", string(content))
+	})
+
+	t.Run("RejectsEscapingPaths", func(t *testing.T) {
+		t.Parallel()
+		for _, path := range []string{"../escape.tf", "/etc/passwd", "nested/../../escape.tf", ".."} {
+			require.ErrorContains(t, writeFiles(t.TempDir(), map[string]string{path: ""}), "must not escape")
+		}
+	})
+}
+
+func TestAccTemplateResourceVersionSourceValidation(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = "https://example.com"
+	token = "abcd"
+}
+
+resource "coderd_template" "test" {
+	name = "example-template"
+	versions = [
+		{
+			active = true
+			%s
+		}
+	]
+}`
+
+	// These all fail during validation, before the provider is configured, so
+	// no Coder deployment is needed.
+	for name, source := range map[string]string{
+		"NoSource":            ``,
+		"DirectoryAndFiles":   "directory = \"./example-template\"\n\t\t\tfiles = { \"main.tf\" = \"\" }",
+		"DirectoryAndArchive": "directory = \"./example-template\"\n\t\t\tarchive_base64 = \"\"",
+		"FilesAndArchive":     "files = { \"main.tf\" = \"\" }\n\t\t\tarchive_base64 = \"\"",
+		"AllThree":            "directory = \"./example-template\"\n\t\t\tfiles = { \"main.tf\" = \"\" }\n\t\t\tarchive_base64 = \"\"",
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource.Test(t, resource.TestCase{
+				PreCheck:                 func() { testAccPreCheck(t) },
+				IsUnitTest:               true,
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      fmt.Sprintf(cfg, source),
+						ExpectError: regexp.MustCompile("Invalid Attribute Combination"),
+					},
+				},
+			})
+		})
+	}
+}
+
+func TestAccTemplateResourceFiles(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+resource "coderd_template" "test" {
+	name = "files-template"
+	versions = [
+		{
+			name   = %q
+			active = true
+			files = {
+				"main.tf"           = %q
+				"terraform.tfvars"  = "name = \"world\""
+			}
+		}
+	]
+}`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_files_acc")
+
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// The contents are provided inline, and `terraform.tfvars` is read
+			// as a variable value just like it is for a `directory`.
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "one", string(mainTF)),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.id"),
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.directory_hash"),
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.name", "one"),
+				),
+			},
+			// Changing the contents creates a new version.
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "two", string(mainTF)+"\n# a change\n"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.name", "two"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccTemplateResourceArchive(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+resource "coderd_template" "test" {
+	name = "archive-template"
+	versions = [
+		{
+			active         = true
+			archive_base64 = %q
+			tf_vars = [
+				{
+					name  = "name"
+					value = "world"
+				}
+			]
+		}
+	]
+}`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_archive_acc")
+
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+	archive := mustTarBase64(t, map[string]string{"main.tf": string(mainTF)})
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), archive),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.id"),
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.directory_hash"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccTemplateResourceVersionSourcePlan checks that a version whose contents
+// come from `files` or `archive_base64` plans without error, end to end. It
+// only plans, so a mock server is enough. The hash the plan modifier produces
+// is asserted in TestVersionsPlanModifierContentHash.
+func TestAccTemplateResourceVersionSourcePlan(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = "abcd"
+}
+
+resource "coderd_template" "test" {
+	name = "example-template"
+	versions = [
+		{
+			active = true
+			%s
+		}
+	]
+}`
+
+	for name, source := range map[string]string{
+		"Files":   "files = { \"main.tf\" = \"resource \\\"null_resource\\\" \\\"a\\\" {}\" }",
+		"Archive": fmt.Sprintf("archive_base64 = %q", mustTarBase64(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})),
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource.Test(t, resource.TestCase{
+				PreCheck:                 func() { testAccPreCheck(t) },
+				IsUnitTest:               true,
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:   fmt.Sprintf(cfg, srv.URL, source),
+						PlanOnly: true,
+						// The resource doesn't exist yet, so the plan to
+						// create it is non-empty by definition.
+						ExpectNonEmptyPlan: true,
+					},
+				},
+			})
+		})
+	}
+}
+
+// TestVersionsPlanModifierContentHash checks that the plan modifier hashes a
+// version's contents regardless of which source attribute they come from,
+// since an unknown or incorrect hash would create a new template version on
+// every plan.
+func TestVersionsPlanModifierContentHash(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	objType := versionObjectType()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte("resource \"null_resource\" \"a\" {}"), 0o644))
+	dirHash, err := computeDirectoryHash(dir)
+	require.NoError(t, err)
+
+	files := map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}
+	archive := mustTarBase64(t, files)
+	decodedArchive, err := base64.StdEncoding.DecodeString(archive)
+	require.NoError(t, err)
+
+	for name, tc := range map[string]struct {
+		directory     attr.Value
+		files         attr.Value
+		archiveBase64 attr.Value
+		expected      string
+	}{
+		"Directory": {
+			directory:     types.StringValue(dir),
+			files:         types.MapNull(types.StringType),
+			archiveBase64: types.StringNull(),
+			expected:      dirHash,
+		},
+		"Files": {
+			directory:     types.StringNull(),
+			files:         mustFilesMap(t, files),
+			archiveBase64: types.StringNull(),
+			expected:      computeFilesHash(files),
+		},
+		"Archive": {
+			directory:     types.StringNull(),
+			files:         types.MapNull(types.StringType),
+			archiveBase64: types.StringValue(archive),
+			expected:      computeBytesHash(decodedArchive),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			versionVal, diags := types.ObjectValue(objType.AttrTypes, map[string]attr.Value{
+				"id":               NewUUIDUnknown(),
+				"name":             types.StringValue("main"),
+				"message":          types.StringValue(""),
+				"directory":        tc.directory,
+				"files":            tc.files,
+				"archive_base64":   tc.archiveBase64,
+				"directory_hash":   types.StringUnknown(),
+				"active":           types.BoolValue(true),
+				"tf_vars":          types.SetNull(variableSetElemType),
+				"provisioner_tags": types.SetNull(variableSetElemType),
+			})
+			require.False(t, diags.HasError(), "building version object: %v", diags.Errors())
+
+			listVal, diags := types.ListValue(objType, []attr.Value{versionVal})
+			require.False(t, diags.HasError(), "building list: %v", diags.Errors())
+
+			resp := &planmodifier.ListResponse{PlanValue: listVal}
+			NewVersionsPlanModifier().PlanModifyList(ctx, planmodifier.ListRequest{
+				ConfigValue: listVal,
+				PlanValue:   listVal,
+			}, resp)
+			require.False(t, resp.Diagnostics.HasError(), "PlanModifyList: %v", resp.Diagnostics.Errors())
+
+			var planned []TemplateVersion
+			diags = resp.PlanValue.ElementsAs(ctx, &planned, false)
+			require.False(t, diags.HasError(), "decoding planned versions: %v", diags.Errors())
+			require.Len(t, planned, 1)
+			require.Equal(t, tc.expected, planned[0].DirectoryHash.ValueString())
+			// There's no prior version with this hash, so a new one is created.
+			require.True(t, planned[0].ID.IsUnknown())
+		})
+	}
 }
