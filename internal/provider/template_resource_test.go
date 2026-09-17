@@ -2684,6 +2684,14 @@ func mustTarBase64(t *testing.T, files map[string]string) string {
 	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
+// escapeTFInterpolation escapes Terraform's interpolation and directive
+// markers, so that file contents embedded in a test configuration reach the
+// provider verbatim instead of being evaluated by Terraform.
+func escapeTFInterpolation(contents string) string {
+	contents = strings.ReplaceAll(contents, "${", "$${")
+	return strings.ReplaceAll(contents, "%{", "%%{")
+}
+
 // mustFilesMap converts a map of file path to content into the types.Map used
 // by a version's `files` attribute.
 func mustFilesMap(t *testing.T, files map[string]string) types.Map {
@@ -3001,6 +3009,10 @@ resource "coderd_template" "test" {
 	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
 	require.NoError(t, err)
 
+	// The contents are interpolated into the test configuration as a string, so
+	// the template's own interpolations have to be escaped to survive it.
+	escapedMainTF := escapeTFInterpolation(string(mainTF))
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		IsUnitTest:               true,
@@ -3009,7 +3021,7 @@ resource "coderd_template" "test" {
 			// The contents are provided inline, and `terraform.tfvars` is read
 			// as a variable value just like it is for a `directory`.
 			{
-				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "one", string(mainTF)),
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "one", escapedMainTF),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.id"),
 					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.directory_hash"),
@@ -3018,7 +3030,7 @@ resource "coderd_template" "test" {
 			},
 			// Changing the contents creates a new version.
 			{
-				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "two", string(mainTF)+"\n# a change\n"),
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "two", escapedMainTF+"\n# a change\n"),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.name", "two"),
 				),
@@ -3107,9 +3119,15 @@ resource "coderd_template" "test" {
 	]
 }`
 
+	// The example template is used verbatim, since its interpolations are
+	// exactly what a `files` entry has to carry through to the provider
+	// untouched.
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+
 	for name, source := range map[string]string{
-		"Files":   "files = { \"main.tf\" = \"resource \\\"null_resource\\\" \\\"a\\\" {}\" }",
-		"Archive": fmt.Sprintf("archive_base64 = %q", mustTarBase64(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})),
+		"Files":   fmt.Sprintf("files = { \"main.tf\" = %q }", escapeTFInterpolation(string(mainTF))),
+		"Archive": fmt.Sprintf("archive_base64 = %q", mustTarBase64(t, map[string]string{"main.tf": string(mainTF)})),
 	} {
 		t.Run(name, func(t *testing.T) {
 			resource.Test(t, resource.TestCase{
