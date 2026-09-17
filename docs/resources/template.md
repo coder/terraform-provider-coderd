@@ -56,7 +56,8 @@ resource "coderd_template" "ubuntu-main" {
 
 // Template contents don't have to live in a directory on disk: a version can be
 // built from rendered file contents, or from a prebuilt archive. Exactly one of
-// `directory`, `files`, and `archive_base64` may be set on a version.
+// `directory`, `files`, `archive_base64`, and `archive_file` may be set on a
+// version.
 resource "coderd_template" "ubuntu-rendered" {
   name        = "ubuntu-rendered"
   description = "The main template, rendered for this deployment."
@@ -71,16 +72,33 @@ resource "coderd_template" "ubuntu-rendered" {
     },
     {
       name = "prebuilt-${var.COMMIT_SHA}"
-      // A base64-encoded, uncompressed tar archive, such as one fetched from an
-      // artifact store. Variable values aren't discovered from an archive, so
+      // A base64-encoded tar, tar.gz, or zip archive, such as one fetched from
+      // an artifact store. Variable values aren't discovered from an archive, so
       // they're set with `tf_vars`.
       archive_base64 = filebase64("${path.module}/tpl/prebuilt.tar")
       tf_vars = [{
         name  = "image"
         value = "ubuntu:24.04"
       }]
+    },
+    {
+      name = "packaged-${var.COMMIT_SHA}"
+      // The same archive, referenced by path instead of being read into the
+      // configuration. The file has to exist at plan time, so a data source is
+      // a better fit than a resource that writes it during apply.
+      archive_file = data.archive_file.template.output_path
+      tf_vars = [{
+        name  = "image"
+        value = "ubuntu:24.04"
+      }]
     }
   ]
+}
+
+data "archive_file" "template" {
+  type        = "zip"
+  source_dir  = "${path.module}/stable-template"
+  output_path = "${path.module}/build/template.zip"
 }
 ```
 
@@ -162,9 +180,10 @@ Optional:
 Optional:
 
 - `active` (Boolean) Whether this version is the active version of the template. Only one version can be active at a time.
-- `archive_base64` (String) A base64-encoded, uncompressed tar archive of the template version contents, uploaded as-is. Changes in the archive will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, or `archive_base64` must be set.
-- `directory` (String) A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Exactly one of `directory`, `files`, or `archive_base64` must be set.
-- `files` (Map of String) The contents of the template version, as a map of file path (relative to the root of the template) to file content. Paths must be relative and must not escape the root of the template, and at least one `.tf` or `.tf.json` file must be present at the root. Changes in the contents will trigger the creation of a new template version. The files are archived exactly as if they were read from a `directory`, meaning hidden files are excluded, and `terraform.tfvars`/`*.auto.tfvars` entries are read as variable values instead of being uploaded. Exactly one of `directory`, `files`, or `archive_base64` must be set.
+- `archive_base64` (String) A base64-encoded archive of the template version contents, uploaded as-is. The archive must be an uncompressed tar, a gzipped tar, or a zip archive. Changes in the archive will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.
+- `archive_file` (String) A path to an archive file containing the template version contents, uploaded as-is. The archive must be an uncompressed tar, a gzipped tar, or a zip archive, such as the one produced by the `archive_file` data source. The file is read while planning, so it must already exist at plan time, and changes to its contents will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.
+- `directory` (String) A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.
+- `files` (Map of String) The contents of the template version, as a map of file path (relative to the root of the template) to file content. Paths must be relative and must not escape the root of the template, and at least one `.tf` or `.tf.json` file must be present at the root. Changes in the contents will trigger the creation of a new template version. The files are archived exactly as if they were read from a `directory`, meaning hidden files are excluded, and `terraform.tfvars`/`*.auto.tfvars` entries are read as variable values instead of being uploaded. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.
 - `message` (String) A message describing the changes in this version of the template. Messages longer than 72 characters will be truncated.
 - `name` (String) The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the version contents, or the `tf_vars` attribute are updated.
 - `provisioner_tags` (Attributes Set) Provisioner tags for the template version. (see [below for nested schema](#nestedatt--versions--provisioner_tags))
