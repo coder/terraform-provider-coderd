@@ -109,7 +109,7 @@ func computeFilesHash(files map[string]string) string {
 }
 
 // computeBytesHash hashes raw contents, as provided by a template version's
-// `archive_base64` attribute.
+// `archive_base64` or `archive_file` attribute.
 func computeBytesHash(contents []byte) string {
 	sum := sha256.Sum256(contents)
 	return hex.EncodeToString(sum[:])

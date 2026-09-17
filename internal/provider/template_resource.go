@@ -2,8 +2,10 @@ package provider
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -174,6 +176,7 @@ type TemplateVersion struct {
 	Directory          types.String `tfsdk:"directory"`
 	Files              types.Map    `tfsdk:"files"`
 	ArchiveBase64      types.String `tfsdk:"archive_base64"`
+	ArchiveFile        types.String `tfsdk:"archive_file"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
 	TerraformVariables types.Set    `tfsdk:"tf_vars"`
@@ -522,23 +525,28 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Default:             stringdefault.StaticString(""),
 						},
 						"directory": schema.StringAttribute{
-							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Exactly one of `directory`, `files`, or `archive_base64` must be set.",
+							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
 							Optional:            true,
 							Validators: []validator.String{
 								stringvalidator.ExactlyOneOf(
 									path.MatchRelative().AtParent().AtName("directory"),
 									path.MatchRelative().AtParent().AtName("files"),
 									path.MatchRelative().AtParent().AtName("archive_base64"),
+									path.MatchRelative().AtParent().AtName("archive_file"),
 								),
 							},
 						},
 						"files": schema.MapAttribute{
-							MarkdownDescription: "The contents of the template version, as a map of file path (relative to the root of the template) to file content. Paths must be relative and must not escape the root of the template, and at least one `.tf` or `.tf.json` file must be present at the root. Changes in the contents will trigger the creation of a new template version. The files are archived exactly as if they were read from a `directory`, meaning hidden files are excluded, and `terraform.tfvars`/`*.auto.tfvars` entries are read as variable values instead of being uploaded. Exactly one of `directory`, `files`, or `archive_base64` must be set.",
+							MarkdownDescription: "The contents of the template version, as a map of file path (relative to the root of the template) to file content. Paths must be relative and must not escape the root of the template, and at least one `.tf` or `.tf.json` file must be present at the root. Changes in the contents will trigger the creation of a new template version. The files are archived exactly as if they were read from a `directory`, meaning hidden files are excluded, and `terraform.tfvars`/`*.auto.tfvars` entries are read as variable values instead of being uploaded. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
 							Optional:            true,
 							ElementType:         types.StringType,
 						},
 						"archive_base64": schema.StringAttribute{
-							MarkdownDescription: "A base64-encoded, uncompressed tar archive of the template version contents, uploaded as-is. Changes in the archive will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, or `archive_base64` must be set.",
+							MarkdownDescription: "A base64-encoded archive of the template version contents, uploaded as-is. The archive must be an uncompressed tar, a gzipped tar, or a zip archive. Changes in the archive will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
+							Optional:            true,
+						},
+						"archive_file": schema.StringAttribute{
+							MarkdownDescription: "A path to an archive file containing the template version contents, uploaded as-is. The archive must be an uncompressed tar, a gzipped tar, or a zip archive, such as the one produced by the `archive_file` data source. The file is read while planning, so it must already exist at plan time, and changes to its contents will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
 							Optional:            true,
 						},
 						"directory_hash": schema.StringAttribute{
@@ -1255,12 +1263,17 @@ const (
 	versionSourceDirectory
 	versionSourceFiles
 	versionSourceArchive
+	versionSourceArchiveFile
 )
+
+// versionSourceAttrs lists the mutually exclusive content attributes, for use
+// in diagnostics.
+const versionSourceAttrs = "`directory`, `files`, `archive_base64`, or `archive_file`"
 
 // versionSource reports which content attribute is set on a version.
 // `stringvalidator.ExactlyOneOf` enforces the same rule at validate time, but
-// it defers whenever one of the three is unknown, so the invariant is checked
-// here too rather than silently picking one of the configured sources.
+// it defers whenever one of them is unknown, so the invariant is checked here
+// too rather than silently picking one of the configured sources.
 func versionSource(version *TemplateVersion) (versionSourceKind, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	kind := versionSourceNone
@@ -1274,11 +1287,14 @@ func versionSource(version *TemplateVersion) (versionSourceKind, diag.Diagnostic
 	if !version.ArchiveBase64.IsNull() {
 		kind, count = versionSourceArchive, count+1
 	}
+	if !version.ArchiveFile.IsNull() {
+		kind, count = versionSourceArchiveFile, count+1
+	}
 	switch {
 	case count == 0:
-		diags.AddError("Client Error", "A template version must set exactly one of `directory`, `files`, or `archive_base64`.")
+		diags.AddError("Client Error", "A template version must set exactly one of "+versionSourceAttrs+".")
 	case count > 1:
-		diags.AddError("Client Error", "A template version can only set one of `directory`, `files`, or `archive_base64`.")
+		diags.AddError("Client Error", "A template version can only set one of "+versionSourceAttrs+".")
 	}
 	return kind, diags
 }
@@ -1347,28 +1363,108 @@ func writeFiles(dir string, files map[string]string) error {
 	return nil
 }
 
+// Magic bytes identifying the archive formats accepted by `archive_base64` and
+// `archive_file`.
+var (
+	gzipMagic = []byte{0x1f, 0x8b}
+	zipMagic  = []byte("PK\x03\x04")
+)
+
+// normalizeArchive sanity-checks raw archive contents and returns the bytes to
+// upload along with the content type to upload them as. An uncompressed tar, a
+// gzipped tar, or a zip archive is accepted: the Coder API takes tar and zip
+// directly, and gzip is decompressed here so that archives produced by e.g. the
+// `archive_file` data source can be used without a conversion step.
+func normalizeArchive(raw []byte) (string, []byte, error) {
+	switch {
+	case bytes.HasPrefix(raw, gzipMagic):
+		payload, err := gunzipArchive(raw)
+		if err != nil {
+			return "", nil, err
+		}
+		if err := validateTarArchive(payload); err != nil {
+			return "", nil, fmt.Errorf("the gzipped archive does not contain a tar archive: %w", err)
+		}
+		return codersdk.ContentTypeTar, payload, nil
+	case bytes.HasPrefix(raw, zipMagic):
+		if err := checkArchiveSize(len(raw)); err != nil {
+			return "", nil, err
+		}
+		if _, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw))); err != nil {
+			return "", nil, fmt.Errorf("the archive is not a readable zip archive: %w", err)
+		}
+		return codersdk.ContentTypeZip, raw, nil
+	default:
+		if err := checkArchiveSize(len(raw)); err != nil {
+			return "", nil, err
+		}
+		if err := validateTarArchive(raw); err != nil {
+			return "", nil, fmt.Errorf("the archive must be an uncompressed tar, a gzipped tar, or a zip archive: %w", err)
+		}
+		return codersdk.ContentTypeTar, raw, nil
+	}
+}
+
+func checkArchiveSize(size int) error {
+	if int64(size) >= provisionersdk.TemplateArchiveLimit {
+		return fmt.Errorf("archive too big. Must be < %d bytes", provisionersdk.TemplateArchiveLimit)
+	}
+	return nil
+}
+
+func validateTarArchive(payload []byte) error {
+	_, err := tar.NewReader(bytes.NewReader(payload)).Next()
+	return err
+}
+
+// gunzipArchive decompresses a gzipped archive, refusing to buffer more than
+// the archive size limit so that a small, highly compressed archive can't be
+// expanded into an unbounded amount of memory.
+func gunzipArchive(raw []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("the archive is not a readable gzip archive: %w", err)
+	}
+	defer func() {
+		_ = reader.Close()
+	}()
+	var buf bytes.Buffer
+	if _, err := io.CopyN(&buf, reader, provisionersdk.TemplateArchiveLimit); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("failed to decompress the archive: %w", err)
+	}
+	if err := checkArchiveSize(buf.Len()); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // decodeArchive decodes and sanity-checks a version's `archive_base64`
 // attribute. It's called from the plan modifier as well as at apply time, so a
 // malformed archive fails the plan instead of a partially applied change.
-func decodeArchive(archiveBase64 string) ([]byte, error) {
-	archive, err := base64.StdEncoding.DecodeString(archiveBase64)
+func decodeArchive(archiveBase64 string) (string, []byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(archiveBase64)
 	if err != nil {
-		return nil, fmt.Errorf("`archive_base64` is not valid base64: %w", err)
+		return "", nil, fmt.Errorf("`archive_base64` is not valid base64: %w", err)
 	}
-	if int64(len(archive)) >= provisionersdk.TemplateArchiveLimit {
-		return nil, fmt.Errorf("archive too big. Must be < %d bytes", provisionersdk.TemplateArchiveLimit)
-	}
-	if _, err := tar.NewReader(bytes.NewReader(archive)).Next(); err != nil {
-		return nil, fmt.Errorf("`archive_base64` must contain an uncompressed tar archive: %w", err)
-	}
-	return archive, nil
+	return normalizeArchive(raw)
 }
 
-// versionContentHash hashes a version's contents, from whichever of
-// `directory`, `files`, or `archive_base64` is set. The hash is what decides
-// whether a new template version needs to be created, so it returns an unknown
-// string when the configured source isn't known yet, which plans the version as
-// new.
+// readArchiveFile reads and sanity-checks the archive a version's
+// `archive_file` attribute points at. Like `computeDirectoryHash`, it reads
+// from disk while planning, so the archive has to exist by then, and a missing
+// or malformed one fails the plan instead of a partially applied change.
+func readArchiveFile(filename string) (string, []byte, error) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read `archive_file`: %w", err)
+	}
+	return normalizeArchive(raw)
+}
+
+// versionContentHash hashes a version's contents, from whichever content
+// attribute is set. The hash is what decides whether a new template version
+// needs to be created, so it returns an unknown string when the configured
+// source isn't known yet, which plans the version as new.
 func versionContentHash(ctx context.Context, version *TemplateVersion) (types.String, diag.Diagnostics) {
 	source, diags := versionSource(version)
 	if diags.HasError() {
@@ -1403,7 +1499,17 @@ func versionContentHash(ctx context.Context, version *TemplateVersion) (types.St
 		if version.ArchiveBase64.IsUnknown() {
 			return types.StringUnknown(), diags
 		}
-		archive, err := decodeArchive(version.ArchiveBase64.ValueString())
+		_, archive, err := decodeArchive(version.ArchiveBase64.ValueString())
+		if err != nil {
+			diags.AddError("Client Error", fmt.Sprintf("Failed to read template version archive: %s", err))
+			return types.StringNull(), diags
+		}
+		return types.StringValue(computeBytesHash(archive)), diags
+	case versionSourceArchiveFile:
+		if version.ArchiveFile.IsUnknown() {
+			return types.StringUnknown(), diags
+		}
+		_, archive, err := readArchiveFile(version.ArchiveFile.ValueString())
 		if err != nil {
 			diags.AddError("Client Error", fmt.Sprintf("Failed to read template version archive: %s", err))
 			return types.StringNull(), diags
@@ -1454,9 +1560,8 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 }
 
 // uploadVersionContents uploads the contents of a template version from
-// whichever of `directory`, `files`, or `archive_base64` is set, and returns
-// the ID of the uploaded file along with any variable values discovered
-// alongside the contents.
+// whichever content attribute is set, and returns the ID of the uploaded file
+// along with any variable values discovered alongside the contents.
 func uploadVersionContents(ctx context.Context, client *codersdk.Client, version *TemplateVersion) (uuid.UUID, []codersdk.VariableValue, error) {
 	source, diags := versionSource(version)
 	if diags.HasError() {
@@ -1493,22 +1598,33 @@ func uploadVersionContents(ctx context.Context, client *codersdk.Client, version
 		}
 		return uploadTemplateDirectory(ctx, client, dir)
 	case versionSourceArchive:
-		archive, err := decodeArchive(version.ArchiveBase64.ValueString())
+		contentType, archive, err := decodeArchive(version.ArchiveBase64.ValueString())
 		if err != nil {
 			return uuid.Nil, nil, fmt.Errorf("failed to read template version archive: %s", err)
 		}
-		tflog.Info(ctx, "uploading archive")
-		uploadResp, err := client.Upload(ctx, codersdk.ContentTypeTar, bytes.NewReader(archive))
+		return uploadTemplateArchive(ctx, client, contentType, archive)
+	case versionSourceArchiveFile:
+		contentType, archive, err := readArchiveFile(version.ArchiveFile.ValueString())
 		if err != nil {
-			return uuid.Nil, nil, fmt.Errorf("failed to upload archive: %s", err)
+			return uuid.Nil, nil, fmt.Errorf("failed to read template version archive: %s", err)
 		}
-		tflog.Info(ctx, "successfully uploaded archive")
-		// Variable values can't be discovered without extracting the archive,
-		// so `tf_vars` is the only way to set them for this source.
-		return uploadResp.ID, nil, nil
+		return uploadTemplateArchive(ctx, client, contentType, archive)
 	default:
-		return uuid.Nil, nil, errors.New("a template version must set exactly one of `directory`, `files`, or `archive_base64`")
+		return uuid.Nil, nil, errors.New("a template version must set exactly one of " + versionSourceAttrs)
 	}
+}
+
+// uploadTemplateArchive uploads an already-built archive as-is. Variable values
+// can't be discovered without extracting it, so `tf_vars` is the only way to
+// set them for the archive sources.
+func uploadTemplateArchive(ctx context.Context, client *codersdk.Client, contentType string, archive []byte) (uuid.UUID, []codersdk.VariableValue, error) {
+	tflog.Info(ctx, "uploading archive")
+	uploadResp, err := client.Upload(ctx, contentType, bytes.NewReader(archive))
+	if err != nil {
+		return uuid.Nil, nil, fmt.Errorf("failed to upload archive: %s", err)
+	}
+	tflog.Info(ctx, "successfully uploaded archive")
+	return uploadResp.ID, nil, nil
 }
 
 // uploadTemplateDirectory archives and uploads a directory, and parses the
