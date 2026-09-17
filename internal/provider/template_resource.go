@@ -1602,29 +1602,32 @@ func uploadVersionContents(ctx context.Context, client *codersdk.Client, version
 		if err != nil {
 			return uuid.Nil, nil, fmt.Errorf("failed to read template version archive: %s", err)
 		}
-		return uploadTemplateArchive(ctx, client, contentType, archive)
+		fileID, err := uploadTemplateArchive(ctx, client, contentType, archive)
+		return fileID, nil, err
 	case versionSourceArchiveFile:
 		contentType, archive, err := readArchiveFile(version.ArchiveFile.ValueString())
 		if err != nil {
 			return uuid.Nil, nil, fmt.Errorf("failed to read template version archive: %s", err)
 		}
-		return uploadTemplateArchive(ctx, client, contentType, archive)
+		fileID, err := uploadTemplateArchive(ctx, client, contentType, archive)
+		return fileID, nil, err
 	default:
 		return uuid.Nil, nil, errors.New("a template version must set exactly one of " + versionSourceAttrs)
 	}
 }
 
-// uploadTemplateArchive uploads an already-built archive as-is. Variable values
-// can't be discovered without extracting it, so `tf_vars` is the only way to
+// uploadTemplateArchive uploads an already-built archive as-is, and returns the
+// ID of the uploaded file. It reports no variable values: they can't be
+// discovered without extracting the archive, so `tf_vars` is the only way to
 // set them for the archive sources.
-func uploadTemplateArchive(ctx context.Context, client *codersdk.Client, contentType string, archive []byte) (uuid.UUID, []codersdk.VariableValue, error) {
+func uploadTemplateArchive(ctx context.Context, client *codersdk.Client, contentType string, archive []byte) (uuid.UUID, error) {
 	tflog.Info(ctx, "uploading archive")
 	uploadResp, err := client.Upload(ctx, contentType, bytes.NewReader(archive))
 	if err != nil {
-		return uuid.Nil, nil, fmt.Errorf("failed to upload archive: %s", err)
+		return uuid.Nil, fmt.Errorf("failed to upload archive: %s", err)
 	}
 	tflog.Info(ctx, "successfully uploaded archive")
-	return uploadResp.ID, nil, nil
+	return uploadResp.ID, nil
 }
 
 // uploadTemplateDirectory archives and uploads a directory, and parses the
