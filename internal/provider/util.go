@@ -88,9 +88,7 @@ func computeDirectoryHash(directory string) (string, error) {
 }
 
 // computeFilesHash hashes a map of relative path to file content, as provided
-// by a template version's `files` attribute. Paths are sorted so the hash
-// doesn't depend on map iteration order, and each path is hashed alongside its
-// contents so that renaming a file produces a new hash.
+// by a template version's `files` attribute.
 func computeFilesHash(files map[string]string) string {
 	paths := make([]string, 0, len(files))
 	for path := range files {

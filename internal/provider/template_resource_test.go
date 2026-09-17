@@ -2671,8 +2671,7 @@ func TestUnknownTFVarsDeserialization(t *testing.T) {
 	})
 }
 
-// sortedPaths returns the paths of a file map in a deterministic order, so that
-// the archives the helpers below build are reproducible.
+// sortedPaths returns the paths of a file map in sorted order.
 func sortedPaths(files map[string]string) []string {
 	paths := make([]string, 0, len(files))
 	for path := range files {
@@ -2709,8 +2708,7 @@ func mustTarBase64(t *testing.T, files map[string]string) string {
 	return base64.StdEncoding.EncodeToString(mustTar(t, files))
 }
 
-// mustGzip compresses an archive, as `tar -czf` or the `archive_file` data
-// source's `tar.gz` type would.
+// mustGzip compresses an archive with gzip.
 func mustGzip(t *testing.T, contents []byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -2721,8 +2719,7 @@ func mustGzip(t *testing.T, contents []byte) []byte {
 	return buf.Bytes()
 }
 
-// mustZip builds a zip archive from a map of file path to content, as the
-// `archive_file` data source's default type would.
+// mustZip builds a zip archive from a map of file path to content.
 func mustZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -2747,8 +2744,7 @@ func mustArchiveFile(t *testing.T, name string, contents []byte) string {
 }
 
 // escapeTFInterpolation escapes Terraform's interpolation and directive
-// markers, so that file contents embedded in a test configuration reach the
-// provider verbatim instead of being evaluated by Terraform.
+// markers in file contents embedded in a test configuration.
 func escapeTFInterpolation(contents string) string {
 	contents = strings.ReplaceAll(contents, "${", "$${")
 	return strings.ReplaceAll(contents, "%{", "%%{")
@@ -2773,9 +2769,7 @@ func TestComputeFilesHash(t *testing.T) {
 
 	t.Run("StableAcrossMaps", func(t *testing.T) {
 		t.Parallel()
-		// A different map with the same entries must hash identically,
-		// otherwise map iteration order would create a new version on
-		// every plan.
+		// A different map with the same entries must hash identically.
 		other := computeFilesHash(map[string]string{
 			"build/Dockerfile": "FROM ubuntu",
 			"main.tf":          "resource \"null_resource\" \"a\" {}",
@@ -2793,8 +2787,7 @@ func TestComputeFilesHash(t *testing.T) {
 
 	t.Run("RenameChanges", func(t *testing.T) {
 		t.Parallel()
-		// Paths are hashed alongside contents, so moving a file is a change
-		// even though the bytes are identical.
+		// Moving a file is a change even though the bytes are identical.
 		require.NotEqual(t, base, computeFilesHash(map[string]string{
 			"main.tf":             "resource \"null_resource\" \"a\" {}",
 			"build/Containerfile": "FROM ubuntu",
@@ -2867,8 +2860,7 @@ func TestVersionContentHash(t *testing.T) {
 		require.Equal(t, computeBytesHash(contents), hash.ValueString())
 	})
 
-	// A gzipped archive hashes as the tar it decompresses to, so recompressing
-	// identical contents doesn't create a new version.
+	// A gzipped archive hashes as the tar it decompresses to.
 	t.Run("GzippedArchiveFile", func(t *testing.T) {
 		t.Parallel()
 		contents := mustTar(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})
@@ -2890,8 +2882,7 @@ func TestVersionContentHash(t *testing.T) {
 		require.True(t, hash.IsUnknown())
 	})
 
-	// Unlike an unknown path, a known path that isn't there is a mistake worth
-	// failing the plan over, exactly like a missing `directory`.
+	// A known path that isn't there fails, like a missing `directory`.
 	t.Run("MissingArchiveFile", func(t *testing.T) {
 		t.Parallel()
 		_, diags := versionContentHash(ctx, &TemplateVersion{
@@ -2901,8 +2892,7 @@ func TestVersionContentHash(t *testing.T) {
 		require.True(t, diags.HasError())
 	})
 
-	// A source that isn't known yet must plan as a new version rather than
-	// failing, since the contents can come from another resource.
+	// A source that isn't known yet plans as a new version rather than failing.
 	t.Run("UnknownFiles", func(t *testing.T) {
 		t.Parallel()
 		hash, diags := versionContentHash(ctx, &TemplateVersion{
@@ -2950,8 +2940,6 @@ func TestVersionContentHash(t *testing.T) {
 		require.True(t, diags.HasError())
 	})
 
-	// `stringvalidator.ExactlyOneOf` defers whenever one of them is unknown,
-	// so this has to be caught here as well.
 	t.Run("MultipleSources", func(t *testing.T) {
 		t.Parallel()
 		_, diags := versionContentHash(ctx, &TemplateVersion{
@@ -3029,8 +3017,6 @@ func TestNormalizeArchive(t *testing.T) {
 		require.Equal(t, tarred, payload)
 	})
 
-	// A gzipped tar is decompressed here, since the API only accepts tar and
-	// zip.
 	t.Run("GzippedTar", func(t *testing.T) {
 		t.Parallel()
 		tarred := mustTar(t, files)
@@ -3040,7 +3026,6 @@ func TestNormalizeArchive(t *testing.T) {
 		require.Equal(t, tarred, payload)
 	})
 
-	// A zip is uploaded as-is: the API expands it server-side.
 	t.Run("Zip", func(t *testing.T) {
 		t.Parallel()
 		zipped := mustZip(t, files)
@@ -3063,8 +3048,6 @@ func TestNormalizeArchive(t *testing.T) {
 		require.ErrorContains(t, err, "readable zip archive")
 	})
 
-	// A small archive must not be allowed to expand into an unbounded amount
-	// of memory.
 	t.Run("GzipBomb", func(t *testing.T) {
 		t.Parallel()
 		bomb := mustGzip(t, mustTar(t, map[string]string{
@@ -3077,8 +3060,7 @@ func TestNormalizeArchive(t *testing.T) {
 
 	t.Run("ZipTooBig", func(t *testing.T) {
 		t.Parallel()
-		// Pseudo-random, and so incompressible, contents: the zip itself has
-		// to exceed the limit for the size check to be the one that fails.
+		// Incompressible contents, so the zip itself exceeds the limit.
 		big := make([]byte, provisionersdk.TemplateArchiveLimit)
 		x := uint64(88172645463325252)
 		for i := range big {
@@ -3115,8 +3097,7 @@ func TestReadArchiveFile(t *testing.T) {
 		require.Equal(t, zipped, payload)
 	})
 
-	// The extension is irrelevant: the format is detected from the contents,
-	// so a mislabelled archive still works.
+	// The format is detected from the contents, not the extension.
 	t.Run("MislabelledExtension", func(t *testing.T) {
 		t.Parallel()
 		contentType, _, err := readArchiveFile(mustArchiveFile(t, "template.tar", mustZip(t, files)))
@@ -3250,8 +3231,8 @@ resource "coderd_template" "test" {
 	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
 	require.NoError(t, err)
 
-	// The contents are interpolated into the test configuration as a string, so
-	// the template's own interpolations have to be escaped to survive it.
+	// The contents are interpolated into the test configuration, so the
+	// template's own interpolations have to be escaped.
 	escapedMainTF := escapeTFInterpolation(string(mainTF))
 
 	resource.Test(t, resource.TestCase{
@@ -3259,8 +3240,8 @@ resource "coderd_template" "test" {
 		IsUnitTest:               true,
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// The contents are provided inline, and `terraform.tfvars` is read
-			// as a variable value just like it is for a `directory`.
+			// Init. `terraform.tfvars` is read as a variable value,
+			// like it is for a `directory`.
 			{
 				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "one", escapedMainTF),
 				Check: resource.ComposeTestCheckFunc(
@@ -3365,8 +3346,8 @@ resource "coderd_template" "test" {
 	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
 	require.NoError(t, err)
 	files := map[string]string{"main.tf": string(mainTF)}
-	// A zip, since that's what the `archive_file` data source produces by
-	// default, and it exercises the server-side expansion.
+	// A zip, as produced by the `archive_file` data source, is expanded
+	// server-side.
 	archive := mustArchiveFile(t, "template.zip", mustZip(t, files))
 
 	resource.Test(t, resource.TestCase{
@@ -3386,9 +3367,8 @@ resource "coderd_template" "test" {
 }
 
 // TestAccTemplateResourceVersionSourcePlan checks that a version whose contents
-// come from `files`, `archive_base64`, or `archive_file` plans without error,
-// end to end. It only plans, so a mock server is enough. The hash the plan
-// modifier produces is asserted in TestVersionsPlanModifierContentHash.
+// come from `files`, `archive_base64`, or `archive_file` plans without error.
+// It only plans, so a mock server is enough.
 func TestAccTemplateResourceVersionSourcePlan(t *testing.T) {
 	t.Parallel()
 	if os.Getenv("TF_ACC") == "" {
@@ -3414,9 +3394,7 @@ resource "coderd_template" "test" {
 	]
 }`
 
-	// The example template is used verbatim, since its interpolations are
-	// exactly what a `files` entry has to carry through to the provider
-	// untouched.
+	// The example template is used verbatim, interpolations included.
 	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
 	require.NoError(t, err)
 
@@ -3438,8 +3416,8 @@ resource "coderd_template" "test" {
 					{
 						Config:   fmt.Sprintf(cfg, srv.URL, source),
 						PlanOnly: true,
-						// The resource doesn't exist yet, so the plan to
-						// create it is non-empty by definition.
+						// The resource doesn't exist yet, so the
+						// plan is non-empty.
 						ExpectNonEmptyPlan: true,
 					},
 				},
@@ -3449,9 +3427,7 @@ resource "coderd_template" "test" {
 }
 
 // TestVersionsPlanModifierContentHash checks that the plan modifier hashes a
-// version's contents regardless of which source attribute they come from,
-// since an unknown or incorrect hash would create a new template version on
-// every plan.
+// version's contents regardless of which source attribute they come from.
 func TestVersionsPlanModifierContentHash(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
