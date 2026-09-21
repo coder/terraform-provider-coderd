@@ -411,6 +411,15 @@ func TestAgentsModelConfigCanonicalJSON(t *testing.T) {
 		require.Equal(t, `{"max_output_tokens":8192,"temperature":0.7}`, got)
 	})
 
+	t.Run("openai reasoning mode survives the round trip", func(t *testing.T) {
+		t.Parallel()
+		// Guards the pinned SDK: an older codersdk would silently drop the key here
+		// and the provider would plan a config Coder never receives.
+		got, err := agentsModelConfigCanonicalJSON(`{"provider_options":{"openai":{"reasoning_mode":"pro"}}}`)
+		require.NoError(t, err)
+		require.Equal(t, `{"provider_options":{"openai":{"reasoning_mode":"pro"}}}`, got)
+	})
+
 	t.Run("invalid json returns an error", func(t *testing.T) {
 		t.Parallel()
 		_, err := agentsModelConfigCanonicalJSON(`{`)
@@ -561,6 +570,7 @@ func TestAgentsModelConfigNoDroppedKeysValidator(t *testing.T) {
 	}{
 		{name: "recognized config", config: types.StringValue(`{"max_output_tokens":8192,"temperature":0.7}`)},
 		{name: "unknown nested field", config: types.StringValue(`{"provider_options":{"anthropic":{"bogus_setting":"x"}}}`), wantErr: "bogus_setting"},
+		{name: "openai reasoning mode", config: types.StringValue(`{"reasoning_effort":{"default":"high"},"provider_options":{"openai":{"reasoning_mode":"pro"}}}`)},
 		{name: "null", config: types.StringNull()},
 		{name: "unknown", config: types.StringUnknown()},
 		// Invalid and non-object JSON are other validators' problem.
