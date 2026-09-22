@@ -35,3 +35,45 @@ resource "coderd_template" "ubuntu-main" {
     groups = []
   }
 }
+
+// Exactly one of `directory`, `files`, `archive_base64`, and `archive_file` may
+// be set on a version.
+resource "coderd_template" "ubuntu-rendered" {
+  name        = "ubuntu-rendered"
+  description = "The main template, rendered for this deployment."
+  versions = [
+    {
+      name   = "rendered-${var.COMMIT_SHA}"
+      active = true
+      files = {
+        "main.tf"          = templatefile("${path.module}/tpl/main.tf.tftpl", { image = "ubuntu:24.04" })
+        "build/Dockerfile" = file("${path.module}/tpl/build/Dockerfile")
+      }
+    },
+    {
+      name = "prebuilt-${var.COMMIT_SHA}"
+      // A base64-encoded tar, tar.gz, or zip archive. Variable values aren't
+      // discovered from an archive, so they're set with `tf_vars`.
+      archive_base64 = filebase64("${path.module}/tpl/prebuilt.tar")
+      tf_vars = [{
+        name  = "image"
+        value = "ubuntu:24.04"
+      }]
+    },
+    {
+      name = "packaged-${var.COMMIT_SHA}"
+      // The same archive, referenced by path. It has to exist at plan time.
+      archive_file = data.archive_file.template.output_path
+      tf_vars = [{
+        name  = "image"
+        value = "ubuntu:24.04"
+      }]
+    }
+  ]
+}
+
+data "archive_file" "template" {
+  type        = "zip"
+  source_dir  = "${path.module}/stable-template"
+  output_path = "${path.module}/build/template.zip"
+}

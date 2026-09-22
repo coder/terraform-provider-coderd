@@ -1,21 +1,30 @@
 package provider
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"text/template"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/config"
@@ -2496,10 +2505,15 @@ func TestReconcileVersionIDs(t *testing.T) {
 func versionObjectType() types.ObjectType {
 	return types.ObjectType{
 		AttrTypes: map[string]attr.Type{
-			"id":             UUIDType,
-			"name":           types.StringType,
-			"message":        types.StringType,
-			"directory":      types.StringType,
+			"id":        UUIDType,
+			"name":      types.StringType,
+			"message":   types.StringType,
+			"directory": types.StringType,
+			"files": types.MapType{
+				ElemType: types.StringType,
+			},
+			"archive_base64": types.StringType,
+			"archive_file":   types.StringType,
 			"directory_hash": types.StringType,
 			"active":         types.BoolType,
 			"tf_vars": types.SetType{
@@ -2528,6 +2542,9 @@ func TestValidateListUnknownTFVars(t *testing.T) {
 		"name":             types.StringValue("main"),
 		"message":          types.StringValue(""),
 		"directory":        types.StringValue("./template"),
+		"files":            types.MapNull(types.StringType),
+		"archive_base64":   types.StringNull(),
+		"archive_file":     types.StringNull(),
 		"directory_hash":   types.StringUnknown(),
 		"active":           types.BoolValue(true),
 		"tf_vars":          types.SetUnknown(variableSetElemType),
@@ -2566,6 +2583,9 @@ func TestUnknownTFVarsDeserialization(t *testing.T) {
 			"name":             types.StringValue("stable-1"),
 			"message":          types.StringValue(""),
 			"directory":        types.StringValue("/tmp/test"),
+			"files":            types.MapNull(types.StringType),
+			"archive_base64":   types.StringNull(),
+			"archive_file":     types.StringNull(),
 			"directory_hash":   types.StringUnknown(),
 			"active":           types.BoolValue(true),
 			"tf_vars":          tfVars,
@@ -2642,4 +2662,857 @@ func TestUnknownTFVarsDeserialization(t *testing.T) {
 		require.False(t, d.HasError())
 		require.Empty(t, vars)
 	})
+}
+
+// sortedPaths returns the paths of a file map in sorted order.
+func sortedPaths(files map[string]string) []string {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// mustTar builds an uncompressed tar archive from a map of file path to
+// content.
+func mustTar(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, path := range sortedPaths(files) {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     path,
+			Typeflag: tar.TypeReg,
+			Mode:     0o644,
+			Size:     int64(len(files[path])),
+		}))
+		_, err := tw.Write([]byte(files[path]))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+// mustTarBase64 builds a base64-encoded tar archive from a map of file path to
+// content, for use as a version's `archive_base64`.
+func mustTarBase64(t *testing.T, files map[string]string) string {
+	t.Helper()
+	return base64.StdEncoding.EncodeToString(mustTar(t, files))
+}
+
+// mustGzip compresses an archive with gzip.
+func mustGzip(t *testing.T, contents []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err := gw.Write(contents)
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	return buf.Bytes()
+}
+
+// mustZip builds a zip archive from a map of file path to content.
+func mustZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, path := range sortedPaths(files) {
+		w, err := zw.Create(path)
+		require.NoError(t, err)
+		_, err = w.Write([]byte(files[path]))
+		require.NoError(t, err)
+	}
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
+}
+
+// mustArchiveFile writes an archive to a temporary file and returns its path,
+// for use as a version's `archive_file`.
+func mustArchiveFile(t *testing.T, name string, contents []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, contents, 0o644))
+	return path
+}
+
+// escapeTFInterpolation escapes Terraform's interpolation and directive
+// markers in file contents embedded in a test configuration.
+func escapeTFInterpolation(contents string) string {
+	contents = strings.ReplaceAll(contents, "${", "$${")
+	return strings.ReplaceAll(contents, "%{", "%%{")
+}
+
+// mustFilesMap converts a map of file path to content into the types.Map used
+// by a version's `files` attribute.
+func mustFilesMap(t *testing.T, files map[string]string) types.Map {
+	t.Helper()
+	m, diags := types.MapValueFrom(context.Background(), types.StringType, files)
+	require.False(t, diags.HasError(), "building files map: %v", diags.Errors())
+	return m
+}
+
+func TestComputeFilesHash(t *testing.T) {
+	t.Parallel()
+
+	base := computeFilesHash(map[string]string{
+		"main.tf":          "resource \"null_resource\" \"a\" {}",
+		"build/Dockerfile": "FROM ubuntu",
+	})
+
+	t.Run("StableAcrossMaps", func(t *testing.T) {
+		t.Parallel()
+		// A different map with the same entries must hash identically.
+		other := computeFilesHash(map[string]string{
+			"build/Dockerfile": "FROM ubuntu",
+			"main.tf":          "resource \"null_resource\" \"a\" {}",
+		})
+		require.Equal(t, base, other)
+	})
+
+	t.Run("ContentChanges", func(t *testing.T) {
+		t.Parallel()
+		require.NotEqual(t, base, computeFilesHash(map[string]string{
+			"main.tf":          "resource \"null_resource\" \"a\" {}",
+			"build/Dockerfile": "FROM debian",
+		}))
+	})
+
+	t.Run("RenameChanges", func(t *testing.T) {
+		t.Parallel()
+		// Moving a file is a change even though the bytes are identical.
+		require.NotEqual(t, base, computeFilesHash(map[string]string{
+			"main.tf":             "resource \"null_resource\" \"a\" {}",
+			"build/Containerfile": "FROM ubuntu",
+		}))
+	})
+
+	t.Run("ConcatenationIsUnambiguous", func(t *testing.T) {
+		t.Parallel()
+		require.NotEqual(t,
+			computeFilesHash(map[string]string{"a": "bc"}),
+			computeFilesHash(map[string]string{"ab": "c"}),
+		)
+	})
+}
+
+func TestVersionContentHash(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte("resource \"null_resource\" \"a\" {}"), 0o644))
+
+	t.Run("Directory", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringValue(dir),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		expected, err := computeDirectoryHash(dir)
+		require.NoError(t, err)
+		require.Equal(t, expected, hash.ValueString())
+	})
+
+	t.Run("Files", func(t *testing.T) {
+		t.Parallel()
+		files := map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         mustFilesMap(t, files),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.Equal(t, computeFilesHash(files), hash.ValueString())
+	})
+
+	t.Run("Archive", func(t *testing.T) {
+		t.Parallel()
+		archive := mustTarBase64(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringValue(archive),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		decoded, err := base64.StdEncoding.DecodeString(archive)
+		require.NoError(t, err)
+		require.Equal(t, computeBytesHash(decoded), hash.ValueString())
+	})
+
+	t.Run("ArchiveFile", func(t *testing.T) {
+		t.Parallel()
+		contents := mustTar(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Files:       types.MapNull(types.StringType),
+			ArchiveFile: types.StringValue(mustArchiveFile(t, "template.tar", contents)),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.Equal(t, computeBytesHash(contents), hash.ValueString())
+	})
+
+	// A gzipped archive hashes as the tar it decompresses to.
+	t.Run("GzippedArchiveFile", func(t *testing.T) {
+		t.Parallel()
+		contents := mustTar(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"})
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Files:       types.MapNull(types.StringType),
+			ArchiveFile: types.StringValue(mustArchiveFile(t, "template.tar.gz", mustGzip(t, contents))),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.Equal(t, computeBytesHash(contents), hash.ValueString())
+	})
+
+	t.Run("UnknownArchiveFile", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Files:       types.MapNull(types.StringType),
+			ArchiveFile: types.StringUnknown(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	// A known path that isn't there fails, like a missing `directory`.
+	t.Run("MissingArchiveFile", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Files:       types.MapNull(types.StringType),
+			ArchiveFile: types.StringValue(filepath.Join(t.TempDir(), "absent.tar")),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	// A source that isn't known yet plans as a new version rather than failing.
+	t.Run("UnknownFiles", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapUnknown(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	t.Run("UnknownFileContent", func(t *testing.T) {
+		t.Parallel()
+		files, diags := types.MapValue(types.StringType, map[string]attr.Value{
+			"main.tf": types.StringUnknown(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         files,
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	t.Run("UnknownDirectory", func(t *testing.T) {
+		t.Parallel()
+		hash, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringUnknown(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.False(t, diags.HasError(), "%v", diags.Errors())
+		require.True(t, hash.IsUnknown())
+	})
+
+	t.Run("NoSource", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	t.Run("MultipleSources", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringValue(dir),
+			Files:         mustFilesMap(t, map[string]string{"main.tf": ""}),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	t.Run("NoTerraformFiles", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         mustFilesMap(t, map[string]string{"nested/main.tf": ""}),
+			ArchiveBase64: types.StringNull(),
+		})
+		require.True(t, diags.HasError())
+	})
+
+	t.Run("InvalidArchive", func(t *testing.T) {
+		t.Parallel()
+		_, diags := versionContentHash(ctx, &TemplateVersion{
+			Directory:     types.StringNull(),
+			Files:         types.MapNull(types.StringType),
+			ArchiveBase64: types.StringValue("not base64!"),
+		})
+		require.True(t, diags.HasError())
+	})
+}
+
+func TestDecodeArchive(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Tar", func(t *testing.T) {
+		t.Parallel()
+		contentType, archive, err := decodeArchive(mustTarBase64(t, map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}))
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeTar, contentType)
+		require.NotEmpty(t, archive)
+	})
+
+	t.Run("NotBase64", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := decodeArchive("not base64!")
+		require.ErrorContains(t, err, "not valid base64")
+	})
+
+	t.Run("NotAnArchive", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := decodeArchive(base64.StdEncoding.EncodeToString([]byte("resource \"null_resource\" \"a\" {}")))
+		require.ErrorContains(t, err, "uncompressed tar, a gzipped tar, or a zip archive")
+	})
+
+	t.Run("TooBig", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := decodeArchive(mustTarBase64(t, map[string]string{
+			"main.tf": strings.Repeat("a", provisionersdk.TemplateArchiveLimit),
+		}))
+		require.ErrorContains(t, err, "too big")
+	})
+}
+
+func TestNormalizeArchive(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}
+
+	t.Run("Tar", func(t *testing.T) {
+		t.Parallel()
+		tarred := mustTar(t, files)
+		contentType, payload, err := normalizeArchive(tarred)
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeTar, contentType)
+		require.Equal(t, tarred, payload)
+	})
+
+	t.Run("GzippedTar", func(t *testing.T) {
+		t.Parallel()
+		tarred := mustTar(t, files)
+		contentType, payload, err := normalizeArchive(mustGzip(t, tarred))
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeTar, contentType)
+		require.Equal(t, tarred, payload)
+	})
+
+	t.Run("Zip", func(t *testing.T) {
+		t.Parallel()
+		zipped := mustZip(t, files)
+		contentType, payload, err := normalizeArchive(zipped)
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeZip, contentType)
+		require.Equal(t, zipped, payload)
+	})
+
+	t.Run("GzippedNonTar", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := normalizeArchive(mustGzip(t, []byte("not a tar archive")))
+		require.ErrorContains(t, err, "does not contain a tar archive")
+	})
+
+	t.Run("TruncatedZip", func(t *testing.T) {
+		t.Parallel()
+		zipped := mustZip(t, files)
+		_, _, err := normalizeArchive(zipped[:len(zipped)/2])
+		require.ErrorContains(t, err, "readable zip archive")
+	})
+
+	t.Run("GzipBomb", func(t *testing.T) {
+		t.Parallel()
+		bomb := mustGzip(t, mustTar(t, map[string]string{
+			"main.tf": strings.Repeat("a", provisionersdk.TemplateArchiveLimit),
+		}))
+		require.Less(t, len(bomb), provisionersdk.TemplateArchiveLimit)
+		_, _, err := normalizeArchive(bomb)
+		require.ErrorContains(t, err, "too big")
+	})
+
+	t.Run("ZipTooBig", func(t *testing.T) {
+		t.Parallel()
+		// Incompressible contents, so the zip itself exceeds the limit.
+		big := make([]byte, provisionersdk.TemplateArchiveLimit)
+		x := uint64(88172645463325252)
+		for i := range big {
+			x ^= x << 13
+			x ^= x >> 7
+			x ^= x << 17
+			big[i] = byte(x)
+		}
+		_, _, err := normalizeArchive(mustZip(t, map[string]string{"main.tf": string(big)}))
+		require.ErrorContains(t, err, "too big")
+	})
+}
+
+func TestReadArchiveFile(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}
+
+	t.Run("Tar", func(t *testing.T) {
+		t.Parallel()
+		tarred := mustTar(t, files)
+		contentType, payload, err := readArchiveFile(mustArchiveFile(t, "template.tar", tarred))
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeTar, contentType)
+		require.Equal(t, tarred, payload)
+	})
+
+	t.Run("Zip", func(t *testing.T) {
+		t.Parallel()
+		zipped := mustZip(t, files)
+		contentType, payload, err := readArchiveFile(mustArchiveFile(t, "template.zip", zipped))
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeZip, contentType)
+		require.Equal(t, zipped, payload)
+	})
+
+	// The format is detected from the contents, not the extension.
+	t.Run("MislabelledExtension", func(t *testing.T) {
+		t.Parallel()
+		contentType, _, err := readArchiveFile(mustArchiveFile(t, "template.tar", mustZip(t, files)))
+		require.NoError(t, err)
+		require.Equal(t, codersdk.ContentTypeZip, contentType)
+	})
+
+	t.Run("Missing", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := readArchiveFile(filepath.Join(t.TempDir(), "absent.tar"))
+		require.ErrorContains(t, err, "failed to read `archive_file`")
+	})
+
+	t.Run("NotAnArchive", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := readArchiveFile(mustArchiveFile(t, "template.tar", []byte("resource \"null_resource\" \"a\" {}")))
+		require.ErrorContains(t, err, "uncompressed tar, a gzipped tar, or a zip archive")
+	})
+}
+
+func TestWriteFiles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NestedPaths", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		require.NoError(t, writeFiles(dir, map[string]string{
+			"main.tf":          "resource \"null_resource\" \"a\" {}",
+			"build/Dockerfile": "FROM ubuntu",
+		}))
+		content, err := os.ReadFile(filepath.Join(dir, "build", "Dockerfile"))
+		require.NoError(t, err)
+		require.Equal(t, "FROM ubuntu", string(content))
+	})
+
+	t.Run("RejectsEscapingPaths", func(t *testing.T) {
+		t.Parallel()
+		for _, path := range []string{"../escape.tf", "/etc/passwd", "nested/../../escape.tf", ".."} {
+			require.ErrorContains(t, writeFiles(t.TempDir(), map[string]string{path: ""}), "must not escape")
+		}
+	})
+}
+
+func TestAccTemplateResourceVersionSourceValidation(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = "https://example.com"
+	token = "abcd"
+}
+
+resource "coderd_template" "test" {
+	name = "example-template"
+	versions = [
+		{
+			active = true
+			%s
+		}
+	]
+}`
+
+	// These all fail during validation, before the provider is configured, so
+	// no Coder deployment is needed.
+	const (
+		directory     = "directory = \"./example-template\""
+		files         = "files = { \"main.tf\" = \"\" }"
+		archiveBase64 = "archive_base64 = \"\""
+		archiveFile   = "archive_file = \"./example-template.tar\""
+		sep           = "\n\t\t\t"
+	)
+
+	for name, source := range map[string]string{
+		"NoSource":                ``,
+		"DirectoryAndFiles":       directory + sep + files,
+		"DirectoryAndArchive":     directory + sep + archiveBase64,
+		"DirectoryAndArchiveFile": directory + sep + archiveFile,
+		"FilesAndArchive":         files + sep + archiveBase64,
+		"FilesAndArchiveFile":     files + sep + archiveFile,
+		"BothArchives":            archiveBase64 + sep + archiveFile,
+		"AllFour":                 directory + sep + files + sep + archiveBase64 + sep + archiveFile,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource.Test(t, resource.TestCase{
+				PreCheck:                 func() { testAccPreCheck(t) },
+				IsUnitTest:               true,
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      fmt.Sprintf(cfg, source),
+						ExpectError: regexp.MustCompile("Invalid Attribute Combination"),
+					},
+				},
+			})
+		})
+	}
+}
+
+func TestAccTemplateResourceFiles(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+resource "coderd_template" "test" {
+	name = "files-template"
+	versions = [
+		{
+			name   = %q
+			active = true
+			files = {
+				"main.tf"           = %q
+				"terraform.tfvars"  = "name = \"world\""
+			}
+		}
+	]
+}`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_files_acc")
+
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+
+	// The contents are interpolated into the test configuration, so the
+	// template's own interpolations have to be escaped.
+	escapedMainTF := escapeTFInterpolation(string(mainTF))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Init. `terraform.tfvars` is read as a variable value,
+			// like it is for a `directory`.
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "one", escapedMainTF),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.id"),
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.directory_hash"),
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.name", "one"),
+				),
+			},
+			// Changing the contents creates a new version.
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), "two", escapedMainTF+"\n# a change\n"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_template.test", "versions.0.name", "two"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccTemplateResourceArchive(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+resource "coderd_template" "test" {
+	name = "archive-template"
+	versions = [
+		{
+			active         = true
+			archive_base64 = %q
+			tf_vars = [
+				{
+					name  = "name"
+					value = "world"
+				}
+			]
+		}
+	]
+}`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_archive_acc")
+
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+	archive := mustTarBase64(t, map[string]string{"main.tf": string(mainTF)})
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), archive),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.id"),
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.directory_hash"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccTemplateResourceArchiveFile(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = %q
+}
+
+resource "coderd_template" "test" {
+	name = "archive-file-template"
+	versions = [
+		{
+			active       = true
+			archive_file = %q
+			tf_vars = [
+				{
+					name  = "name"
+					value = "world"
+				}
+			]
+		}
+	]
+}`
+
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "template_resource_archive_file_acc")
+
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+	files := map[string]string{"main.tf": string(mainTF)}
+	// A zip, as produced by the `archive_file` data source, is expanded
+	// server-side.
+	archive := mustArchiveFile(t, "template.zip", mustZip(t, files))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(cfg, client.URL.String(), client.SessionToken(), archive),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.id"),
+					resource.TestCheckResourceAttrSet("coderd_template.test", "versions.0.directory_hash"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccTemplateResourceVersionSourcePlan checks that a version whose contents
+// come from `files`, `archive_base64`, or `archive_file` plans without error.
+// It only plans, so a mock server is enough.
+func TestAccTemplateResourceVersionSourcePlan(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	cfg := `
+provider coderd {
+	url   = %q
+	token = "abcd"
+}
+
+resource "coderd_template" "test" {
+	name = "example-template"
+	versions = [
+		{
+			active = true
+			%s
+		}
+	]
+}`
+
+	// The example template is used verbatim, interpolations included.
+	mainTF, err := os.ReadFile("../../integration/template-test/example-template/main.tf")
+	require.NoError(t, err)
+
+	tarred := mustTar(t, map[string]string{"main.tf": string(mainTF)})
+
+	for name, source := range map[string]string{
+		"Files":       fmt.Sprintf("files = { \"main.tf\" = %q }", escapeTFInterpolation(string(mainTF))),
+		"Archive":     fmt.Sprintf("archive_base64 = %q", base64.StdEncoding.EncodeToString(tarred)),
+		"ArchiveFile": fmt.Sprintf("archive_file = %q", mustArchiveFile(t, "template.tar", tarred)),
+		"ZippedArchiveFile": fmt.Sprintf("archive_file = %q",
+			mustArchiveFile(t, "template.zip", mustZip(t, map[string]string{"main.tf": string(mainTF)}))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource.Test(t, resource.TestCase{
+				PreCheck:                 func() { testAccPreCheck(t) },
+				IsUnitTest:               true,
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:   fmt.Sprintf(cfg, srv.URL, source),
+						PlanOnly: true,
+						// The resource doesn't exist yet, so the
+						// plan is non-empty.
+						ExpectNonEmptyPlan: true,
+					},
+				},
+			})
+		})
+	}
+}
+
+// TestVersionsPlanModifierContentHash checks that the plan modifier hashes a
+// version's contents regardless of which source attribute they come from.
+func TestVersionsPlanModifierContentHash(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	objType := versionObjectType()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte("resource \"null_resource\" \"a\" {}"), 0o644))
+	dirHash, err := computeDirectoryHash(dir)
+	require.NoError(t, err)
+
+	files := map[string]string{"main.tf": "resource \"null_resource\" \"a\" {}"}
+	tarred := mustTar(t, files)
+	archive := base64.StdEncoding.EncodeToString(tarred)
+	zipped := mustZip(t, files)
+
+	for name, tc := range map[string]struct {
+		directory     attr.Value
+		files         attr.Value
+		archiveBase64 attr.Value
+		archiveFile   attr.Value
+		expected      string
+	}{
+		"Directory": {
+			directory:     types.StringValue(dir),
+			files:         types.MapNull(types.StringType),
+			archiveBase64: types.StringNull(),
+			archiveFile:   types.StringNull(),
+			expected:      dirHash,
+		},
+		"Files": {
+			directory:     types.StringNull(),
+			files:         mustFilesMap(t, files),
+			archiveBase64: types.StringNull(),
+			archiveFile:   types.StringNull(),
+			expected:      computeFilesHash(files),
+		},
+		"Archive": {
+			directory:     types.StringNull(),
+			files:         types.MapNull(types.StringType),
+			archiveBase64: types.StringValue(archive),
+			archiveFile:   types.StringNull(),
+			expected:      computeBytesHash(tarred),
+		},
+		"ArchiveFile": {
+			directory:     types.StringNull(),
+			files:         types.MapNull(types.StringType),
+			archiveBase64: types.StringNull(),
+			archiveFile:   types.StringValue(mustArchiveFile(t, "template.tar", tarred)),
+			expected:      computeBytesHash(tarred),
+		},
+		"ZippedArchiveFile": {
+			directory:     types.StringNull(),
+			files:         types.MapNull(types.StringType),
+			archiveBase64: types.StringNull(),
+			archiveFile:   types.StringValue(mustArchiveFile(t, "template.zip", zipped)),
+			expected:      computeBytesHash(zipped),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			versionVal, diags := types.ObjectValue(objType.AttrTypes, map[string]attr.Value{
+				"id":               NewUUIDUnknown(),
+				"name":             types.StringValue("main"),
+				"message":          types.StringValue(""),
+				"directory":        tc.directory,
+				"files":            tc.files,
+				"archive_base64":   tc.archiveBase64,
+				"archive_file":     tc.archiveFile,
+				"directory_hash":   types.StringUnknown(),
+				"active":           types.BoolValue(true),
+				"tf_vars":          types.SetNull(variableSetElemType),
+				"provisioner_tags": types.SetNull(variableSetElemType),
+			})
+			require.False(t, diags.HasError(), "building version object: %v", diags.Errors())
+
+			listVal, diags := types.ListValue(objType, []attr.Value{versionVal})
+			require.False(t, diags.HasError(), "building list: %v", diags.Errors())
+
+			resp := &planmodifier.ListResponse{PlanValue: listVal}
+			NewVersionsPlanModifier().PlanModifyList(ctx, planmodifier.ListRequest{
+				ConfigValue: listVal,
+				PlanValue:   listVal,
+			}, resp)
+			require.False(t, resp.Diagnostics.HasError(), "PlanModifyList: %v", resp.Diagnostics.Errors())
+
+			var planned []TemplateVersion
+			diags = resp.PlanValue.ElementsAs(ctx, &planned, false)
+			require.False(t, diags.HasError(), "decoding planned versions: %v", diags.Errors())
+			require.Len(t, planned, 1)
+			require.Equal(t, tc.expected, planned[0].DirectoryHash.ValueString())
+			// There's no prior version with this hash, so a new one is created.
+			require.True(t, planned[0].ID.IsUnknown())
+		})
+	}
 }
