@@ -57,12 +57,11 @@ func TestIntegration(t *testing.T) {
 				me, err := c.User(ctx, codersdk.Me)
 				assert.NoError(t, err)
 				user1, err := c.CreateUser(ctx, codersdk.CreateUserRequest{
-					Email:          "test2@coder.com",
-					Username:       "ethan",
-					Password:       "SomeSecurePassword!",
-					UserLoginType:  "password",
-					DisableLogin:   false,
-					OrganizationID: me.OrganizationIDs[0],
+					Email:           "test2@coder.com",
+					Username:        "ethan",
+					Password:        "SomeSecurePassword!",
+					UserLoginType:   "password",
+					OrganizationIDs: []uuid.UUID{me.OrganizationIDs[0]},
 				})
 				assert.NoError(t, err)
 				group, err := c.CreateGroup(ctx, me.OrganizationIDs[0], codersdk.CreateGroupRequest{

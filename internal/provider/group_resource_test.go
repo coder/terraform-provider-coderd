@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/stretchr/testify/require"
 )
@@ -24,20 +25,20 @@ func TestAccGroupResource(t *testing.T) {
 	require.NoError(t, err)
 
 	user1, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-		Email:          "example@coder.com",
-		Username:       "example",
-		Password:       "SomeSecurePassword!",
-		UserLoginType:  "password",
-		OrganizationID: firstUser.OrganizationIDs[0],
+		Email:           "example@coder.com",
+		Username:        "example",
+		Password:        "SomeSecurePassword!",
+		UserLoginType:   "password",
+		OrganizationIDs: []uuid.UUID{firstUser.OrganizationIDs[0]},
 	})
 	require.NoError(t, err)
 
 	user2, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-		Email:          "example2@coder.com",
-		Username:       "example2",
-		Password:       "SomeSecurePassword!",
-		UserLoginType:  "password",
-		OrganizationID: firstUser.OrganizationIDs[0],
+		Email:           "example2@coder.com",
+		Username:        "example2",
+		Password:        "SomeSecurePassword!",
+		UserLoginType:   "password",
+		OrganizationIDs: []uuid.UUID{firstUser.OrganizationIDs[0]},
 	})
 	require.NoError(t, err)
 

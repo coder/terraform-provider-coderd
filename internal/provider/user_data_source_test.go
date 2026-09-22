@@ -91,11 +91,11 @@ func TestAccUserDataSource(t *testing.T) {
 	firstUser, err := client.User(ctx, codersdk.Me)
 	require.NoError(t, err)
 	user, err := client.CreateUser(ctx, codersdk.CreateUserRequest{
-		Email:          "example@coder.com",
-		Username:       "example",
-		Password:       "SomeSecurePassword!",
-		UserLoginType:  "password",
-		OrganizationID: firstUser.OrganizationIDs[0],
+		Email:           "example@coder.com",
+		Username:        "example",
+		Password:        "SomeSecurePassword!",
+		UserLoginType:   "password",
+		OrganizationIDs: []uuid.UUID{firstUser.OrganizationIDs[0]},
 	})
 	require.NoError(t, err)
 	_, err = client.UpdateUserRoles(ctx, user.Username, codersdk.UpdateRoles{
