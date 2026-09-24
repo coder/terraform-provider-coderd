@@ -294,6 +294,21 @@ func TestIntegration(t *testing.T) {
 				// coderd_agents_default_model.default points at claude_sonnet, which
 				// demotes the auto-promoted claude_opus, so Sonnet is the sole default.
 				assert.Equal(t, []string{"claude-sonnet-4-6"}, defaults)
+
+				prices, err := exp.ListAIModelPrices(ctx, codersdk.AIModelPricesFilter{
+					Source: codersdk.AIModelPriceSourceFilterCustom,
+				})
+				require.NoError(t, err)
+				type price struct{ input, output, cacheRead, cacheWrite *int64 }
+				gotPrices := make(map[string]price, len(prices))
+				for _, p := range prices {
+					gotPrices[p.Provider+"/"+p.Model] = price{p.InputPrice, p.OutputPrice, p.CacheReadPrice, p.CacheWritePrice}
+				}
+				i64 := func(v int64) *int64 { return &v }
+				assert.Equal(t, map[string]price{
+					"anthropic/claude-sonnet-4-6": {i64(3000000), i64(15000000), i64(300000), i64(3750000)},
+					"openai/gpt-5.4-mini":         {i64(750000), i64(4500000), nil, nil},
+				}, gotPrices)
 			},
 		},
 		{

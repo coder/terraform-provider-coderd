@@ -1,7 +1,7 @@
 {{- $subcategory := "" -}}
 {{- if or (eq .Name "coderd_agents_default_model") (eq .Name "coderd_agents_mcp_server") (eq .Name "coderd_agents_model") (eq .Name "coderd_agents_system_prompt") -}}
 {{- $subcategory = "Agents" -}}
-{{- else if eq .Name "coderd_ai_provider" -}}
+{{- else if or (eq .Name "coderd_ai_provider") (eq .Name "coderd_ai_model_price") -}}
 {{- $subcategory = "AI Governance" -}}
 {{- else if or (eq .Name "coderd_license") (eq .Name "coderd_oauth2_provider_settings") (eq .Name "coderd_provisioner_key") (eq .Name "coderd_workspace_proxy") -}}
 {{- $subcategory = "Deployment" -}}

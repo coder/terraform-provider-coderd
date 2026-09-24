@@ -111,6 +111,22 @@ resource "coderd_agents_model" "gpt_mini" {
   })
 }
 
+resource "coderd_ai_model_price" "claude_sonnet" {
+  provider_type     = coderd_ai_provider.anthropic.type
+  model             = coderd_agents_model.claude_sonnet.model
+  input_price       = 3000000
+  output_price      = 15000000
+  cache_read_price  = 300000
+  cache_write_price = 3750000
+}
+
+resource "coderd_ai_model_price" "gpt_mini" {
+  provider_type = coderd_ai_provider.openai.type
+  model         = coderd_agents_model.gpt_mini.model
+  input_price   = 750000
+  output_price  = 4500000
+}
+
 # Select Claude Sonnet as the default in its organization. Coder auto-promotes
 # the first model created (claude_opus), so this resource demotes it and proves
 # the pointer overrides the server's automatic choice end-to-end.
