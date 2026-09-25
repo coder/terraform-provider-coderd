@@ -5,7 +5,7 @@ subcategory: "AI Governance"
 description: |-
   ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
   ~> Warning
-  This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
+  This resource is only compatible with Coder version 2.37.0 and later.
   Manages the token price that AI Gateway uses to compute the cost of each request to a model. Requires a Premium license with the AI Gateway feature, and the Owner role.
   Coder ships default prices https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices for many models. Use this resource to override a default price, or to price a model that has no default. Coder lists the price as a custom price, which takes precedence over the default and stays in effect across Coder upgrades.
   -> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.
@@ -18,7 +18,7 @@ description: |-
 ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
 
 ~> **Warning**
-This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
+This resource is only compatible with Coder version 2.37.0 and later.
 
 Manages the token price that AI Gateway uses to compute the cost of each request to a model. Requires a Premium license with the AI Gateway feature, and the Owner role.
 

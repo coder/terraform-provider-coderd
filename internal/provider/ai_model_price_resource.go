@@ -178,7 +178,7 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
-			"~> **Warning**\nThis resource is only compatible with Coder version [" + aiModelPriceMinVersion + "](https://github.com/coder/coder/releases/tag/v" + aiModelPriceMinVersion + ") and later.\n\n" +
+			"~> **Warning**\nThis resource is only compatible with Coder version " + aiModelPriceMinVersion + " and later.\n\n" +
 			"Manages the token price that AI Gateway uses to compute the cost of each request to a model. " +
 			"Requires a Premium license with the AI Gateway feature, and the Owner role.\n\n" +
 			"Coder ships [default prices](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices) for many models. " +
