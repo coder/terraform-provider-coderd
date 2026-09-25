@@ -196,7 +196,7 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 			},
 			"provider_type": schema.StringAttribute{
 				MarkdownDescription: "AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. " +
-					"`openai-compat` is not supported, because these providers pass through to any upstream vendor. " +
+					"`openai-compat` is not currently supported. " +
 					"Changing this forces a new resource.",
 				Required: true,
 				Validators: []validator.String{

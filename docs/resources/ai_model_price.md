@@ -55,7 +55,7 @@ resource "coderd_ai_model_price" "sonnet" {
 ### Required
 
 - `model` (String) Model name the price applies to, as shown in AI Gateway usage and spend reports, for example `claude-sonnet-4-5`. Changing this forces a new resource.
-- `provider_type` (String) AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. `openai-compat` is not supported, because these providers pass through to any upstream vendor. Changing this forces a new resource.
+- `provider_type` (String) AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. `openai-compat` is not currently supported. Changing this forces a new resource.
 
 ### Optional
 
