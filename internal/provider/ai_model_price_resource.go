@@ -184,6 +184,7 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 			"Coder ships [default prices](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices) for many models. " +
 			"Use this resource to override a default price, or to price a model that has no default. " +
 			"Coder lists the price as a `custom` price, which takes precedence over the default and stays in effect across Coder upgrades.\n\n" +
+			"A custom price replaces the default price instead of merging with it. Any price you omit counts as zero, not the default.\n\n" +
 			"-> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.\n\n" +
 			"~> **Warning**\nDestroying this resource only removes it from the Terraform state. The price stays in effect, because Coder has no API to delete a custom price.",
 		Attributes: map[string]schema.Attribute{

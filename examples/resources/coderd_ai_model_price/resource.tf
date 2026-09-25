@@ -3,6 +3,8 @@ resource "coderd_ai_model_price" "opus" {
   model         = "claude-opus-4-1"
   input_price   = 15000000 // $15.00 per 1M input tokens
   output_price  = 75000000 // $75.00 per 1M output tokens
+  // cache_read_price is omitted, so cache reads cost $0.
+  // cache_write_price is omitted, so cache writes cost $0.
 }
 
 resource "coderd_ai_model_price" "sonnet" {

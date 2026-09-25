@@ -8,6 +8,7 @@ description: |-
   This resource is only compatible with Coder version 2.37.0 and later.
   Manages the token price that AI Gateway uses to compute the cost of each request to a model. Requires a Premium license with the AI Gateway feature, and the Owner role.
   Coder ships default prices https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices for many models. Use this resource to override a default price, or to price a model that has no default. Coder lists the price as a custom price, which takes precedence over the default and stays in effect across Coder upgrades.
+  A custom price replaces the default price instead of merging with it. Any price you omit counts as zero, not the default.
   -> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.
   ~> Warning
   Destroying this resource only removes it from the Terraform state. The price stays in effect, because Coder has no API to delete a custom price.
@@ -24,6 +25,8 @@ Manages the token price that AI Gateway uses to compute the cost of each request
 
 Coder ships [default prices](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices) for many models. Use this resource to override a default price, or to price a model that has no default. Coder lists the price as a `custom` price, which takes precedence over the default and stays in effect across Coder upgrades.
 
+A custom price replaces the default price instead of merging with it. Any price you omit counts as zero, not the default.
+
 -> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.
 
 ~> **Warning**
@@ -37,6 +40,8 @@ resource "coderd_ai_model_price" "opus" {
   model         = "claude-opus-4-1"
   input_price   = 15000000 // $15.00 per 1M input tokens
   output_price  = 75000000 // $75.00 per 1M output tokens
+  // cache_read_price is omitted, so cache reads cost $0.
+  // cache_write_price is omitted, so cache writes cost $0.
 }
 
 resource "coderd_ai_model_price" "sonnet" {
