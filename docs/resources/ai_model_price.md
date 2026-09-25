@@ -6,13 +6,11 @@ description: |-
   ~> This resource is experimental. Changes are expected, and it is not recommended for production use.
   ~> Warning
   This resource is only compatible with Coder version 2.37.0 https://github.com/coder/coder/releases/tag/v2.37.0 and later.
-  Sets a custom token price for a model, which AI Gateway uses to compute the cost of each request. This resource requires a Premium license with the AI Gateway feature, and the Owner role.
-  Prices are integer micro-units per 1M tokens. For example, 3000000 is $3.00 per 1M tokens.
-  A price applies to every AI provider of provider_type. model must match the model name that AI Gateway records for requests, as shown in AI Gateway usage and spend reports.
-  Coder ships default prices for many models. A custom price takes precedence over the default price for the same model. Creating this resource overwrites any custom price that already exists for the same provider_type and model.
+  Manages the token price that AI Gateway uses to compute the cost of each request to a model. Requires a Premium license with the AI Gateway feature, and the Owner role.
+  Coder ships default prices https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices for many models. Use this resource to override a default price, or to price a model that has no default. Coder lists the price as a custom price, which takes precedence over the default and stays in effect across Coder upgrades.
+  -> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.
   ~> Warning
-  Coder has no API to delete a custom price. Destroying this resource only removes it from the Terraform state. The custom price stays in Coder and still takes precedence over the default price.
-  Import IDs use <provider_type>/<model>.
+  Destroying this resource only removes it from the Terraform state. The price stays in effect, because Coder has no API to delete a custom price.
 ---
 
 # coderd_ai_model_price (Resource)
@@ -22,18 +20,14 @@ description: |-
 ~> **Warning**
 This resource is only compatible with Coder version [2.37.0](https://github.com/coder/coder/releases/tag/v2.37.0) and later.
 
-Sets a custom token price for a model, which AI Gateway uses to compute the cost of each request. This resource requires a Premium license with the AI Gateway feature, and the Owner role.
+Manages the token price that AI Gateway uses to compute the cost of each request to a model. Requires a Premium license with the AI Gateway feature, and the Owner role.
 
-Prices are integer micro-units per 1M tokens. For example, `3000000` is $3.00 per 1M tokens.
+Coder ships [default prices](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices) for many models. Use this resource to override a default price, or to price a model that has no default. Coder lists the price as a `custom` price, which takes precedence over the default and stays in effect across Coder upgrades.
 
-A price applies to every AI provider of `provider_type`. `model` must match the model name that AI Gateway records for requests, as shown in AI Gateway usage and spend reports.
-
-Coder ships default prices for many models. A custom price takes precedence over the default price for the same model. Creating this resource overwrites any custom price that already exists for the same `provider_type` and `model`.
+-> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.
 
 ~> **Warning**
-Coder has no API to delete a custom price. Destroying this resource only removes it from the Terraform state. The custom price stays in Coder and still takes precedence over the default price.
-
-Import IDs use `<provider_type>/<model>`.
+Destroying this resource only removes it from the Terraform state. The price stays in effect, because Coder has no API to delete a custom price.
 
 ## Example Usage
 
@@ -60,8 +54,8 @@ resource "coderd_ai_model_price" "sonnet" {
 
 ### Required
 
-- `model` (String) Model name the price applies to, for example `claude-sonnet-4-5`. Changing this forces a new resource.
-- `provider_type` (String) AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. Changing this forces a new resource.
+- `model` (String) Model name the price applies to, as shown in AI Gateway usage and spend reports, for example `claude-sonnet-4-5`. Changing this forces a new resource.
+- `provider_type` (String) AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. `openai-compat` is not supported, because these providers pass through to any upstream vendor. Changing this forces a new resource.
 
 ### Optional
 

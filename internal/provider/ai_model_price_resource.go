@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // aiModelPriceMinVersion is the first Coder release that includes the AI model
@@ -65,6 +66,58 @@ func (r *AIModelPriceResource) experimentalClient() *codersdk.ExperimentalClient
 	return codersdk.NewExperimentalClient(r.data.Client)
 }
 
+// aiModelPriceDiag converts an error from the model prices API into a
+// diagnostic. The list call returns an empty list and the upsert call never
+// returns 404, so a 404 means that the deployment has no model prices API.
+func aiModelPriceDiag(action, id string, err error) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if isHTTPNotFound(err) {
+		diags.AddError("Unsupported Coder Version", fmt.Sprintf(
+			"Unable to %s AI model price %s: the deployment returned 404 for /api/experimental/ai/model-prices. "+
+				"This resource requires Coder version %s or later; upgrade the deployment, or remove "+
+				"`coderd_ai_model_price` from your configuration. Original error: %s",
+			action, id, aiModelPriceMinVersion, err))
+		return diags
+	}
+	diags.AddError("Client Error", fmt.Sprintf("Unable to %s AI model price %s, got error: %s", action, id, err))
+	return diags
+}
+
+func aiModelPriceConflictDiag(id string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	diags.AddError("AI Model Price Already Exists", fmt.Sprintf(
+		"Coder already has a custom price for %s with different values. Terraform does not overwrite a price that it does not manage. "+
+			"To manage the existing price, import it with the ID `%s`, then set the values that you want.",
+		id, id))
+	return diags
+}
+
+// customPrice returns nil, nil when Coder has no custom price for the key.
+func (r *AIModelPriceResource) customPrice(ctx context.Context, providerType, model string) (*codersdk.AIModelPrice, error) {
+	prices, err := r.experimentalClient().ListAIModelPrices(ctx, codersdk.AIModelPricesFilter{
+		Provider: providerType,
+		Model:    model,
+		Source:   codersdk.AIModelPriceSourceFilterCustom,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(prices) == 0 {
+		return nil, nil
+	}
+	return &prices[0], nil
+}
+
+// sameAIModelPrice reports whether the plan matches an existing custom price.
+// A create adopts an equal price, because destroy leaves the price in Coder,
+// and a strict check would then fail every destroy and re-apply.
+func sameAIModelPrice(plan AIModelPriceResourceModel, p codersdk.AIModelPrice) bool {
+	return plan.InputPrice.Equal(types.Int64PointerValue(p.InputPrice)) &&
+		plan.OutputPrice.Equal(types.Int64PointerValue(p.OutputPrice)) &&
+		plan.CacheReadPrice.Equal(types.Int64PointerValue(p.CacheReadPrice)) &&
+		plan.CacheWritePrice.Equal(types.Int64PointerValue(p.CacheWritePrice))
+}
+
 func (r *AIModelPriceResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_ai_model_price"
 }
@@ -74,6 +127,46 @@ func (r *AIModelPriceResource) ModifyPlan(ctx context.Context, req resource.Modi
 		"Experimental Resource",
 		"coderd_ai_model_price is experimental. Changes are expected, and it is not recommended for production use.",
 	)
+
+	if req.Plan.Raw.IsNull() || r.data == nil {
+		return
+	}
+	var plan AIModelPriceResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() || plan.ProviderType.IsUnknown() || plan.Model.IsUnknown() {
+		return
+	}
+	// Only a create or a replace writes a key that Terraform does not manage yet.
+	if !req.State.Raw.IsNull() {
+		var state AIModelPriceResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if state.ProviderType.Equal(plan.ProviderType) && state.Model.Equal(plan.Model) {
+			return
+		}
+	}
+	id := aiModelPriceID(plan.ProviderType.ValueString(), plan.Model.ValueString())
+	existing, err := r.customPrice(ctx, plan.ProviderType.ValueString(), plan.Model.ValueString())
+	if isHTTPNotFound(err) {
+		resp.Diagnostics.Append(aiModelPriceDiag("read", id, err)...)
+		return
+	}
+	if err != nil {
+		// Best-effort. Create() repeats the check and reports the error.
+		tflog.Debug(ctx, "skipping AI model price plan-time conflict check", map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	if existing == nil || plan.InputPrice.IsUnknown() || plan.OutputPrice.IsUnknown() ||
+		plan.CacheReadPrice.IsUnknown() || plan.CacheWritePrice.IsUnknown() {
+		return
+	}
+	if !sameAIModelPrice(plan, *existing) {
+		resp.Diagnostics.Append(aiModelPriceConflictDiag(id)...)
+	}
 }
 
 func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -86,15 +179,13 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "~> This resource is experimental. Changes are expected, and it is not recommended for production use.\n\n" +
 			"~> **Warning**\nThis resource is only compatible with Coder version [" + aiModelPriceMinVersion + "](https://github.com/coder/coder/releases/tag/v" + aiModelPriceMinVersion + ") and later.\n\n" +
-			"Sets a custom token price for a model, which AI Gateway uses to compute the cost of each request. " +
-			"This resource requires a Premium license with the AI Gateway feature, and the Owner role.\n\n" +
-			"Prices are integer micro-units per 1M tokens. For example, `3000000` is $3.00 per 1M tokens.\n\n" +
-			"A price applies to every AI provider of `provider_type`. " +
-			"`model` must match the model name that AI Gateway records for requests, as shown in AI Gateway usage and spend reports.\n\n" +
-			"Coder ships default prices for many models. A custom price takes precedence over the default price for the same model. " +
-			"Creating this resource overwrites any custom price that already exists for the same `provider_type` and `model`.\n\n" +
-			"~> **Warning**\nCoder has no API to delete a custom price. Destroying this resource only removes it from the Terraform state. The custom price stays in Coder and still takes precedence over the default price.\n\n" +
-			"Import IDs use `<provider_type>/<model>`.",
+			"Manages the token price that AI Gateway uses to compute the cost of each request to a model. " +
+			"Requires a Premium license with the AI Gateway feature, and the Owner role.\n\n" +
+			"Coder ships [default prices](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#configure-model-prices) for many models. " +
+			"Use this resource to override a default price, or to price a model that has no default. " +
+			"Coder lists the price as a `custom` price, which takes precedence over the default and stays in effect across Coder upgrades.\n\n" +
+			"-> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.\n\n" +
+			"~> **Warning**\nDestroying this resource only removes it from the Terraform state. The price stays in effect, because Coder has no API to delete a custom price.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Model price ID, in the form `<provider_type>/<model>`.",
@@ -104,8 +195,10 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 				},
 			},
 			"provider_type": schema.StringAttribute{
-				MarkdownDescription: "AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. Changing this forces a new resource.",
-				Required:            true,
+				MarkdownDescription: "AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. " +
+					"`openai-compat` is not supported, because these providers pass through to any upstream vendor. " +
+					"Changing this forces a new resource.",
+				Required: true,
 				Validators: []validator.String{
 					stringvalidator.OneOf(
 						string(codersdk.AIProviderTypeOpenAI),
@@ -123,7 +216,7 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 				},
 			},
 			"model": schema.StringAttribute{
-				MarkdownDescription: "Model name the price applies to, for example `claude-sonnet-4-5`. Changing this forces a new resource.",
+				MarkdownDescription: "Model name the price applies to, as shown in AI Gateway usage and spend reports, for example `claude-sonnet-4-5`. Changing this forces a new resource.",
 				Required:            true,
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
@@ -207,8 +300,17 @@ func (r *AIModelPriceResource) Create(ctx context.Context, req resource.CreateRe
 	}
 
 	id := aiModelPriceID(plan.ProviderType.ValueString(), plan.Model.ValueString())
+	existing, err := r.customPrice(ctx, plan.ProviderType.ValueString(), plan.Model.ValueString())
+	if err != nil {
+		resp.Diagnostics.Append(aiModelPriceDiag("read", id, err)...)
+		return
+	}
+	if existing != nil && !sameAIModelPrice(plan, *existing) {
+		resp.Diagnostics.Append(aiModelPriceConflictDiag(id)...)
+		return
+	}
 	if err := r.upsert(ctx, plan); err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to set AI model price %s, got error: %s", id, err))
+		resp.Diagnostics.Append(aiModelPriceDiag("set", id, err)...)
 		return
 	}
 
@@ -226,22 +328,17 @@ func (r *AIModelPriceResource) Read(ctx context.Context, req resource.ReadReques
 	providerType := state.ProviderType.ValueString()
 	model := state.Model.ValueString()
 	id := aiModelPriceID(providerType, model)
-	prices, err := r.experimentalClient().ListAIModelPrices(ctx, codersdk.AIModelPricesFilter{
-		Provider: providerType,
-		Model:    model,
-		Source:   codersdk.AIModelPriceSourceFilterCustom,
-	})
+	price, err := r.customPrice(ctx, providerType, model)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read AI model price %s, got error: %s", id, err))
+		resp.Diagnostics.Append(aiModelPriceDiag("read", id, err)...)
 		return
 	}
-	if len(prices) == 0 {
+	if price == nil {
 		resp.Diagnostics.AddWarning("Client Warning", fmt.Sprintf("Custom AI model price %s not found. Marking as deleted.", id))
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	price := prices[0]
 	state.ID = types.StringValue(id)
 	state.InputPrice = types.Int64PointerValue(price.InputPrice)
 	state.OutputPrice = types.Int64PointerValue(price.OutputPrice)
@@ -263,7 +360,7 @@ func (r *AIModelPriceResource) Update(ctx context.Context, req resource.UpdateRe
 
 	id := aiModelPriceID(plan.ProviderType.ValueString(), plan.Model.ValueString())
 	if err := r.upsert(ctx, plan); err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update AI model price %s, got error: %s", id, err))
+		resp.Diagnostics.Append(aiModelPriceDiag("update", id, err)...)
 		return
 	}
 
