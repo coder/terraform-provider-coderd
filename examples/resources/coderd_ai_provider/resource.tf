@@ -12,9 +12,8 @@ resource "coderd_ai_provider" "claude_platform_aws" {
     }
   }
 
-  // Optional: set an Anthropic API key for stored-key authentication. Omit it
-  // to let Coder use the server process's ambient AWS credentials.
-  // api_key_wo         = var.anthropic_api_key
+  // Optional: a Claude Platform on AWS API key. Storing one disables IAM signing.
+  // api_key_wo         = var.claude_platform_aws_api_key
   // api_key_wo_version = 1
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -87,6 +88,27 @@ func (r *AIProviderResource) ModifyPlan(ctx context.Context, req resource.Modify
 		"Experimental Resource",
 		"coderd_ai_provider is experimental. Changes are expected, and it is not recommended for production use.",
 	)
+
+	// The Coder API treats omitted settings as unchanged and cannot clear a
+	// stored variant, so removing one would fail at apply. Replacement is fine.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || len(resp.RequiresReplace) > 0 {
+		return
+	}
+	var planSettings, stateSettings types.Object
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("settings"), &planSettings)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("settings"), &stateSettings)...)
+	if resp.Diagnostics.HasError() || !planSettings.IsNull() || stateSettings.IsNull() {
+		return
+	}
+	for name, value := range stateSettings.Attributes() {
+		if !value.IsNull() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("settings"),
+				"Cannot Remove Provider Settings",
+				fmt.Sprintf("Terraform cannot clear `settings.%s` from an existing provider. Remove it through the Coder UI or API, then remove it from this configuration.", name),
+			)
+		}
+	}
 }
 
 func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -96,7 +118,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 			"their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.\n\n" +
 			"Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.\n\n" +
 			"For `type = \"bedrock\"`, omit `settings.bedrock.access_key_wo` and `settings.bedrock.access_key_secret_wo` to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.\n\n" +
-			"Claude Platform for AWS uses `type = \"anthropic\"` with `settings.claude_platform_aws`. Its provider API key is optional; when no client or stored provider key is available, Coder signs requests with the server process's ambient AWS credentials.",
+			"Claude Platform for AWS uses `type = \"anthropic\"` with `settings.claude_platform_aws`; see that attribute for how requests are authenticated.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "AI provider ID.",
@@ -155,7 +177,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Required:            true,
 			},
 			"api_key_wo": schema.StringAttribute{
-				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional for Claude Platform for AWS; omit it to allow ambient AWS authentication. Bump `api_key_wo_version` to rotate it.",
+				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration does not delete a stored key. Bump `api_key_wo_version` to rotate it.",
 				Optional:            true,
 				Sensitive:           true,
 				WriteOnly:           true,
@@ -177,8 +199,11 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Optional:            true,
 				Attributes: map[string]schema.Attribute{
 					"claude_platform_aws": schema.SingleNestedAttribute{
-						MarkdownDescription: "Claude Platform for AWS settings. Valid only for `type = \"anthropic\"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials. Requires Coder v2.38.0 or later.",
+						MarkdownDescription: "Claude Platform for AWS settings. Valid only for `type = \"anthropic\"`. Coder authenticates each request with the first available of: the user's own key when Bring Your Own Key is enabled, the stored `api_key_wo` (a Claude Platform on AWS key, not an api.anthropic.com key), or SigV4 signing with the Coder server's ambient AWS credentials. A stored key stays in use until it is removed through the Coder UI or API. Requires Coder v2.38.0 or later.",
 						Optional:            true,
+						Validators: []validator.Object{
+							objectvalidator.ConflictsWith(path.MatchRoot("settings").AtName("bedrock")),
+						},
 						Attributes: map[string]schema.Attribute{
 							"region": schema.StringAttribute{
 								MarkdownDescription: "AWS region for the regional endpoint and SigV4 signing scope. Required even when `base_url` points to a proxy.",
@@ -324,7 +349,8 @@ func (r *AIProviderResource) Configure(ctx context.Context, req resource.Configu
 
 func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	// The pointer-based model can't decode an unknown settings variant object
-	// (e.g. settings = var.x), so defer validation until those are known.
+	// (e.g. settings = { claude_platform_aws = var.x }), so defer validation
+	// until those are known.
 	var settings types.Object
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("settings"), &settings)...)
 	if resp.Diagnostics.HasError() {
@@ -333,16 +359,9 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 	if settings.IsUnknown() {
 		return
 	}
-	if !settings.IsNull() {
-		for _, variant := range []string{"bedrock", "claude_platform_aws"} {
-			var value types.Object
-			resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("settings").AtName(variant), &value)...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-			if value.IsUnknown() {
-				return
-			}
+	for _, value := range settings.Attributes() {
+		if value.IsUnknown() {
+			return
 		}
 	}
 
@@ -387,10 +406,6 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 
 	bedrock := data.bedrock()
 	claudePlatformAWS := data.claudePlatformAWS()
-	if bedrock != nil && claudePlatformAWS != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("settings"), "Invalid Settings", "`settings.bedrock` and `settings.claude_platform_aws` are mutually exclusive.")
-		return
-	}
 	if bedrock == nil && claudePlatformAWS == nil {
 		switch {
 		case providerType == codersdk.AIProviderTypeBedrock:
@@ -406,6 +421,7 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 		if providerType != codersdk.AIProviderTypeAnthropic {
 			resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("claude_platform_aws"), "Invalid Attribute Combination", "`settings.claude_platform_aws` is only valid when `type` is `anthropic`.")
 		}
+		// ConflictsWith reports the combination with bedrock.
 		return
 	}
 
@@ -463,7 +479,6 @@ func (r *AIProviderResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
 	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
-	checkClaudePlatformAWSDropped(config, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -540,7 +555,6 @@ func (r *AIProviderResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
 	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
-	checkClaudePlatformAWSDropped(config, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -604,10 +618,10 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 		patch.BaseURL = &v
 	}
 
-	// Only send settings when either Terraform state or the plan represents a
-	// known settings variant. This also keeps older provider versions safe: they
-	// cannot represent Claude Platform settings, so unrelated updates omit the
-	// field and the Coder API preserves the stored variant.
+	// Send settings when state or plan has a variant. Omitted settings leave
+	// the stored variant unchanged; ModifyPlan rejects removing one. The server
+	// merges Bedrock credentials, so omitting the credential pointers leaves
+	// stored AWS keys untouched.
 	credentialsChanged := credentialsVersionChanged(m.bedrock(), state.bedrock())
 	if m.hasSettings() || state.hasSettings() {
 		settings := m.sdkSettings(config, credentialsChanged, diags)
@@ -713,8 +727,8 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 	}
 	if provider.Settings.ClaudePlatformAWS != nil {
 		out.Settings = &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
-			Region:      stringValueOrNull(provider.Settings.ClaudePlatformAWS.Region),
-			WorkspaceID: stringValueOrNull(provider.Settings.ClaudePlatformAWS.WorkspaceID),
+			Region:      types.StringValue(provider.Settings.ClaudePlatformAWS.Region),
+			WorkspaceID: types.StringValue(provider.Settings.ClaudePlatformAWS.WorkspaceID),
 		}}
 	}
 	if provider.Settings.Bedrock != nil {
@@ -735,17 +749,6 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 		}
 	}
 	return out
-}
-
-func checkClaudePlatformAWSDropped(config AIProviderResourceModel, provider codersdk.AIProvider, diags *diag.Diagnostics) {
-	if config.claudePlatformAWS() == nil || provider.Settings.ClaudePlatformAWS != nil {
-		return
-	}
-	diags.AddAttributeError(
-		path.Root("settings").AtName("claude_platform_aws"),
-		"Claude Platform for AWS settings not supported by this Coder deployment",
-		"The Coder server accepted the request but did not persist `settings.claude_platform_aws`. Upgrade to Coder v2.38.0 or later, or remove the settings block.",
-	)
 }
 
 // A Coder server older than v2.35.0 drops the unknown role_arn JSON key
