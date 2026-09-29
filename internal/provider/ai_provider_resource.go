@@ -177,7 +177,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Optional:            true,
 				Attributes: map[string]schema.Attribute{
 					"claude_platform_aws": schema.SingleNestedAttribute{
-						MarkdownDescription: "Claude Platform for AWS settings. Valid only for `type = \"anthropic\"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials.",
+						MarkdownDescription: "Claude Platform for AWS settings. Valid only for `type = \"anthropic\"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials. Requires Coder v2.38.0 or later.",
 						Optional:            true,
 						Attributes: map[string]schema.Attribute{
 							"region": schema.StringAttribute{
@@ -463,6 +463,7 @@ func (r *AIProviderResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
 	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
+	checkClaudePlatformAWSDropped(config, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -539,6 +540,7 @@ func (r *AIProviderResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
 	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
+	checkClaudePlatformAWSDropped(config, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -602,10 +604,10 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 		patch.BaseURL = &v
 	}
 
-	// Send settings whenever they are (or were) present. Settings variants are
-	// full replacements, so this also explicitly clears settings when the
-	// configured variant is removed. The server merges omitted Bedrock
-	// credential pointers, leaving stored AWS keys untouched.
+	// Only send settings when either Terraform state or the plan represents a
+	// known settings variant. This also keeps older provider versions safe: they
+	// cannot represent Claude Platform settings, so unrelated updates omit the
+	// field and the Coder API preserves the stored variant.
 	credentialsChanged := credentialsVersionChanged(m.bedrock(), state.bedrock())
 	if m.hasSettings() || state.hasSettings() {
 		settings := m.sdkSettings(config, credentialsChanged, diags)
@@ -733,6 +735,17 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 		}
 	}
 	return out
+}
+
+func checkClaudePlatformAWSDropped(config AIProviderResourceModel, provider codersdk.AIProvider, diags *diag.Diagnostics) {
+	if config.claudePlatformAWS() == nil || provider.Settings.ClaudePlatformAWS != nil {
+		return
+	}
+	diags.AddAttributeError(
+		path.Root("settings").AtName("claude_platform_aws"),
+		"Claude Platform for AWS settings not supported by this Coder deployment",
+		"The Coder server accepted the request but did not persist `settings.claude_platform_aws`. Upgrade to Coder v2.38.0 or later, or remove the settings block.",
+	)
 }
 
 // A Coder server older than v2.35.0 drops the unknown role_arn JSON key

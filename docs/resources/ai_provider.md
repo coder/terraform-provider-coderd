@@ -122,7 +122,7 @@ resource "coderd_ai_provider" "openai" {
 Optional:
 
 - `bedrock` (Attributes) AWS Bedrock settings. Valid only for `type = "bedrock"` or `type = "anthropic"`. (see [below for nested schema](#nestedatt--settings--bedrock))
-- `claude_platform_aws` (Attributes) Claude Platform for AWS settings. Valid only for `type = "anthropic"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials. (see [below for nested schema](#nestedatt--settings--claude_platform_aws))
+- `claude_platform_aws` (Attributes) Claude Platform for AWS settings. Valid only for `type = "anthropic"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials. Requires Coder v2.38.0 or later. (see [below for nested schema](#nestedatt--settings--claude_platform_aws))
 
 <a id="nestedatt--settings--bedrock"></a>
 ### Nested Schema for `settings.bedrock`

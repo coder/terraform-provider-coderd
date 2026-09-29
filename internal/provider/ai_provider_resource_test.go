@@ -1292,6 +1292,27 @@ func TestAIProviderCreateRequestClaudePlatformAWS(t *testing.T) {
 	}, req.Settings.ClaudePlatformAWS)
 }
 
+func TestAIProviderLegacyShapedUpdateOmitsSettings(t *testing.T) {
+	t.Parallel()
+
+	// Provider versions before Claude Platform support cannot represent its
+	// settings in configuration or state. An unrelated update must omit settings
+	// so a newer Coder server preserves the stored variant.
+	state := AIProviderResourceModel{
+		DisplayName: types.StringValue("Claude Platform"),
+		Enabled:     types.BoolValue(true),
+		BaseURL:     types.StringValue("https://aws-external-anthropic.us-east-1.api.aws"),
+	}
+	plan := state
+	plan.DisplayName = types.StringValue("Claude Platform for AWS")
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, plan, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.DisplayName)
+	require.Nil(t, patch.Settings, "omitted settings preserve variants unknown to an older provider")
+}
+
 func TestAIProviderUpdateRequestClaudePlatformAWS(t *testing.T) {
 	t.Parallel()
 
@@ -1373,6 +1394,47 @@ func TestAIProviderUpdateRequestClaudePlatformAWSRemovalSendsEmptySettings(t *te
 	require.NotNil(t, patch.Settings, "removing settings must send an explicit empty settings object")
 	require.Nil(t, patch.Settings.Bedrock)
 	require.Nil(t, patch.Settings.ClaudePlatformAWS)
+}
+
+func TestAIProviderCheckClaudePlatformAWSDropped(t *testing.T) {
+	t.Parallel()
+
+	config := AIProviderResourceModel{
+		Settings: &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+			Region:      types.StringValue("us-east-1"),
+			WorkspaceID: types.StringValue("wrkspc_test"),
+		}},
+	}
+
+	for name, tc := range map[string]struct {
+		response  codersdk.AIProvider
+		wantError bool
+	}{
+		"persisted": {
+			response: codersdk.AIProvider{Settings: codersdk.AIProviderSettings{
+				ClaudePlatformAWS: &codersdk.AIProviderClaudePlatformAWSSettings{
+					Region:      "us-east-1",
+					WorkspaceID: "wrkspc_test",
+				},
+			}},
+		},
+		"dropped": {
+			response:  codersdk.AIProvider{},
+			wantError: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var diags diag.Diagnostics
+			checkClaudePlatformAWSDropped(config, tc.response, &diags)
+			require.Equal(t, tc.wantError, diags.HasError())
+			if tc.wantError {
+				require.Contains(t, diags.Errors()[0].Summary(), "Claude Platform for AWS settings not supported")
+				require.Contains(t, diags.Errors()[0].Detail(), "Coder v2.38.0")
+			}
+		})
+	}
 }
 
 func TestAIProviderStateFromProviderMapsClaudePlatformAWS(t *testing.T) {
