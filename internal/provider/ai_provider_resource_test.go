@@ -39,18 +39,23 @@ func TestAccAIProviderResource(t *testing.T) {
 	client := integration.StartCoder(ctx, t, "ai_provider_acc", integration.UseLicense)
 
 	cfg1 := testAccAIProviderResourceConfig{
-		URL:              client.URL.String(),
-		Token:            client.SessionToken(),
-		OpenAIKey:        "sk-test-primary-000000",
-		OpenAIKeyVersion: 1,
-		BedrockBaseURL:   "https://bedrock-runtime.us-east-1.amazonaws.com",
+		URL:                   client.URL.String(),
+		Token:                 client.SessionToken(),
+		OpenAIKey:             "sk-test-primary-000000",
+		OpenAIKeyVersion:      1,
+		BedrockBaseURL:        "https://bedrock-runtime.us-east-1.amazonaws.com",
+		ClaudeWorkspaceID:     "wrkspc_initial",
+		IncludeClaudeSettings: true,
 	}
 	cfg2 := cfg1
 	cfg2.OpenAIKey = "sk-test-primary-111111"
 	cfg2.OpenAIKeyVersion = 2
+	cfg2.ClaudeWorkspaceID = "wrkspc_updated"
 	// Changing base_url to a different region must re-derive settings.bedrock.region.
 	cfg3 := cfg2
 	cfg3.BedrockBaseURL = "https://bedrock-runtime.us-west-2.amazonaws.com"
+	cfg4 := cfg3
+	cfg4.IncludeClaudeSettings = false
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -65,6 +70,8 @@ func TestAccAIProviderResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg1.OpenAIKey)),
 					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_wo"),
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-east-1"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.region", "us-east-1"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.workspace_id", cfg1.ClaudeWorkspaceID),
 				),
 			},
 			{
@@ -75,10 +82,17 @@ func TestAccAIProviderResource(t *testing.T) {
 				ImportStateVerifyIgnore: []string{"api_key_wo", "api_key_wo_version"},
 			},
 			{
+				ResourceName:      "coderd_ai_provider.claude_platform",
+				ImportState:       true,
+				ImportStateId:     "claude-platform-acc",
+				ImportStateVerify: true,
+			},
+			{
 				Config: cfg2.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_wo_version", "2"),
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg2.OpenAIKey)),
+					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.workspace_id", cfg2.ClaudeWorkspaceID),
 				),
 			},
 			{
@@ -87,16 +101,24 @@ func TestAccAIProviderResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
 				),
 			},
+			{
+				Config: cfg4.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("coderd_ai_provider.claude_platform", "settings"),
+				),
+			},
 		},
 	})
 }
 
 type testAccAIProviderResourceConfig struct {
-	URL              string
-	Token            string
-	OpenAIKey        string
-	OpenAIKeyVersion int
-	BedrockBaseURL   string
+	URL                   string
+	Token                 string
+	OpenAIKey             string
+	OpenAIKeyVersion      int
+	BedrockBaseURL        string
+	ClaudeWorkspaceID     string
+	IncludeClaudeSettings bool
 }
 
 func (c testAccAIProviderResourceConfig) String(t *testing.T) string {
@@ -116,6 +138,21 @@ resource "coderd_ai_provider" "openai" {
 
   api_key_wo         = "{{.OpenAIKey}}"
   api_key_wo_version = {{.OpenAIKeyVersion}}
+}
+
+resource "coderd_ai_provider" "claude_platform" {
+  type         = "anthropic"
+  name         = "claude-platform-acc"
+  display_name = "Claude Platform Acceptance"
+  enabled      = true
+  base_url     = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  {{if .IncludeClaudeSettings}}settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "{{.ClaudeWorkspaceID}}"
+    }
+  }{{end}}
 }
 
 resource "coderd_ai_provider" "bedrock" {
@@ -165,7 +202,7 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
   api_key_wo_version = 1
 }
 `,
-			wantError: `string length must be at least 1`,
+			wantError: `(?s)string length must be at\s+least\s+1`,
 		},
 		"bedrock known config requires region or credentials": {
 			body: `resource "coderd_ai_provider" "test" {
@@ -840,9 +877,12 @@ func aiProviderPlanWithRoleARN(t *testing.T, roleARN tftypes.Value) tfsdk.Plan {
 	for name, attrType := range objType.AttributeTypes {
 		rootVals[name] = tftypes.NewValue(attrType, nil)
 	}
-	rootVals["settings"] = tftypes.NewValue(settingsType, map[string]tftypes.Value{
-		"bedrock": tftypes.NewValue(bedrockType, bedrockVals),
-	})
+	settingsVals := map[string]tftypes.Value{}
+	for name, attrType := range settingsType.AttributeTypes {
+		settingsVals[name] = tftypes.NewValue(attrType, nil)
+	}
+	settingsVals["bedrock"] = tftypes.NewValue(bedrockType, bedrockVals)
+	rootVals["settings"] = tftypes.NewValue(settingsType, settingsVals)
 	return tfsdk.Plan{Schema: schemaResp.Schema, Raw: tftypes.NewValue(objType, rootVals)}
 }
 
@@ -1087,6 +1127,326 @@ func TestAIProviderCheckBedrockProtocolDropped(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAIProviderClaudePlatformAWSSchemaValidation(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		body      string
+		wantError string
+	}{
+		"without API key": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "anthropic"
+  name     = "claude-platform"
+  base_url = "https://api.anthropic.com"
+
+  settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "wrkspc_test"
+    }
+  }
+}
+`,
+		},
+		"missing region": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "anthropic"
+  name     = "claude-platform"
+  base_url = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  settings = {
+    claude_platform_aws = {
+      workspace_id = "wrkspc_test"
+    }
+  }
+}
+`,
+			wantError: `region`,
+		},
+		"empty region": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "anthropic"
+  name     = "claude-platform"
+  base_url = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  settings = {
+    claude_platform_aws = {
+      region       = ""
+      workspace_id = "wrkspc_test"
+    }
+  }
+}
+`,
+			wantError: `(?s)string length must be at\s+least\s+1`,
+		},
+		"missing workspace ID": {
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "anthropic"
+  name     = "claude-platform"
+  base_url = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  settings = {
+    claude_platform_aws = {
+      region = "us-east-1"
+    }
+  }
+}
+`,
+			wantError: `workspace_id`,
+		},
+		"claude platform settings conflict with bedrock": {
+			wantError: `exactly one|mutually exclusive|conflict`,
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "anthropic"
+  name     = "claude-platform"
+  base_url = "https://api.anthropic.com"
+
+  settings = {
+    bedrock = {
+      region = "us-east-1"
+    }
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "wrkspc_test"
+    }
+  }
+}
+`,
+		},
+		"claude platform settings require anthropic": {
+			wantError: `only valid.*anthropic|type.*anthropic`,
+			body: `resource "coderd_ai_provider" "test" {
+  type     = "openai"
+  name     = "claude-platform"
+  base_url = "https://api.openai.com/v1"
+
+  settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "wrkspc_test"
+    }
+  }
+}
+`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv := newMockServer(nil)
+			defer srv.Close()
+
+			step := resource.TestStep{
+				Config:             testAIProviderValidationConfigWithURL(srv.URL, tc.body),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			}
+			if tc.wantError != "" {
+				step.ExpectError = regexp.MustCompile(tc.wantError)
+			}
+
+			resource.Test(t, resource.TestCase{
+				IsUnitTest:               true,
+				TerraformVersionChecks:   testAIProviderTerraformVersionChecks(),
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps:                    []resource.TestStep{step},
+			})
+		})
+	}
+}
+
+func TestAIProviderResourceValidationDefersUnknownClaudePlatformAWSConfig(t *testing.T) {
+	t.Parallel()
+
+	srv := newMockServer(nil)
+	defer srv.Close()
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		TerraformVersionChecks:   testAIProviderTerraformVersionChecks(),
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAIProviderValidationConfigWithURL(srv.URL, `variable "settings" {
+  type = object({
+    claude_platform_aws = optional(object({
+      region       = optional(string)
+      workspace_id = optional(string)
+    }))
+  })
+}
+
+resource "coderd_ai_provider" "test" {
+  type     = "anthropic"
+  name     = "claude-platform"
+  base_url = "https://api.anthropic.com"
+  settings = var.settings
+}
+`),
+				ConfigVariables: config.Variables{
+					"settings": config.ObjectVariable(map[string]config.Variable{
+						"claude_platform_aws": config.ObjectVariable(map[string]config.Variable{
+							"region":       config.StringVariable("us-east-1"),
+							"workspace_id": config.StringVariable("wrkspc_test"),
+						}),
+					}),
+				},
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+func TestAIProviderCreateRequestClaudePlatformAWS(t *testing.T) {
+	t.Parallel()
+
+	plan := AIProviderResourceModel{
+		Type:        types.StringValue(string(codersdk.AIProviderTypeAnthropic)),
+		Name:        types.StringValue("claude-platform"),
+		DisplayName: types.StringValue("Claude Platform"),
+		Enabled:     types.BoolValue(true),
+		BaseURL:     types.StringValue("https://api.anthropic.com"),
+		Settings: &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+			Region:      types.StringValue("us-east-1"),
+			WorkspaceID: types.StringValue("wrkspc_test"),
+		}},
+	}
+	config := plan
+	config.APIKeyWO = types.StringValue("sk-test")
+
+	var diags diag.Diagnostics
+	req := plan.createRequest(config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.Equal(t, codersdk.AIProviderTypeAnthropic, req.Type)
+	require.Equal(t, []string{"sk-test"}, req.APIKeys, "Claude Platform for AWS accepts stored provider keys")
+	require.Nil(t, req.Settings.Bedrock)
+	require.Equal(t, &codersdk.AIProviderClaudePlatformAWSSettings{
+		Region:      "us-east-1",
+		WorkspaceID: "wrkspc_test",
+	}, req.Settings.ClaudePlatformAWS)
+}
+
+func TestAIProviderUpdateRequestClaudePlatformAWS(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:        types.StringValue(string(codersdk.AIProviderTypeAnthropic)),
+		DisplayName: types.StringValue("Claude Platform"),
+		Enabled:     types.BoolValue(true),
+		BaseURL:     types.StringValue("https://api.anthropic.com"),
+		Settings: &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+			Region:      types.StringValue("us-east-1"),
+			WorkspaceID: types.StringValue("wrkspc_old"),
+		}},
+	}
+	plan := state
+	plan.DisplayName = types.StringValue("Claude Platform for AWS")
+	plan.Settings = &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+		Region:      types.StringValue("eu-west-1"),
+		WorkspaceID: types.StringValue("wrkspc_new"),
+	}}
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, plan, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.DisplayName)
+	require.NotNil(t, patch.Settings)
+	require.Nil(t, patch.Settings.Bedrock)
+	require.Equal(t, &codersdk.AIProviderClaudePlatformAWSSettings{
+		Region:      "eu-west-1",
+		WorkspaceID: "wrkspc_new",
+	}, patch.Settings.ClaudePlatformAWS)
+}
+
+func TestAIProviderUpdateRequestClaudePlatformAWSAPIKeyRotation(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:            types.StringValue(string(codersdk.AIProviderTypeAnthropic)),
+		Enabled:         types.BoolValue(true),
+		BaseURL:         types.StringValue("https://aws-external-anthropic.us-east-1.api.aws"),
+		APIKeyWOVersion: types.Int64Value(1),
+		Settings: &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+			Region:      types.StringValue("us-east-1"),
+			WorkspaceID: types.StringValue("wrkspc_test"),
+		}},
+	}
+	plan := state
+	plan.APIKeyWOVersion = types.Int64Value(2)
+	config := plan
+	config.APIKeyWO = types.StringValue("sk-rotated")
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Settings)
+	require.NotNil(t, patch.Settings.ClaudePlatformAWS)
+	require.NotNil(t, patch.APIKeys)
+	require.Len(t, *patch.APIKeys, 1)
+	require.Equal(t, "sk-rotated", *(*patch.APIKeys)[0].APIKey)
+}
+
+func TestAIProviderUpdateRequestClaudePlatformAWSRemovalSendsEmptySettings(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{
+		Type:    types.StringValue(string(codersdk.AIProviderTypeAnthropic)),
+		Enabled: types.BoolValue(true),
+		BaseURL: types.StringValue("https://api.anthropic.com"),
+		Settings: &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+			Region:      types.StringValue("us-east-1"),
+			WorkspaceID: types.StringValue("wrkspc_test"),
+		}},
+	}
+	plan := state
+	plan.Settings = nil
+
+	var diags diag.Diagnostics
+	patch := plan.updateRequest(state, plan, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.NotNil(t, patch.Settings, "removing settings must send an explicit empty settings object")
+	require.Nil(t, patch.Settings.Bedrock)
+	require.Nil(t, patch.Settings.ClaudePlatformAWS)
+}
+
+func TestAIProviderStateFromProviderMapsClaudePlatformAWS(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{}.stateFromProvider(codersdk.AIProvider{
+		ID:      uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		Type:    codersdk.AIProviderTypeAnthropic,
+		Name:    "claude-platform",
+		BaseURL: "https://aws-external-anthropic.us-east-1.api.aws",
+		Settings: codersdk.AIProviderSettings{ClaudePlatformAWS: &codersdk.AIProviderClaudePlatformAWSSettings{
+			Region:      "us-east-1",
+			WorkspaceID: "wrkspc_test",
+		}},
+	})
+
+	require.NotNil(t, state.Settings)
+	require.NotNil(t, state.Settings.ClaudePlatformAWS)
+	require.Equal(t, "us-east-1", state.Settings.ClaudePlatformAWS.Region.ValueString())
+	require.Equal(t, "wrkspc_test", state.Settings.ClaudePlatformAWS.WorkspaceID.ValueString())
+}
+
+func TestAIProviderStateFromProviderMapsEmptyClaudePlatformAWSStringsToNull(t *testing.T) {
+	t.Parallel()
+
+	state := AIProviderResourceModel{}.stateFromProvider(codersdk.AIProvider{
+		ID:       uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		Type:     codersdk.AIProviderTypeAnthropic,
+		Name:     "claude-platform",
+		BaseURL:  "https://api.anthropic.com",
+		Settings: codersdk.AIProviderSettings{ClaudePlatformAWS: &codersdk.AIProviderClaudePlatformAWSSettings{}},
+	})
+
+	require.NotNil(t, state.Settings)
+	require.NotNil(t, state.Settings.ClaudePlatformAWS)
+	require.True(t, state.Settings.ClaudePlatformAWS.Region.IsNull())
+	require.True(t, state.Settings.ClaudePlatformAWS.WorkspaceID.IsNull())
 }
 
 func TestAIProviderStateFromProviderRetainsProtocol(t *testing.T) {

@@ -57,7 +57,13 @@ type AIProviderResourceModel struct {
 }
 
 type AIProviderSettingsModel struct {
-	Bedrock *AIProviderBedrockSettingsModel `tfsdk:"bedrock"`
+	Bedrock           *AIProviderBedrockSettingsModel           `tfsdk:"bedrock"`
+	ClaudePlatformAWS *AIProviderClaudePlatformAWSSettingsModel `tfsdk:"claude_platform_aws"`
+}
+
+type AIProviderClaudePlatformAWSSettingsModel struct {
+	Region      types.String `tfsdk:"region"`
+	WorkspaceID types.String `tfsdk:"workspace_id"`
 }
 
 type AIProviderBedrockSettingsModel struct {
@@ -89,7 +95,8 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 			"-> `_wo` attributes are [write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments): " +
 			"their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.\n\n" +
 			"Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.\n\n" +
-			"For `type = \"bedrock\"`, omit `settings.bedrock.access_key_wo` and `settings.bedrock.access_key_secret_wo` to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.",
+			"For `type = \"bedrock\"`, omit `settings.bedrock.access_key_wo` and `settings.bedrock.access_key_secret_wo` to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.\n\n" +
+			"Claude Platform for AWS uses `type = \"anthropic\"` with `settings.claude_platform_aws`. Its provider API key is optional; when no client or stored provider key is available, Coder signs requests with the server process's ambient AWS credentials.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "AI provider ID.",
@@ -148,7 +155,7 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Required:            true,
 			},
 			"api_key_wo": schema.StringAttribute{
-				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Bump `api_key_wo_version` to rotate it.",
+				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional for Claude Platform for AWS; omit it to allow ambient AWS authentication. Bump `api_key_wo_version` to rotate it.",
 				Optional:            true,
 				Sensitive:           true,
 				WriteOnly:           true,
@@ -169,6 +176,26 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				MarkdownDescription: "Type-specific provider settings.",
 				Optional:            true,
 				Attributes: map[string]schema.Attribute{
+					"claude_platform_aws": schema.SingleNestedAttribute{
+						MarkdownDescription: "Claude Platform for AWS settings. Valid only for `type = \"anthropic\"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials.",
+						Optional:            true,
+						Attributes: map[string]schema.Attribute{
+							"region": schema.StringAttribute{
+								MarkdownDescription: "AWS region for the regional endpoint and SigV4 signing scope. Required even when `base_url` points to a proxy.",
+								Required:            true,
+								Validators: []validator.String{
+									stringvalidator.LengthAtLeast(1),
+								},
+							},
+							"workspace_id": schema.StringAttribute{
+								MarkdownDescription: "Claude Platform workspace ID sent in the `anthropic-workspace-id` header on every request.",
+								Required:            true,
+								Validators: []validator.String{
+									stringvalidator.LengthAtLeast(1),
+								},
+							},
+						},
+					},
 					"bedrock": schema.SingleNestedAttribute{
 						MarkdownDescription: "AWS Bedrock settings. Valid only for `type = \"bedrock\"` or `type = \"anthropic\"`.",
 						Optional:            true,
@@ -296,7 +323,7 @@ func (r *AIProviderResource) Configure(ctx context.Context, req resource.Configu
 }
 
 func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	// The pointer-based model can't decode an unknown settings/bedrock object
+	// The pointer-based model can't decode an unknown settings variant object
 	// (e.g. settings = var.x), so defer validation until those are known.
 	var settings types.Object
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("settings"), &settings)...)
@@ -307,13 +334,15 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 		return
 	}
 	if !settings.IsNull() {
-		var bedrock types.Object
-		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("settings").AtName("bedrock"), &bedrock)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		if bedrock.IsUnknown() {
-			return
+		for _, variant := range []string{"bedrock", "claude_platform_aws"} {
+			var value types.Object
+			resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("settings").AtName(variant), &value)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			if value.IsUnknown() {
+				return
+			}
 		}
 	}
 
@@ -357,13 +386,25 @@ func (r *AIProviderResource) ValidateConfig(ctx context.Context, req resource.Va
 	}
 
 	bedrock := data.bedrock()
-	if bedrock == nil {
+	claudePlatformAWS := data.claudePlatformAWS()
+	if bedrock != nil && claudePlatformAWS != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("settings"), "Invalid Settings", "`settings.bedrock` and `settings.claude_platform_aws` are mutually exclusive.")
+		return
+	}
+	if bedrock == nil && claudePlatformAWS == nil {
 		switch {
 		case providerType == codersdk.AIProviderTypeBedrock:
 			resp.Diagnostics.AddAttributeError(path.Root("settings"), "Missing Bedrock Settings", "`type = \"bedrock\"` requires `settings.bedrock` with at least `region` or write-only AWS credentials.")
 		case data.Settings != nil:
 			// An empty settings = {} produces a null-vs-empty diff; reject it.
-			resp.Diagnostics.AddAttributeError(path.Root("settings"), "Invalid Settings", "`settings` must include a `bedrock` block or be omitted.")
+			resp.Diagnostics.AddAttributeError(path.Root("settings"), "Invalid Settings", "`settings` must include a `bedrock` or `claude_platform_aws` block, or be omitted.")
+		}
+		return
+	}
+
+	if claudePlatformAWS != nil {
+		if providerType != codersdk.AIProviderTypeAnthropic {
+			resp.Diagnostics.AddAttributeError(path.Root("settings").AtName("claude_platform_aws"), "Invalid Attribute Combination", "`settings.claude_platform_aws` is only valid when `type` is `anthropic`.")
 		}
 		return
 	}
@@ -561,11 +602,12 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 		patch.BaseURL = &v
 	}
 
-	// Send settings whenever they are (or were) present. The server merges
-	// credentials, so omitting credential pointers leaves stored AWS keys
-	// untouched; dropping the bedrock block clears settings server-side.
+	// Send settings whenever they are (or were) present. Settings variants are
+	// full replacements, so this also explicitly clears settings when the
+	// configured variant is removed. The server merges omitted Bedrock
+	// credential pointers, leaving stored AWS keys untouched.
 	credentialsChanged := credentialsVersionChanged(m.bedrock(), state.bedrock())
-	if m.bedrock() != nil || state.bedrock() != nil {
+	if m.hasSettings() || state.hasSettings() {
 		settings := m.sdkSettings(config, credentialsChanged, diags)
 		patch.Settings = &settings
 	}
@@ -613,6 +655,13 @@ func (m AIProviderResourceModel) validateEffectiveUpdateState(state, config AIPr
 }
 
 func (m AIProviderResourceModel) sdkSettings(config AIProviderResourceModel, includeCredentials bool, diags *diag.Diagnostics) codersdk.AIProviderSettings {
+	if claudePlatformAWS := m.claudePlatformAWS(); claudePlatformAWS != nil {
+		return codersdk.AIProviderSettings{ClaudePlatformAWS: &codersdk.AIProviderClaudePlatformAWSSettings{
+			Region:      claudePlatformAWS.Region.ValueString(),
+			WorkspaceID: claudePlatformAWS.WorkspaceID.ValueString(),
+		}}
+	}
+
 	bedrock := m.bedrock()
 	if bedrock == nil {
 		return codersdk.AIProviderSettings{}
@@ -659,6 +708,12 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 	// len(APIKeys) is always 0 or 1; index 0 is the key we manage.
 	if len(provider.APIKeys) > 0 {
 		out.APIKeyMasked = types.StringValue(provider.APIKeys[0].Masked)
+	}
+	if provider.Settings.ClaudePlatformAWS != nil {
+		out.Settings = &AIProviderSettingsModel{ClaudePlatformAWS: &AIProviderClaudePlatformAWSSettingsModel{
+			Region:      stringValueOrNull(provider.Settings.ClaudePlatformAWS.Region),
+			WorkspaceID: stringValueOrNull(provider.Settings.ClaudePlatformAWS.WorkspaceID),
+		}}
 	}
 	if provider.Settings.Bedrock != nil {
 		out.Settings = &AIProviderSettingsModel{Bedrock: &AIProviderBedrockSettingsModel{
@@ -731,6 +786,17 @@ func bedrockProtocol(p types.String) codersdk.AIProviderBedrockProtocol {
 		return ""
 	}
 	return codersdk.AIProviderBedrockProtocol(p.ValueString())
+}
+
+func (m AIProviderResourceModel) hasSettings() bool {
+	return m.bedrock() != nil || m.claudePlatformAWS() != nil
+}
+
+func (m AIProviderResourceModel) claudePlatformAWS() *AIProviderClaudePlatformAWSSettingsModel {
+	if m.Settings == nil {
+		return nil
+	}
+	return m.Settings.ClaudePlatformAWS
 }
 
 func (m AIProviderResourceModel) bedrock() *AIProviderBedrockSettingsModel {

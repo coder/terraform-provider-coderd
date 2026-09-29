@@ -7,6 +7,7 @@ description: |-
   -> _wo attributes are write-only https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments: their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.
   Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.
   For type = "bedrock", omit settings.bedrock.access_key_wo and settings.bedrock.access_key_secret_wo to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.
+  Claude Platform for AWS uses type = "anthropic" with settings.claude_platform_aws. Its provider API key is optional; when no client or stored provider key is available, Coder signs requests with the server process's ambient AWS credentials.
 ---
 
 # coderd_ai_provider (Resource)
@@ -19,9 +20,31 @@ Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.
 
 For `type = "bedrock"`, omit `settings.bedrock.access_key_wo` and `settings.bedrock.access_key_secret_wo` to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.
 
+Claude Platform for AWS uses `type = "anthropic"` with `settings.claude_platform_aws`. Its provider API key is optional; when no client or stored provider key is available, Coder signs requests with the server process's ambient AWS credentials.
+
 ## Example Usage
 
 ```terraform
+resource "coderd_ai_provider" "claude_platform_aws" {
+  type         = "anthropic"
+  name         = "claude-platform-aws"
+  display_name = "Claude Platform for AWS"
+  enabled      = true
+  base_url     = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "wrkspc_example"
+    }
+  }
+
+  // Optional: set an Anthropic API key for stored-key authentication. Omit it
+  // to let Coder use the server process's ambient AWS credentials.
+  // api_key_wo         = var.anthropic_api_key
+  // api_key_wo_version = 1
+}
+
 resource "coderd_ai_provider" "bedrock" {
   type         = "bedrock"
   name         = "aws-bedrock"
@@ -80,7 +103,7 @@ resource "coderd_ai_provider" "openai" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Bump `api_key_wo_version` to rotate it.
+- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional for Claude Platform for AWS; omit it to allow ambient AWS authentication. Bump `api_key_wo_version` to rotate it.
 - `api_key_wo_version` (Number) Version for the write-only API key. Required when `api_key_wo` is set; bump it whenever `api_key_wo` changes to rotate the stored key.
 - `display_name` (String) Display name shown in Coder. If omitted, defaults to the provider name.
 - `enabled` (Boolean) Whether this AI provider is enabled. Defaults to true.
@@ -99,6 +122,7 @@ resource "coderd_ai_provider" "openai" {
 Optional:
 
 - `bedrock` (Attributes) AWS Bedrock settings. Valid only for `type = "bedrock"` or `type = "anthropic"`. (see [below for nested schema](#nestedatt--settings--bedrock))
+- `claude_platform_aws` (Attributes) Claude Platform for AWS settings. Valid only for `type = "anthropic"`. Provider API keys are optional; without one, Coder uses its ambient AWS credentials. (see [below for nested schema](#nestedatt--settings--claude_platform_aws))
 
 <a id="nestedatt--settings--bedrock"></a>
 ### Nested Schema for `settings.bedrock`
@@ -117,6 +141,15 @@ Optional:
 Read-Only:
 
 - `external_id` (String) STS external ID the server generates and sends on the AssumeRole call when `role_arn` is set. Reference it in the assumed role's trust policy `sts:ExternalId` condition. Null until `role_arn` is first configured; stable afterwards. Requires Coder v2.36.0 or later.
+
+
+<a id="nestedatt--settings--claude_platform_aws"></a>
+### Nested Schema for `settings.claude_platform_aws`
+
+Required:
+
+- `region` (String) AWS region for the regional endpoint and SigV4 signing scope. Required even when `base_url` points to a proxy.
+- `workspace_id` (String) Claude Platform workspace ID sent in the `anthropic-workspace-id` header on every request.
 
 ## Import
 

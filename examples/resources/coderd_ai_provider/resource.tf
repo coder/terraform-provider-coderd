@@ -1,3 +1,23 @@
+resource "coderd_ai_provider" "claude_platform_aws" {
+  type         = "anthropic"
+  name         = "claude-platform-aws"
+  display_name = "Claude Platform for AWS"
+  enabled      = true
+  base_url     = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "wrkspc_example"
+    }
+  }
+
+  // Optional: set an Anthropic API key for stored-key authentication. Omit it
+  // to let Coder use the server process's ambient AWS credentials.
+  // api_key_wo         = var.anthropic_api_key
+  // api_key_wo_version = 1
+}
+
 resource "coderd_ai_provider" "bedrock" {
   type         = "bedrock"
   name         = "aws-bedrock"
