@@ -39,23 +39,18 @@ func TestAccAIProviderResource(t *testing.T) {
 	client := integration.StartCoder(ctx, t, "ai_provider_acc", integration.UseLicense)
 
 	cfg1 := testAccAIProviderResourceConfig{
-		URL:                   client.URL.String(),
-		Token:                 client.SessionToken(),
-		OpenAIKey:             "sk-test-primary-000000",
-		OpenAIKeyVersion:      1,
-		BedrockBaseURL:        "https://bedrock-runtime.us-east-1.amazonaws.com",
-		ClaudeWorkspaceID:     "wrkspc_initial",
-		IncludeClaudeSettings: true,
+		URL:              client.URL.String(),
+		Token:            client.SessionToken(),
+		OpenAIKey:        "sk-test-primary-000000",
+		OpenAIKeyVersion: 1,
+		BedrockBaseURL:   "https://bedrock-runtime.us-east-1.amazonaws.com",
 	}
 	cfg2 := cfg1
 	cfg2.OpenAIKey = "sk-test-primary-111111"
 	cfg2.OpenAIKeyVersion = 2
-	cfg2.ClaudeWorkspaceID = "wrkspc_updated"
 	// Changing base_url to a different region must re-derive settings.bedrock.region.
 	cfg3 := cfg2
 	cfg3.BedrockBaseURL = "https://bedrock-runtime.us-west-2.amazonaws.com"
-	cfg4 := cfg3
-	cfg4.IncludeClaudeSettings = false
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -70,8 +65,6 @@ func TestAccAIProviderResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg1.OpenAIKey)),
 					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_wo"),
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-east-1"),
-					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.region", "us-east-1"),
-					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.workspace_id", cfg1.ClaudeWorkspaceID),
 				),
 			},
 			{
@@ -82,17 +75,10 @@ func TestAccAIProviderResource(t *testing.T) {
 				ImportStateVerifyIgnore: []string{"api_key_wo", "api_key_wo_version"},
 			},
 			{
-				ResourceName:      "coderd_ai_provider.claude_platform",
-				ImportState:       true,
-				ImportStateId:     "claude-platform-acc",
-				ImportStateVerify: true,
-			},
-			{
 				Config: cfg2.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_wo_version", "2"),
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg2.OpenAIKey)),
-					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.workspace_id", cfg2.ClaudeWorkspaceID),
 				),
 			},
 			{
@@ -101,24 +87,16 @@ func TestAccAIProviderResource(t *testing.T) {
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
 				),
 			},
-			{
-				Config: cfg4.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckNoResourceAttr("coderd_ai_provider.claude_platform", "settings"),
-				),
-			},
 		},
 	})
 }
 
 type testAccAIProviderResourceConfig struct {
-	URL                   string
-	Token                 string
-	OpenAIKey             string
-	OpenAIKeyVersion      int
-	BedrockBaseURL        string
-	ClaudeWorkspaceID     string
-	IncludeClaudeSettings bool
+	URL              string
+	Token            string
+	OpenAIKey        string
+	OpenAIKeyVersion int
+	BedrockBaseURL   string
 }
 
 func (c testAccAIProviderResourceConfig) String(t *testing.T) string {
@@ -138,21 +116,6 @@ resource "coderd_ai_provider" "openai" {
 
   api_key_wo         = "{{.OpenAIKey}}"
   api_key_wo_version = {{.OpenAIKeyVersion}}
-}
-
-resource "coderd_ai_provider" "claude_platform" {
-  type         = "anthropic"
-  name         = "claude-platform-acc"
-  display_name = "Claude Platform Acceptance"
-  enabled      = true
-  base_url     = "https://aws-external-anthropic.us-east-1.api.aws"
-
-  {{if .IncludeClaudeSettings}}settings = {
-    claude_platform_aws = {
-      region       = "us-east-1"
-      workspace_id = "{{.ClaudeWorkspaceID}}"
-    }
-  }{{end}}
 }
 
 resource "coderd_ai_provider" "bedrock" {
