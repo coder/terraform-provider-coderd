@@ -2,8 +2,10 @@ package provider
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"text/template"
 
@@ -137,6 +139,86 @@ resource "coderd_ai_provider" "bedrock" {
 	var out bytes.Buffer
 	require.NoError(t, template.Must(template.New("aiProviderResource").Parse(tpl)).Execute(&out, c))
 	return out.String()
+}
+
+func TestAccAIProviderResourceClaudePlatformAWS(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "ai_provider_claude_acc")
+
+	// Development builds of Coder report the previous release's version, so
+	// probe for support instead of comparing versions.
+	probe, err := client.CreateAIProvider(ctx, codersdk.CreateAIProviderRequest{
+		Type:    codersdk.AIProviderTypeAnthropic,
+		Name:    "claude-platform-probe",
+		BaseURL: "https://aws-external-anthropic.us-east-1.api.aws",
+		Settings: codersdk.AIProviderSettings{ClaudePlatformAWS: &codersdk.AIProviderClaudePlatformAWSSettings{
+			Region:      "us-east-1",
+			WorkspaceID: "wrkspc_probe",
+		}},
+	})
+	if err != nil && strings.Contains(err.Error(), "unknown settings type") {
+		t.Skip("Coder server does not support Claude Platform for AWS settings.")
+	}
+	require.NoError(t, err)
+	require.NoError(t, client.DeleteAIProvider(ctx, probe.ID.String()))
+
+	cfg := func(settings string) string {
+		return fmt.Sprintf(`
+provider "coderd" {
+  url   = %q
+  token = %q
+}
+
+resource "coderd_ai_provider" "claude_platform" {
+  type     = "anthropic"
+  name     = "claude-platform-acc"
+  base_url = "https://aws-external-anthropic.us-east-1.api.aws"
+  %s
+}
+`, client.URL.String(), client.SessionToken(), settings)
+	}
+	withWorkspace := func(id string) string {
+		return cfg(fmt.Sprintf(`settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = %q
+    }
+  }`, id))
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		TerraformVersionChecks:   testAIProviderTerraformVersionChecks(),
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: withWorkspace("wrkspc_initial"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.region", "us-east-1"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.workspace_id", "wrkspc_initial"),
+				),
+			},
+			{
+				ResourceName:      "coderd_ai_provider.claude_platform",
+				ImportState:       true,
+				ImportStateId:     "claude-platform-acc",
+				ImportStateVerify: true,
+			},
+			{
+				Config: withWorkspace("wrkspc_updated"),
+				Check:  resource.TestCheckResourceAttr("coderd_ai_provider.claude_platform", "settings.claude_platform_aws.workspace_id", "wrkspc_updated"),
+			},
+			{
+				Config:      cfg(""),
+				ExpectError: regexp.MustCompile("Cannot Remove Provider Settings"),
+			},
+		},
+	})
 }
 
 func TestAIProviderResourceSchemaValidation(t *testing.T) {
