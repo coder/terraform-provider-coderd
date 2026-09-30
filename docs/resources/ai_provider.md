@@ -7,7 +7,7 @@ description: |-
   -> _wo attributes are write-only https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments: their values are sent to Coder but never stored in Terraform state. This resource therefore requires Terraform 1.11 or later.
   Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.
   For type = "bedrock", omit settings.bedrock.access_key_wo and settings.bedrock.access_key_secret_wo to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.
-  Claude Platform for AWS uses type = "anthropic" with settings.claude_platform_aws; see that attribute for how requests are authenticated.
+  For Claude Platform for AWS, use type = "anthropic" with settings.claude_platform_aws.
 ---
 
 # coderd_ai_provider (Resource)
@@ -20,7 +20,7 @@ Configures an AI Provider for use with Coder's AI Gateway & Coder Agents.
 
 For `type = "bedrock"`, omit `settings.bedrock.access_key_wo` and `settings.bedrock.access_key_secret_wo` to use the AWS SDK default credential chain as resolved by the Coder server process (IAM role, IRSA, environment variables, shared config, SSO, IMDS, and more). Set both together to use static IAM-user credentials.
 
-Claude Platform for AWS uses `type = "anthropic"` with `settings.claude_platform_aws`; see that attribute for how requests are authenticated.
+For Claude Platform for AWS, use `type = "anthropic"` with `settings.claude_platform_aws`.
 
 ## Example Usage
 
@@ -39,7 +39,7 @@ resource "coderd_ai_provider" "claude_platform_aws" {
     }
   }
 
-  // Optional: a Claude Platform on AWS API key. Storing one disables IAM signing.
+  // Optional: a Claude Platform for AWS API key. Storing one disables IAM signing.
   // api_key_wo         = var.claude_platform_aws_api_key
   // api_key_wo_version = 1
 }
@@ -102,11 +102,11 @@ resource "coderd_ai_provider" "openai" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration does not delete a stored key. Bump `api_key_wo_version` to rotate it.
+- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration does not delete a stored key; replace the resource to delete it. Bump `api_key_wo_version` to rotate it.
 - `api_key_wo_version` (Number) Version for the write-only API key. Required when `api_key_wo` is set; bump it whenever `api_key_wo` changes to rotate the stored key.
 - `display_name` (String) Display name shown in Coder. If omitted, defaults to the provider name.
 - `enabled` (Boolean) Whether this AI provider is enabled. Defaults to true.
-- `settings` (Attributes) Type-specific provider settings. (see [below for nested schema](#nestedatt--settings))
+- `settings` (Attributes) Type-specific provider settings. Removing them from an existing provider replaces the provider. (see [below for nested schema](#nestedatt--settings))
 
 ### Read-Only
 
@@ -121,7 +121,7 @@ resource "coderd_ai_provider" "openai" {
 Optional:
 
 - `bedrock` (Attributes) AWS Bedrock settings. Valid only for `type = "bedrock"` or `type = "anthropic"`. (see [below for nested schema](#nestedatt--settings--bedrock))
-- `claude_platform_aws` (Attributes) Claude Platform for AWS settings. Valid only for `type = "anthropic"`. Coder authenticates each request with the first available of: the user's own key when Bring Your Own Key is enabled, the stored `api_key_wo` (a Claude Platform on AWS key, not an api.anthropic.com key), or SigV4 signing with the Coder server's ambient AWS credentials. A stored key stays in use until it is removed through the Coder UI or API. Requires Coder v2.38.0 or later. (see [below for nested schema](#nestedatt--settings--claude_platform_aws))
+- `claude_platform_aws` (Attributes) Claude Platform for AWS settings. Valid only for `type = "anthropic"`. Coder authenticates each request with the first available of: the user's own key when Bring Your Own Key is enabled, the stored `api_key_wo` (a Claude Platform for AWS key, not an api.anthropic.com key), or SigV4 signing with the Coder server's ambient AWS credentials. Requires Coder v2.38.0 or later. (see [below for nested schema](#nestedatt--settings--claude_platform_aws))
 
 <a id="nestedatt--settings--bedrock"></a>
 ### Nested Schema for `settings.bedrock`

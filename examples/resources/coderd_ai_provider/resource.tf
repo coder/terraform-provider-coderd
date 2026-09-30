@@ -12,7 +12,7 @@ resource "coderd_ai_provider" "claude_platform_aws" {
     }
   }
 
-  // Optional: a Claude Platform on AWS API key. Storing one disables IAM signing.
+  // Optional: a Claude Platform for AWS API key. Storing one disables IAM signing.
   // api_key_wo         = var.claude_platform_aws_api_key
   // api_key_wo_version = 1
 }
