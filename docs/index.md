@@ -3,16 +3,11 @@
 page_title: "coderd Provider"
 description: |-
   The coderd provider can be used to manage resources on a Coder deployment. The provider exposes resources and data sources for users, groups, templates, and workspace proxies.
-  ~> Warning
-  This provider is only compatible with Coder version 2.10.1 https://github.com/coder/coder/releases/tag/v2.10.1 and later.
 ---
 
 # coderd Provider
 
 The coderd provider can be used to manage resources on a Coder deployment. The provider exposes resources and data sources for users, groups, templates, and workspace proxies.
-
-~> **Warning**
-This provider is only compatible with Coder version [2.10.1](https://github.com/coder/coder/releases/tag/v2.10.1) and later.
 
 ## Example Usage
 
