@@ -30,9 +30,7 @@ type agentsModelACL struct {
 func agentsModelACLAttribute() schema.SingleNestedAttribute {
 	return schema.SingleNestedAttribute{
 		MarkdownDescription: "Users and groups that can use this model. Owners and organization admins can use every model. " +
-			"Coder gives the organization's `Everyone` group access to new models. That group's ID is the organization ID. " +
-			"If set, Terraform manages the full list and removes entries that are not in it. " +
-			"If omitted, Terraform does not change the list and records the list stored in Coder.",
+			"Coder gives the organization's `Everyone` group access to new models.",
 		Optional: true,
 		Computed: true,
 		PlanModifiers: []planmodifier.Object{

@@ -78,7 +78,7 @@ resource "coderd_agents_model" "sonnet" {
 
 ### Optional
 
-- `acl` (Attributes) Users and groups that can use this model. Owners and organization admins can use every model. Coder gives the organization's `Everyone` group access to new models. That group's ID is the organization ID. If set, Terraform manages the full list and removes entries that are not in it. If omitted, Terraform does not change the list and records the list stored in Coder. (see [below for nested schema](#nestedatt--acl))
+- `acl` (Attributes) Users and groups that can use this model. Owners and organization admins can use every model. Coder gives the organization's `Everyone` group access to new models. (see [below for nested schema](#nestedatt--acl))
 - `compression_threshold` (Number) Percentage of the context window at which Coder should compact chat context. Defaults to 70 and must be between 0 and 100.
 - `display_name` (String) Display name shown in Coder.
 - `enabled` (Boolean) Whether this model configuration is enabled. Defaults to true.
