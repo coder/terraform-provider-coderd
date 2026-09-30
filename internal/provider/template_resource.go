@@ -1,11 +1,19 @@
 package provider
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -166,6 +174,9 @@ type TemplateVersion struct {
 	Name               types.String `tfsdk:"name"`
 	Message            types.String `tfsdk:"message"`
 	Directory          types.String `tfsdk:"directory"`
+	Files              types.Map    `tfsdk:"files"`
+	ArchiveBase64      types.String `tfsdk:"archive_base64"`
+	ArchiveFile        types.String `tfsdk:"archive_file"`
 	DirectoryHash      types.String `tfsdk:"directory_hash"`
 	Active             types.Bool   `tfsdk:"active"`
 	TerraformVariables types.Set    `tfsdk:"tf_vars"`
@@ -500,7 +511,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Computed:   true,
 						},
 						"name": schema.StringAttribute{
-							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the directory contents, or the `tf_vars` attribute are updated.",
+							MarkdownDescription: "The name of the template version. Automatically generated if not provided. If provided, the name *must* change each time the version contents, or the `tf_vars` attribute are updated.",
 							Optional:            true,
 							Computed:            true,
 							Validators: []validator.String{
@@ -514,11 +525,33 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 							Default:             stringdefault.StaticString(""),
 						},
 						"directory": schema.StringAttribute{
-							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version.",
-							Required:            true,
+							MarkdownDescription: "A path to the directory to create the template version from. Changes in the directory contents will trigger the creation of a new template version. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
+							Optional:            true,
+							Validators: []validator.String{
+								stringvalidator.ExactlyOneOf(
+									path.MatchRelative().AtParent().AtName("directory"),
+									path.MatchRelative().AtParent().AtName("files"),
+									path.MatchRelative().AtParent().AtName("archive_base64"),
+									path.MatchRelative().AtParent().AtName("archive_file"),
+								),
+							},
+						},
+						"files": schema.MapAttribute{
+							MarkdownDescription: "The contents of the template version, as a map of file path (relative to the root of the template) to file content. Paths must be relative and must not escape the root of the template, and at least one `.tf` or `.tf.json` file must be present at the root. Changes in the contents will trigger the creation of a new template version. The files are archived exactly as if they were read from a `directory`, meaning hidden files are excluded, and `terraform.tfvars`/`*.auto.tfvars` entries are read as variable values instead of being uploaded. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
+							Optional:            true,
+							ElementType:         types.StringType,
+						},
+						"archive_base64": schema.StringAttribute{
+							MarkdownDescription: "A base64-encoded archive of the template version contents, uploaded as-is. The archive must be an uncompressed tar, a gzipped tar, or a zip archive. Changes in the archive will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
+							Optional:            true,
+						},
+						"archive_file": schema.StringAttribute{
+							MarkdownDescription: "A path to an archive file containing the template version contents, uploaded as-is. The archive must be an uncompressed tar, a gzipped tar, or a zip archive, such as the one produced by the `archive_file` data source. The file is read while planning, so it must already exist at plan time, and changes to its contents will trigger the creation of a new template version. Unlike `directory` and `files`, variable values are not discovered from the archive, so any `*.tfvars` files it contains are ignored - use `tf_vars` instead. Exactly one of `directory`, `files`, `archive_base64`, or `archive_file` must be set.",
+							Optional:            true,
 						},
 						"directory_hash": schema.StringAttribute{
-							Computed: true,
+							MarkdownDescription: "A hash of the template version contents, used to detect when a new version needs to be created.",
+							Computed:            true,
 						},
 						"active": schema.BoolAttribute{
 							MarkdownDescription: "Whether this version is the active version of the template. Only one version can be active at a time.",
@@ -708,6 +741,11 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 	data.reconcileVersionedMetadata(&authoritativeTemplate)
+
+	resp.Diagnostics.Append(data.Versions.resolveContentHashes(ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -924,6 +962,11 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	newState.reconcileVersionedMetadata(&templateResp)
 
+	resp.Diagnostics.Append(newState.Versions.resolveContentHashes(ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -1055,7 +1098,7 @@ func (d *versionsPlanModifier) Description(ctx context.Context) string {
 
 // MarkdownDescription implements planmodifier.Object.
 func (d *versionsPlanModifier) MarkdownDescription(context.Context) string {
-	return "Compute the hash of a directory."
+	return "Compute the hash of a template version's contents."
 }
 
 // PlanModifyObject implements planmodifier.List.
@@ -1103,12 +1146,12 @@ func (d *versionsPlanModifier) PlanModifyList(ctx context.Context, req planmodif
 	}
 
 	for i := range planVersions {
-		hash, err := computeDirectoryHash(planVersions[i].Directory.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
+		hash, hashDiags := versionContentHash(ctx, &planVersions[i])
+		resp.Diagnostics.Append(hashDiags...)
+		if resp.Diagnostics.HasError() {
 			return
 		}
-		planVersions[i].DirectoryHash = types.StringValue(hash)
+		planVersions[i].DirectoryHash = hash
 	}
 
 	var lv LastVersionsByHash
@@ -1209,6 +1252,274 @@ var templateACLRoleValidator = stringvalidator.OneOf(
 	string(codersdk.TemplateRoleUse),
 )
 
+// versionSourceKind identifies which of the mutually exclusive attributes a
+// template version takes its contents from.
+type versionSourceKind int
+
+const (
+	versionSourceNone versionSourceKind = iota
+	versionSourceDirectory
+	versionSourceFiles
+	versionSourceArchive
+	versionSourceArchiveFile
+)
+
+// versionSourceAttrs lists the mutually exclusive content attributes, for use
+// in diagnostics.
+const versionSourceAttrs = "`directory`, `files`, `archive_base64`, or `archive_file`"
+
+// versionSource reports which content attribute is set on a version.
+func versionSource(version *TemplateVersion) (versionSourceKind, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	kind := versionSourceNone
+	count := 0
+	if !version.Directory.IsNull() {
+		kind, count = versionSourceDirectory, count+1
+	}
+	if !version.Files.IsNull() {
+		kind, count = versionSourceFiles, count+1
+	}
+	if !version.ArchiveBase64.IsNull() {
+		kind, count = versionSourceArchive, count+1
+	}
+	if !version.ArchiveFile.IsNull() {
+		kind, count = versionSourceArchiveFile, count+1
+	}
+	switch {
+	case count == 0:
+		diags.AddError("Client Error", "A template version must set exactly one of "+versionSourceAttrs+".")
+	case count > 1:
+		diags.AddError("Client Error", "A template version can only set one of "+versionSourceAttrs+".")
+	}
+	return kind, diags
+}
+
+// filesFromMap converts a version's `files` attribute into a map of relative
+// path to content. It returns a nil map, without diagnostics, when the map or
+// any of its elements is still unknown.
+func filesFromMap(ctx context.Context, files types.Map) (map[string]string, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if files.IsNull() || files.IsUnknown() {
+		return nil, diags
+	}
+	elements := files.Elements()
+	for name, content := range elements {
+		if content.IsUnknown() {
+			return nil, diags
+		}
+		if content.IsNull() {
+			diags.AddError("Client Error", fmt.Sprintf("The contents of file %q are null. Every entry in `files` must be a string.", name))
+			return nil, diags
+		}
+	}
+	out := make(map[string]string, len(elements))
+	diags.Append(files.ElementsAs(ctx, &out, false)...)
+	if diags.HasError() {
+		return nil, diags
+	}
+	return out, diags
+}
+
+// filesHaveTerraform reports whether a `files` map contains a Terraform file at
+// the root of the template.
+func filesHaveTerraform(files map[string]string) bool {
+	for name := range files {
+		rel := filepath.Clean(filepath.FromSlash(name))
+		if filepath.Dir(rel) != "." {
+			continue
+		}
+		if strings.HasSuffix(rel, ".tf") || strings.HasSuffix(rel, ".tf.json") {
+			return true
+		}
+	}
+	return false
+}
+
+// writeFiles materializes a `files` map into dir.
+func writeFiles(dir string, files map[string]string) error {
+	for name, content := range files {
+		rel := filepath.Clean(filepath.FromSlash(name))
+		if filepath.IsAbs(rel) || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("invalid file path %q: paths must be relative to the root of the template, and must not escape it", name)
+		}
+		target := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("failed to create directory for %q: %w", name, err)
+		}
+		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("failed to write %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// Magic bytes identifying the archive formats accepted by `archive_base64` and
+// `archive_file`.
+var (
+	gzipMagic = []byte{0x1f, 0x8b}
+	zipMagic  = []byte("PK\x03\x04")
+)
+
+// normalizeArchive sanity-checks raw archive contents and returns the bytes to
+// upload along with the content type to upload them as. An uncompressed tar, a
+// gzipped tar, or a zip archive is accepted; a gzipped tar is decompressed.
+func normalizeArchive(raw []byte) (string, []byte, error) {
+	switch {
+	case bytes.HasPrefix(raw, gzipMagic):
+		payload, err := gunzipArchive(raw)
+		if err != nil {
+			return "", nil, err
+		}
+		if err := validateTarArchive(payload); err != nil {
+			return "", nil, fmt.Errorf("the gzipped archive does not contain a tar archive: %w", err)
+		}
+		return codersdk.ContentTypeTar, payload, nil
+	case bytes.HasPrefix(raw, zipMagic):
+		if err := checkArchiveSize(len(raw)); err != nil {
+			return "", nil, err
+		}
+		if _, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw))); err != nil {
+			return "", nil, fmt.Errorf("the archive is not a readable zip archive: %w", err)
+		}
+		return codersdk.ContentTypeZip, raw, nil
+	default:
+		if err := checkArchiveSize(len(raw)); err != nil {
+			return "", nil, err
+		}
+		if err := validateTarArchive(raw); err != nil {
+			return "", nil, fmt.Errorf("the archive must be an uncompressed tar, a gzipped tar, or a zip archive: %w", err)
+		}
+		return codersdk.ContentTypeTar, raw, nil
+	}
+}
+
+func checkArchiveSize(size int) error {
+	if int64(size) >= provisionersdk.TemplateArchiveLimit {
+		return fmt.Errorf("archive too big. Must be < %d bytes", provisionersdk.TemplateArchiveLimit)
+	}
+	return nil
+}
+
+func validateTarArchive(payload []byte) error {
+	_, err := tar.NewReader(bytes.NewReader(payload)).Next()
+	return err
+}
+
+// gunzipArchive decompresses a gzipped archive, buffering at most the archive
+// size limit.
+func gunzipArchive(raw []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("the archive is not a readable gzip archive: %w", err)
+	}
+	defer func() {
+		_ = reader.Close()
+	}()
+	var buf bytes.Buffer
+	if _, err := io.CopyN(&buf, reader, provisionersdk.TemplateArchiveLimit); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("failed to decompress the archive: %w", err)
+	}
+	if err := checkArchiveSize(buf.Len()); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodeArchive decodes and sanity-checks a version's `archive_base64`
+// attribute.
+func decodeArchive(archiveBase64 string) (string, []byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(archiveBase64)
+	if err != nil {
+		return "", nil, fmt.Errorf("`archive_base64` is not valid base64: %w", err)
+	}
+	return normalizeArchive(raw)
+}
+
+// readArchiveFile reads and sanity-checks the archive a version's
+// `archive_file` attribute points at.
+func readArchiveFile(filename string) (string, []byte, error) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read `archive_file`: %w", err)
+	}
+	return normalizeArchive(raw)
+}
+
+// versionContentHash hashes a version's contents, from whichever content
+// attribute is set. It returns an unknown string when the configured source
+// isn't known yet.
+func versionContentHash(ctx context.Context, version *TemplateVersion) (types.String, diag.Diagnostics) {
+	source, diags := versionSource(version)
+	if diags.HasError() {
+		return types.StringNull(), diags
+	}
+	switch source {
+	case versionSourceDirectory:
+		if version.Directory.IsUnknown() {
+			return types.StringUnknown(), diags
+		}
+		hash, err := computeDirectoryHash(version.Directory.ValueString())
+		if err != nil {
+			diags.AddError("Client Error", fmt.Sprintf("Failed to compute directory hash: %s", err))
+			return types.StringNull(), diags
+		}
+		return types.StringValue(hash), diags
+	case versionSourceFiles:
+		files, fileDiags := filesFromMap(ctx, version.Files)
+		diags.Append(fileDiags...)
+		if diags.HasError() {
+			return types.StringNull(), diags
+		}
+		if files == nil {
+			return types.StringUnknown(), diags
+		}
+		if !filesHaveTerraform(files) {
+			diags.AddError("Client Error", "`files` must contain at least one `.tf` or `.tf.json` file at the root of the template.")
+			return types.StringNull(), diags
+		}
+		return types.StringValue(computeFilesHash(files)), diags
+	case versionSourceArchive:
+		if version.ArchiveBase64.IsUnknown() {
+			return types.StringUnknown(), diags
+		}
+		_, archive, err := decodeArchive(version.ArchiveBase64.ValueString())
+		if err != nil {
+			diags.AddError("Client Error", fmt.Sprintf("Failed to read template version archive: %s", err))
+			return types.StringNull(), diags
+		}
+		return types.StringValue(computeBytesHash(archive)), diags
+	case versionSourceArchiveFile:
+		if version.ArchiveFile.IsUnknown() {
+			return types.StringUnknown(), diags
+		}
+		_, archive, err := readArchiveFile(version.ArchiveFile.ValueString())
+		if err != nil {
+			diags.AddError("Client Error", fmt.Sprintf("Failed to read template version archive: %s", err))
+			return types.StringNull(), diags
+		}
+		return types.StringValue(computeBytesHash(archive)), diags
+	default:
+		return types.StringUnknown(), diags
+	}
+}
+
+// resolveContentHashes fills in any version hash that was left unknown at plan
+// time.
+func (v Versions) resolveContentHashes(ctx context.Context) (diags diag.Diagnostics) {
+	for i := range v {
+		if !v[i].DirectoryHash.IsUnknown() {
+			continue
+		}
+		hash, hashDiags := versionContentHash(ctx, &v[i])
+		diags.Append(hashDiags...)
+		if diags.HasError() {
+			return diags
+		}
+		v[i].DirectoryHash = hash
+	}
+	return diags
+}
+
 func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.Logger, directory string) (*codersdk.UploadResponse, error) {
 	pipeReader, pipeWriter := io.Pipe()
 	go func() {
@@ -1228,6 +1539,95 @@ func uploadDirectory(ctx context.Context, client *codersdk.Client, logger slog.L
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// uploadVersionContents uploads the contents of a template version from
+// whichever content attribute is set, and returns the ID of the uploaded file
+// along with any variable values discovered alongside the contents.
+func uploadVersionContents(ctx context.Context, client *codersdk.Client, version *TemplateVersion) (uuid.UUID, []codersdk.VariableValue, error) {
+	source, diags := versionSource(version)
+	if diags.HasError() {
+		return uuid.Nil, nil, errors.New(diags.Errors()[0].Detail())
+	}
+	switch source {
+	case versionSourceDirectory:
+		return uploadTemplateDirectory(ctx, client, version.Directory.ValueString())
+	case versionSourceFiles:
+		files, fileDiags := filesFromMap(ctx, version.Files)
+		if fileDiags.HasError() {
+			return uuid.Nil, nil, errors.New(fileDiags.Errors()[0].Detail())
+		}
+		if files == nil {
+			return uuid.Nil, nil, errors.New("the contents of `files` are not known")
+		}
+		dir, err := os.MkdirTemp("", "coderd-template-version-")
+		if err != nil {
+			return uuid.Nil, nil, fmt.Errorf("failed to create temporary directory for `files`: %s", err)
+		}
+		defer func() {
+			if err := os.RemoveAll(dir); err != nil {
+				tflog.Warn(ctx, "error removing temporary template directory", map[string]any{
+					"error": err,
+				})
+			}
+		}()
+		if err := writeFiles(dir, files); err != nil {
+			return uuid.Nil, nil, fmt.Errorf("failed to write `files`: %s", err)
+		}
+		return uploadTemplateDirectory(ctx, client, dir)
+	case versionSourceArchive:
+		contentType, archive, err := decodeArchive(version.ArchiveBase64.ValueString())
+		if err != nil {
+			return uuid.Nil, nil, fmt.Errorf("failed to read template version archive: %s", err)
+		}
+		fileID, err := uploadTemplateArchive(ctx, client, contentType, archive)
+		return fileID, nil, err
+	case versionSourceArchiveFile:
+		contentType, archive, err := readArchiveFile(version.ArchiveFile.ValueString())
+		if err != nil {
+			return uuid.Nil, nil, fmt.Errorf("failed to read template version archive: %s", err)
+		}
+		fileID, err := uploadTemplateArchive(ctx, client, contentType, archive)
+		return fileID, nil, err
+	default:
+		return uuid.Nil, nil, errors.New("a template version must set exactly one of " + versionSourceAttrs)
+	}
+}
+
+// uploadTemplateArchive uploads an already-built archive and returns the ID of
+// the uploaded file.
+func uploadTemplateArchive(ctx context.Context, client *codersdk.Client, contentType string, archive []byte) (uuid.UUID, error) {
+	tflog.Info(ctx, "uploading archive")
+	uploadResp, err := client.Upload(ctx, contentType, bytes.NewReader(archive))
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to upload archive: %s", err)
+	}
+	tflog.Info(ctx, "successfully uploaded archive")
+	return uploadResp.ID, nil
+}
+
+// uploadTemplateDirectory archives and uploads a directory, and parses the
+// variable values from any vars files it contains.
+func uploadTemplateDirectory(ctx context.Context, client *codersdk.Client, directory string) (uuid.UUID, []codersdk.VariableValue, error) {
+	tflog.Info(ctx, "uploading directory")
+	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
+	if err != nil {
+		return uuid.Nil, nil, fmt.Errorf("failed to upload directory: %s", err)
+	}
+	tflog.Info(ctx, "successfully uploaded directory")
+	tflog.Info(ctx, "discovering and parsing vars files")
+	varFiles, err := codersdk.DiscoverVarsFiles(directory)
+	if err != nil {
+		return uuid.Nil, nil, fmt.Errorf("failed to discover vars files: %s", err)
+	}
+	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
+	if err != nil {
+		return uuid.Nil, nil, fmt.Errorf("failed to parse user variable values: %s", err)
+	}
+	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
+		"vars": vars,
+	})
+	return uploadResp.ID, vars, nil
 }
 
 func waitForJob(ctx context.Context, client *codersdk.Client, version *codersdk.TemplateVersion) ([]codersdk.ProvisionerJobLog, error) {
@@ -1306,25 +1706,10 @@ type newVersionRequest struct {
 
 func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequest) (*codersdk.TemplateVersion, []codersdk.ProvisionerJobLog, error) {
 	var logs []codersdk.ProvisionerJobLog
-	directory := req.Version.Directory.ValueString()
-	tflog.Info(ctx, "uploading directory")
-	uploadResp, err := uploadDirectory(ctx, client, slog.Make(newTFLogSink(ctx)), directory)
+	fileID, vars, err := uploadVersionContents(ctx, client, req.Version)
 	if err != nil {
-		return nil, logs, fmt.Errorf("failed to upload directory: %s", err)
+		return nil, logs, err
 	}
-	tflog.Info(ctx, "successfully uploaded directory")
-	tflog.Info(ctx, "discovering and parsing vars files")
-	varFiles, err := codersdk.DiscoverVarsFiles(directory)
-	if err != nil {
-		return nil, logs, fmt.Errorf("failed to discover vars files: %s", err)
-	}
-	vars, err := codersdk.ParseUserVariableValues(varFiles, "", []string{})
-	if err != nil {
-		return nil, logs, fmt.Errorf("failed to parse user variable values: %s", err)
-	}
-	tflog.Info(ctx, "discovered and parsed vars files", map[string]any{
-		"vars": vars,
-	})
 	tfVars, diags := variablesFromSet(ctx, req.Version.TerraformVariables)
 	if diags.HasError() {
 		return nil, logs, fmt.Errorf("failed to extract terraform variables: %s", diags.Errors()[0].Detail())
@@ -1348,7 +1733,7 @@ func newVersion(ctx context.Context, client *codersdk.Client, req newVersionRequ
 		Message:            req.Version.Message.ValueString(),
 		StorageMethod:      codersdk.ProvisionerStorageMethodFile,
 		Provisioner:        codersdk.ProvisionerTypeTerraform,
-		FileID:             uploadResp.ID,
+		FileID:             fileID,
 		UserVariableValues: vars,
 		ProvisionerTags:    provTags,
 	}
