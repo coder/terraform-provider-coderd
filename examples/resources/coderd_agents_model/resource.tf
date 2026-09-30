@@ -12,6 +12,10 @@ resource "coderd_ai_provider" "anthropic" {
   api_key_wo_version = 1
 }
 
+resource "coderd_group" "agents_users" {
+  name = "agents-users"
+}
+
 resource "coderd_agents_model" "sonnet" {
   ai_provider_id = coderd_ai_provider.anthropic.id
   model          = "claude-3-5-sonnet-20241022"
@@ -32,4 +36,9 @@ resource "coderd_agents_model" "sonnet" {
       }
     }
   })
+
+  acl = {
+    users  = []
+    groups = [coderd_group.agents_users.id]
+  }
 }

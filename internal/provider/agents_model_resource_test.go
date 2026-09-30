@@ -20,6 +20,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/terraform-provider-coderd/integration"
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -295,6 +296,7 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 	remote := decodeAgentsModelConfigForTest(t, `{"top_p":0.9,"max_output_tokens":9223372036854775807,"top_k":40}`)
 
 	var diags diag.Diagnostics
+	acl := agentsModelACLValue(codersdk.ChatModelACL{Groups: []codersdk.ChatGroup{{Group: codersdk.Group{ID: organizationID}}}})
 	state := stateFromModelConfig(codersdk.ChatModel{
 		ID:                   modelConfigID,
 		OrganizationID:       organizationID,
@@ -307,9 +309,10 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 		ModelConfig:          remote,
 		CreatedAt:            createdAt,
 		UpdatedAt:            updatedAt,
-	}, "anthropic", &diags)
+	}, "anthropic", acl, &diags)
 	require.False(t, diags.HasError(), diags.Errors())
 	require.Equal(t, modelConfigID, state.ID.ValueUUID())
+	require.True(t, acl.Equal(state.ACL))
 	require.Equal(t, organizationID, state.OrganizationID.ValueUUID())
 	require.Equal(t, aiProviderID, state.AIProviderID.ValueUUID())
 	require.Equal(t, "anthropic", state.ProviderType.ValueString())
@@ -329,6 +332,71 @@ func TestAgentsModelStateFromModelConfig(t *testing.T) {
 		`{"max_output_tokens":9223372036854775807,"top_k":40,"top_p":0.9}`,
 		state.ModelConfig.ValueString(),
 		"state stores model_config with sorted keys and exact number tokens to match jsonencode byte-for-byte")
+}
+
+func TestAgentsModelACLUpdate(t *testing.T) {
+	t.Parallel()
+
+	orgID := uuid.New()
+	groupID := uuid.New()
+	userA := uuid.New()
+	userB := uuid.New()
+	users := func(ids ...uuid.UUID) []codersdk.ChatUser {
+		out := make([]codersdk.ChatUser, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, codersdk.ChatUser{MinimalUser: codersdk.MinimalUser{ID: id}, Role: codersdk.ChatRoleRead})
+		}
+		return out
+	}
+	groups := func(ids ...uuid.UUID) []codersdk.ChatGroup {
+		out := make([]codersdk.ChatGroup, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, codersdk.ChatGroup{Group: codersdk.Group{ID: id}, Role: codersdk.ChatRoleRead})
+		}
+		return out
+	}
+
+	tests := []struct {
+		name    string
+		current codersdk.ChatModelACL
+		want    agentsModelACL
+		expect  codersdk.UpdateChatModelACLRequest
+	}{
+		{
+			name:    "ReplaceEveryoneWithGroup",
+			current: codersdk.ChatModelACL{Users: users(), Groups: groups(orgID)},
+			want:    agentsModelACL{Users: []UUID{}, Groups: []UUID{UUIDValue(groupID)}},
+			expect: codersdk.UpdateChatModelACLRequest{
+				GroupRoles: map[string]codersdk.ChatRole{
+					orgID.String():   codersdk.ChatRoleDeleted,
+					groupID.String(): codersdk.ChatRoleRead,
+				},
+			},
+		},
+		{
+			name:    "SwapUsers",
+			current: codersdk.ChatModelACL{Users: users(userA), Groups: groups()},
+			want:    agentsModelACL{Users: []UUID{UUIDValue(userB)}, Groups: []UUID{}},
+			expect: codersdk.UpdateChatModelACLRequest{
+				UserRoles: map[string]codersdk.ChatRole{
+					userA.String(): codersdk.ChatRoleDeleted,
+					userB.String(): codersdk.ChatRoleRead,
+				},
+			},
+		},
+		{
+			name:    "Unchanged",
+			current: codersdk.ChatModelACL{Users: users(userA), Groups: groups(groupID)},
+			want:    agentsModelACL{Users: []UUID{UUIDValue(userA)}, Groups: []UUID{UUIDValue(groupID)}},
+			expect:  codersdk.UpdateChatModelACLRequest{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.expect, agentsModelACLUpdate(tt.current, tt.want))
+		})
+	}
 }
 
 func TestAgentsModelConfigSemanticEquals(t *testing.T) {
@@ -621,6 +689,57 @@ resource "coderd_agents_model" "sonnet" {
 				},
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: `provider "coderd" {
+  url   = "` + srv.URL + `"
+  token = "test-token"
+}
+
+resource "terraform_data" "group" {
+  input = "` + uuid.NewString() + `"
+}
+
+resource "coderd_agents_model" "sonnet" {
+  ai_provider_id = "` + uuid.NewString() + `"
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+  acl = {
+    users  = []
+    groups = [terraform_data.group.output]
+  }
+}
+`,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+func TestAgentsModelResourceACLRequiresBothLists(t *testing.T) {
+	t.Parallel()
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `provider "coderd" {
+  url   = "https://coder.example.com"
+  token = "test-token"
+}
+
+resource "coderd_agents_model" "sonnet" {
+  ai_provider_id = "` + uuid.NewString() + `"
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+  acl = {
+    groups = []
+  }
+}
+`,
+				ExpectError: regexp.MustCompile(`acl\.users`),
 			},
 		},
 	})
@@ -1060,6 +1179,148 @@ resource "coderd_agents_model" "sonnet" {
 	})
 }
 
+// TestAccAgentsModelResourceACL covers the acl lifecycle: an omitted acl
+// records the server list without managing it, a configured acl replaces the
+// default Everyone entry and corrects out-of-band changes, and removing acl
+// again leaves the server list unchanged.
+func TestAccAgentsModelResourceACL(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("Acceptance tests are disabled.")
+	}
+	ctx := t.Context()
+	client := integration.StartCoder(ctx, t, "agents_model_acl_acc", integration.UseLicense)
+	skipUnlessAgentsModelEndpoint(ctx, t, client)
+	orgID := accDefaultOrganizationID(ctx, t, client)
+	aiProvider := createAccAgentsModelAIProvider(ctx, t, client)
+	member, err := client.CreateUserWithOrgs(ctx, codersdk.CreateUserRequestWithOrgs{
+		Email:           "agents-acl@coder.com",
+		Username:        "agents-acl",
+		Password:        "SomeSecurePassword!",
+		UserLoginType:   codersdk.LoginTypePassword,
+		OrganizationIDs: []uuid.UUID{orgID},
+	})
+	require.NoError(t, err)
+	group, err := client.CreateGroup(ctx, orgID, codersdk.CreateGroupRequest{Name: "agents-acl"})
+	require.NoError(t, err)
+
+	cfg := func(acl string) string {
+		return fmt.Sprintf(`
+provider "coderd" {
+  url   = %q
+  token = %q
+}
+
+resource "coderd_agents_model" "sonnet" {
+  ai_provider_id = %q
+  model          = "claude-3-5-sonnet-20241022"
+  context_limit  = 200000
+  %s
+}
+`, client.URL.String(), client.SessionToken(), aiProvider.ID.String(), acl)
+	}
+	managed := cfg(fmt.Sprintf(`acl = {
+    users  = [%q]
+    groups = [%q]
+  }`, member.ID, group.ID))
+
+	var modelID uuid.UUID
+	checkServerACL := func(wantUsers, wantGroups []uuid.UUID) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			acl, err := client.ChatModelACL(ctx, orgID, modelID)
+			if err != nil {
+				return err
+			}
+			got := agentsModelACLValue(acl)
+			want := types.ObjectValueMust(agentsModelACLAttrTypes, map[string]attr.Value{
+				"users":  uuidSetForTest(wantUsers),
+				"groups": uuidSetForTest(wantGroups),
+			})
+			if !got.Equal(want) {
+				return fmt.Errorf("server acl = %s, want %s", got, want)
+			}
+			return nil
+		}
+	}
+	stateACL := func(users, groups uuid.UUID) []statecheck.StateCheck {
+		return []statecheck.StateCheck{
+			statecheck.ExpectKnownValue("coderd_agents_model.sonnet", tfjsonpath.New("acl").AtMapKey("users"), knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact(users.String())})),
+			statecheck.ExpectKnownValue("coderd_agents_model.sonnet", tfjsonpath.New("acl").AtMapKey("groups"), knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact(groups.String())})),
+		}
+	}
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg(""),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue("coderd_agents_model.sonnet", tfjsonpath.New("acl").AtMapKey("users"), knownvalue.SetExact([]knownvalue.Check{})),
+					statecheck.ExpectKnownValue("coderd_agents_model.sonnet", tfjsonpath.New("acl").AtMapKey("groups"), knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact(orgID.String())})),
+				},
+				Check: resource.TestCheckResourceAttrWith("coderd_agents_model.sonnet", "id", func(value string) error {
+					id, err := uuid.Parse(value)
+					modelID = id
+					return err
+				}),
+			},
+			{
+				Config: managed,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.sonnet", plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: stateACL(member.ID, group.ID),
+				Check:             checkServerACL([]uuid.UUID{member.ID}, []uuid.UUID{group.ID}),
+			},
+			{
+				PreConfig: func() {
+					require.NoError(t, client.UpdateChatModelACL(ctx, orgID, modelID, codersdk.UpdateChatModelACLRequest{
+						GroupRoles: map[string]codersdk.ChatRole{orgID.String(): codersdk.ChatRoleRead},
+					}))
+				},
+				Config: managed,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("coderd_agents_model.sonnet", plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: stateACL(member.ID, group.ID),
+				Check:             checkServerACL([]uuid.UUID{member.ID}, []uuid.UUID{group.ID}),
+			},
+			{
+				ResourceName:      "coderd_agents_model.sonnet",
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					return orgID.String() + "/" + modelID.String(), nil
+				},
+			},
+			{
+				Config: cfg(""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				ConfigStateChecks: stateACL(member.ID, group.ID),
+				Check:             checkServerACL([]uuid.UUID{member.ID}, []uuid.UUID{group.ID}),
+			},
+		},
+	})
+}
+
+func uuidSetForTest(ids []uuid.UUID) types.Set {
+	elems := make([]attr.Value, 0, len(ids))
+	for _, id := range ids {
+		elems = append(elems, UUIDValue(id))
+	}
+	return types.SetValueMust(UUIDType, elems)
+}
+
 func skipUnlessAgentsModelEndpoint(ctx context.Context, t *testing.T, client *codersdk.Client) {
 	t.Helper()
 	organizationID := accDefaultOrganizationID(ctx, t, client)
@@ -1332,12 +1593,22 @@ func fakeChatModelServer(t *testing.T, orgID uuid.UUID, model codersdk.ChatModel
 	mux.HandleFunc("DELETE "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("GET "+modelPath+"/acl", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, everyoneChatModelACL(orgID))
+	})
 	mux.HandleFunc("GET /api/v2/ai/providers/"+model.AIProviderID.String(), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, codersdk.AIProvider{ID: model.AIProviderID, Type: "anthropic"})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func everyoneChatModelACL(orgID uuid.UUID) codersdk.ChatModelACL {
+	return codersdk.ChatModelACL{
+		Users:  []codersdk.ChatUser{},
+		Groups: []codersdk.ChatGroup{{Group: codersdk.Group{ID: orgID, Name: "Everyone", OrganizationID: orgID}, Role: codersdk.ChatRoleRead}},
+	}
 }
 
 // TestAgentsModelLegacyStateAdoption upgrades state written by the
@@ -1476,6 +1747,11 @@ func TestAgentsModelUnknownOrganizationReplacement(t *testing.T) {
 		// Post-test destroy cleanup.
 		w.WriteHeader(http.StatusNoContent)
 	})
+	for _, m := range []codersdk.ChatModel{modelA, modelB} {
+		mux.HandleFunc(fmt.Sprintf("GET /api/v2/organizations/%s/chats/models/%s/acl", m.OrganizationID, m.ID), func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, everyoneChatModelACL(m.OrganizationID))
+		})
+	}
 	mux.HandleFunc("GET /api/v2/ai/providers/"+providerID.String(), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, codersdk.AIProvider{ID: providerID, Type: "anthropic"})
 	})
