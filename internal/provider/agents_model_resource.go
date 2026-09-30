@@ -385,8 +385,8 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// Write the ACL first: it bumps updated_at, so the model PATCH response
-	// then carries the final value.
+	// Write the ACL first: it bumps updated_at, so the model response below
+	// carries the final value.
 	acl := state.ACL
 	if !plan.ACL.Equal(state.ACL) {
 		acl = r.syncACL(ctx, organizationID, state.ID.ValueUUID(), plan.ACL, &resp.Diagnostics)
@@ -394,7 +394,13 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 			return
 		}
 	}
-	modelConfig, err := r.experimentalClient().UpdateChatModel(ctx, organizationID, state.ID.ValueUUID(), updateReq)
+	var modelConfig codersdk.ChatModel
+	var err error
+	if updateReq == (codersdk.UpdateChatModelRequest{}) {
+		modelConfig, err = r.experimentalClient().ChatModel(ctx, organizationID, state.ID.ValueUUID())
+	} else {
+		modelConfig, err = r.experimentalClient().UpdateChatModel(ctx, organizationID, state.ID.ValueUUID(), updateReq)
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update Agents model, got error: %s", err))
 		return

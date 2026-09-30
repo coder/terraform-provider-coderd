@@ -1678,7 +1678,7 @@ resource "coderd_agents_model" "test" {
 		},
 	})
 
-	require.True(t, patched.Load(), "expected the adoption apply to PATCH the organization-scoped route")
+	require.False(t, patched.Load(), "expected the adoption apply to skip the empty model PATCH")
 }
 
 // TestAgentsModelUnknownOrganizationReplacement moves a model to an
