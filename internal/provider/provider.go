@@ -197,7 +197,7 @@ func (p *CoderdProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	if len(httpHeaders) > 0 {
 		client.HTTPClient.Transport = &codersdk.HeaderTransport{
 			Transport: client.HTTPClient.Transport,
-			Header:    httpHeaders,
+			Provider:  codersdk.StaticHeaderProvider{Header: httpHeaders},
 		}
 	}
 	if data.DefaultOrganizationID.IsNull() {

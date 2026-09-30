@@ -1,3 +1,22 @@
+resource "coderd_ai_provider" "claude_platform_aws" {
+  type         = "anthropic"
+  name         = "claude-platform-aws"
+  display_name = "Claude Platform for AWS"
+  enabled      = true
+  base_url     = "https://aws-external-anthropic.us-east-1.api.aws"
+
+  settings = {
+    claude_platform_aws = {
+      region       = "us-east-1"
+      workspace_id = "wrkspc_example"
+    }
+  }
+
+  // Optional: a Claude Platform for AWS API key. Storing one disables IAM signing.
+  // api_key_wo         = var.claude_platform_aws_api_key
+  // api_key_wo_version = 1
+}
+
 resource "coderd_ai_provider" "bedrock" {
   type         = "bedrock"
   name         = "aws-bedrock"

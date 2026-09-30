@@ -98,9 +98,9 @@ func TestHeadersBypassRateLimit(t *testing.T) {
 		bypassClient.SetSessionToken(client.SessionToken())
 		bypassClient.HTTPClient.Transport = &codersdk.HeaderTransport{
 			Transport: http.DefaultTransport,
-			Header: http.Header{
+			Provider: codersdk.StaticHeaderProvider{Header: http.Header{
 				"X-Coder-Bypass-Ratelimit": []string{"true"},
-			},
+			}},
 		}
 
 		// Same burst, but with bypass -- all should succeed.
