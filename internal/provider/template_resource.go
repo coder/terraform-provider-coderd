@@ -594,6 +594,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 
 	client := r.data.Client
 	orgID := data.OrganizationID.ValueUUID()
+	useClassicParameterFlow := data.UseClassicParameterFlow
 	var templateResp codersdk.Template
 	for idx, version := range data.Versions {
 		newVersionRequest := newVersionRequest{
@@ -610,7 +611,7 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		}
 		if idx == 0 {
 			tflog.Info(ctx, "creating template")
-			createReq := data.toCreateRequest(ctx, resp, versionResp.ID)
+			createReq := data.toCreateRequest(ctx, resp, versionResp.ID, r.data.FeatureEnabled(codersdk.FeatureControlSharedPorts))
 			if resp.Diagnostics.HasError() {
 				return
 			}
@@ -660,35 +661,10 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 	data.ID = UUIDValue(templateResp.ID)
 	data.DisplayName = types.StringValue(templateResp.DisplayName)
 
-	// TODO: Remove this update call once this provider requires a Coder
-	// deployment running `v2.15.0` or later.
-	if data.MaxPortShareLevel.IsUnknown() {
-		data.MaxPortShareLevel = types.StringValue(string(templateResp.MaxPortShareLevel))
-	} else if data.MaxPortShareLevel.ValueString() == string(templateResp.MaxPortShareLevel) {
-		tflog.Info(ctx, "max port share level set to default, not updating")
-	} else {
-		mpslReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		mpslResp, err := client.UpdateTemplateMeta(ctx, data.ID.ValueUUID(), *mpslReq)
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to set max port share level via update: %s", err))
-			return
-		}
-		data.MaxPortShareLevel = types.StringValue(string(mpslResp.MaxPortShareLevel))
-	}
-
-	// Set cors_behavior from the response (it's set during create via toCreateRequest)
-	data.CORSBehavior = stringValueOrNull(string(templateResp.CORSBehavior))
-
 	// TODO: Remove this update call (and the attribute) once the provider
 	// requires a Coder version where this flag has been removed.
-	if data.UseClassicParameterFlow.IsUnknown() {
-		data.UseClassicParameterFlow = types.BoolValue(templateResp.UseClassicParameterFlow)
-	} else if data.UseClassicParameterFlow.ValueBool() == templateResp.UseClassicParameterFlow {
-		tflog.Info(ctx, "use classic parameter flow set to default, not updating")
-	} else {
+	if !useClassicParameterFlow.IsUnknown() && useClassicParameterFlow.ValueBool() != templateResp.UseClassicParameterFlow {
+		data.UseClassicParameterFlow = useClassicParameterFlow
 		ucpfReq := data.toUpdateRequest(ctx, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
@@ -700,14 +676,6 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 		}
 		data.UseClassicParameterFlow = types.BoolValue(ucpfResp.UseClassicParameterFlow)
 	}
-
-	// Fetch the authoritative values after the compatibility updates.
-	authoritativeTemplate, err := client.Template(ctx, data.ID.ValueUUID())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
-		return
-	}
-	data.reconcileVersionedMetadata(&authoritativeTemplate)
 
 	resp.Diagnostics.Append(data.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
@@ -747,7 +715,6 @@ func (r *TemplateResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.Diagnostics.Append(diag...)
 		return
 	}
-	data.reconcileVersionedMetadata(&template)
 
 	if !data.ACL.IsNull() {
 		tflog.Info(ctx, "reading template ACL")
@@ -830,11 +797,12 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		_, err := client.UpdateTemplateMeta(ctx, templateID, *updateReq)
+		updated, err := client.UpdateTemplateMeta(ctx, templateID, *updateReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update template metadata: %s", err))
 			return
 		}
+		newState.reconcileVersionedMetadata(&updated)
 
 		tflog.Info(ctx, "successfully updated template metadata")
 	}
@@ -915,15 +883,6 @@ func (r *TemplateResource) Update(ctx context.Context, req resource.UpdateReques
 			}
 		}
 	}
-	// TODO(ethanndickson): Remove this once the provider requires a Coder
-	// deployment running `v2.15.0` or later.
-	templateResp, err := client.Template(ctx, templateID)
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get template: %s", err))
-		return
-	}
-	newState.reconcileVersionedMetadata(&templateResp)
-
 	resp.Diagnostics.Append(newState.Versions.setPrivateState(ctx, resp.Private)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -1432,9 +1391,9 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	}
 }
 
-// reconcileVersionedMetadata overwrites metadata fields that older Coder
-// servers can omit from mutation responses. Call it with an authoritative
-// template response before writing state.
+// reconcileVersionedMetadata overwrites metadata fields that a Coder server can
+// ignore, for example because it predates them, so an apply that sets one
+// against such a server fails instead of drifting.
 func (r *TemplateResourceModel) reconcileVersionedMetadata(template *codersdk.Template) {
 	r.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 	r.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
@@ -1471,8 +1430,7 @@ func (r *TemplateResourceModel) readResponse(ctx context.Context, template *code
 	r.TimeTilDormantAutoDeleteMillis = types.Int64Value(template.TimeTilDormantAutoDeleteMillis)
 	r.RequireActiveVersion = types.BoolValue(template.RequireActiveVersion)
 	r.DeprecationMessage = types.StringValue(template.DeprecationMessage)
-	// TODO(ethanndickson): MaxPortShareLevel deliberately omitted, as it can't
-	// be set during a create request, and we call this during `Create`.
+	r.reconcileVersionedMetadata(template)
 	return nil
 }
 
@@ -1524,7 +1482,7 @@ func (r *TemplateResourceModel) toUpdateRequest(ctx context.Context, diag *diag.
 	}
 }
 
-func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resource.CreateResponse, versionID uuid.UUID) *codersdk.CreateTemplateRequest {
+func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resource.CreateResponse, versionID uuid.UUID, canRestrictPortSharing bool) *codersdk.CreateTemplateRequest {
 	var days []string
 	resp.Diagnostics.Append(
 		r.AutostartPermittedDaysOfWeek.ElementsAs(ctx, &days, false)...,
@@ -1546,6 +1504,12 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		DaysOfWeek: reqs.DaysOfWeek,
 		Weeks:      reqs.Weeks,
 	}
+	var maxPortShareLevel *codersdk.WorkspaceAgentPortShareLevel
+	// Without port sharing control, Coder rejects any level on create, even
+	// `public`, which is the only level it allows.
+	if level := stringPtrOrNil(r.MaxPortShareLevel); level != nil && canRestrictPortSharing {
+		maxPortShareLevel = new(codersdk.WorkspaceAgentPortShareLevel(*level))
+	}
 	return &codersdk.CreateTemplateRequest{
 		Name:                           r.Name.ValueString(),
 		DisplayName:                    r.DisplayName.ValueString(),
@@ -1563,6 +1527,7 @@ func (r *TemplateResourceModel) toCreateRequest(ctx context.Context, resp *resou
 		TimeTilDormantMillis:           r.TimeTilDormantMillis.ValueInt64Pointer(),
 		TimeTilDormantAutoDeleteMillis: r.TimeTilDormantAutoDeleteMillis.ValueInt64Pointer(),
 		RequireActiveVersion:           r.RequireActiveVersion.ValueBool(),
+		MaxPortShareLevel:              maxPortShareLevel,
 		UseClassicParameterFlow:        boolPtrOrNil(r.UseClassicParameterFlow),
 		AgentsAllowed:                  boolPtrOrNil(r.AgentsAllowed),
 		CORSBehavior:                   corsPtr(r.CORSBehavior),
