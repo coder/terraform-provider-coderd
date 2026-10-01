@@ -128,7 +128,7 @@ func TestTemplateResourceBoolRequests(t *testing.T) {
 			require.Equal(t, tc.wantAgents, updateReq.AgentsAllowed)
 
 			createResp := frameworkresource.CreateResponse{}
-			createReq := model.toCreateRequest(t.Context(), &createResp, uuid.New())
+			createReq := model.toCreateRequest(t.Context(), &createResp, uuid.New(), false)
 			require.False(t, createResp.Diagnostics.HasError(), createResp.Diagnostics.Errors())
 			require.Equal(t, tc.wantClassic, createReq.UseClassicParameterFlow)
 			require.Equal(t, tc.wantAgents, createReq.AgentsAllowed)
@@ -1463,6 +1463,9 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 	cfg7.ACL.null = true
 	cfg7.MaxPortShareLevel = new("owner")
 
+	cfg8 := cfg7
+	cfg8.MaxPortShareLevel = new("public")
+
 	for _, cfg := range []testAccTemplateResourceConfig{cfg1, cfg2, cfg3, cfg4} {
 		resource.Test(t, resource.TestCase{
 			PreCheck:                 func() { testAccPreCheck(t) },
@@ -1493,6 +1496,10 @@ func TestAccTemplateResourceAGPL(t *testing.T) {
 			{
 				Config:      cfg7.String(t),
 				ExpectError: regexp.MustCompile("Your license is not entitled to use port sharing control"),
+			},
+			{
+				Config: cfg8.String(t),
+				Check:  resource.TestCheckResourceAttr("coderd_template.test", "max_port_share_level", "public"),
 			},
 		},
 	})
