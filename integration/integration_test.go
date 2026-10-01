@@ -278,6 +278,15 @@ func TestIntegration(t *testing.T) {
 					if m.IsDefault {
 						defaults = append(defaults, m.Model)
 					}
+					acl, err := c.ChatModelACL(ctx, organizations[0].ID, m.ID)
+					require.NoError(t, err)
+					assert.Empty(t, acl.Users, "model %s", m.Model)
+					require.Len(t, acl.Groups, 1, "model %s", m.Model)
+					if m.Model == "claude-opus-4-8" {
+						assert.Equal(t, "agents-users", acl.Groups[0].Name)
+					} else {
+						assert.Equal(t, organizations[0].ID, acl.Groups[0].ID, "model %s keeps the default Everyone entry", m.Model)
+					}
 					w, ok := want[m.Model]
 					require.True(t, ok, "unexpected model %s", m.Model)
 					assert.Equal(t, w.provider, providerTypeByID[m.AIProviderID])

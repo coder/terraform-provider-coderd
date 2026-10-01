@@ -35,6 +35,10 @@ resource "coderd_ai_provider" "anthropic" {
   api_key_wo_version = 1
 }
 
+resource "coderd_group" "agents_users" {
+  name = "agents-users"
+}
+
 resource "coderd_agents_model" "sonnet" {
   ai_provider_id = coderd_ai_provider.anthropic.id
   model          = "claude-3-5-sonnet-20241022"
@@ -55,6 +59,11 @@ resource "coderd_agents_model" "sonnet" {
       }
     }
   })
+
+  acl = {
+    users  = []
+    groups = [coderd_group.agents_users.id]
+  }
 }
 ```
 
@@ -69,6 +78,7 @@ resource "coderd_agents_model" "sonnet" {
 
 ### Optional
 
+- `acl` (Attributes) Users and groups that can use this model. Owners and organization admins can use every model. Coder gives the organization's `Everyone` group access to new models. (see [below for nested schema](#nestedatt--acl))
 - `compression_threshold` (Number) Percentage of the context window at which Coder should compact chat context. Defaults to 70 and must be between 0 and 100.
 - `display_name` (String) Display name shown in Coder.
 - `enabled` (Boolean) Whether this model configuration is enabled. Defaults to true.
@@ -81,6 +91,14 @@ resource "coderd_agents_model" "sonnet" {
 - `id` (String) Agents model configuration ID.
 - `provider_type` (String) Provider type derived by Coder from `ai_provider_id`, for example `openai`, `anthropic`, or `bedrock`.
 - `updated_at` (Number) Last update timestamp as Unix seconds.
+
+<a id="nestedatt--acl"></a>
+### Nested Schema for `acl`
+
+Optional:
+
+- `groups` (Set of String) IDs of groups that can use the model. Required if `acl` is set. Each group must belong to the model's organization. To keep access for the `Everyone` group, include the organization ID.
+- `users` (Set of String) IDs of users that can use the model. Required if `acl` is set. Each user must be a member of the model's organization.
 
 ## Import
 

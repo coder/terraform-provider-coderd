@@ -27,12 +27,21 @@ resource "coderd_ai_provider" "openai" {
   api_key_wo_version = 1
 }
 
+resource "coderd_group" "agents_users" {
+  name = "agents-users"
+}
+
 resource "coderd_agents_model" "claude_opus" {
   ai_provider_id        = coderd_ai_provider.anthropic.id
   model                 = "claude-opus-4-8"
   display_name          = "Claude Opus 4.8"
   context_limit         = 1000000
   compression_threshold = 42
+
+  acl = {
+    users  = []
+    groups = [coderd_group.agents_users.id]
+  }
 
   model_config = jsonencode({
     max_output_tokens = 128000

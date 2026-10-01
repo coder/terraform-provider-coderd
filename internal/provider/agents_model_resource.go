@@ -100,6 +100,7 @@ type AgentsModelResourceModel struct {
 	ContextLimit         types.Int64            `tfsdk:"context_limit"`
 	CompressionThreshold types.Int64            `tfsdk:"compression_threshold"`
 	ModelConfig          agentsModelConfigValue `tfsdk:"model_config"`
+	ACL                  types.Object           `tfsdk:"acl"`
 	CreatedAt            types.Int64            `tfsdk:"created_at"`
 	UpdatedAt            types.Int64            `tfsdk:"updated_at"`
 }
@@ -210,6 +211,7 @@ func (r *AgentsModelResource) Schema(ctx context.Context, req resource.SchemaReq
 					agentsModelConfigUseStateIfSemanticallyEqual{},
 				},
 			},
+			"acl": agentsModelACLAttribute(),
 			"created_at": schema.Int64Attribute{
 				MarkdownDescription: "Creation timestamp as Unix seconds.",
 				Computed:            true,
@@ -272,10 +274,18 @@ func (r *AgentsModelResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	state := stateFromModelConfig(modelConfig, providerType, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	acl := r.syncACL(ctx, organizationID, modelConfig.ID, plan.ACL, &resp.Diagnostics)
+	if !resp.Diagnostics.HasError() && !plan.ACL.IsUnknown() {
+		refreshed, err := r.experimentalClient().ChatModel(ctx, organizationID, modelConfig.ID)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read Agents model after updating its access list, got error: %s", err))
+		} else {
+			modelConfig = refreshed
+		}
 	}
+	// Save state even on error so Terraform taints the model instead of
+	// orphaning it.
+	state := stateFromModelConfig(modelConfig, providerType, acl, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -347,7 +357,11 @@ func (r *AgentsModelResource) Read(ctx context.Context, req resource.ReadRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	refreshed := stateFromModelConfig(config, providerType, &resp.Diagnostics)
+	acl, ok := r.readACL(ctx, organizationID, modelConfigID, &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	refreshed := stateFromModelConfig(config, providerType, agentsModelACLValue(acl), &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -371,7 +385,22 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	modelConfig, err := r.experimentalClient().UpdateChatModel(ctx, organizationID, state.ID.ValueUUID(), updateReq)
+	// Write the ACL first: it bumps updated_at, so the model response below
+	// carries the final value.
+	acl := state.ACL
+	if !plan.ACL.Equal(state.ACL) {
+		acl = r.syncACL(ctx, organizationID, state.ID.ValueUUID(), plan.ACL, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	var modelConfig codersdk.ChatModel
+	var err error
+	if updateReq == (codersdk.UpdateChatModelRequest{}) {
+		modelConfig, err = r.experimentalClient().ChatModel(ctx, organizationID, state.ID.ValueUUID())
+	} else {
+		modelConfig, err = r.experimentalClient().UpdateChatModel(ctx, organizationID, state.ID.ValueUUID(), updateReq)
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update Agents model, got error: %s", err))
 		return
@@ -381,7 +410,7 @@ func (r *AgentsModelResource) Update(ctx context.Context, req resource.UpdateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	updated := stateFromModelConfig(modelConfig, providerType, &resp.Diagnostics)
+	updated := stateFromModelConfig(modelConfig, providerType, acl, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -514,7 +543,7 @@ func (m AgentsModelResourceModel) updateRequest(state AgentsModelResourceModel, 
 	return req
 }
 
-func stateFromModelConfig(config codersdk.ChatModel, providerType string, diags *diag.Diagnostics) AgentsModelResourceModel {
+func stateFromModelConfig(config codersdk.ChatModel, providerType string, acl types.Object, diags *diag.Diagnostics) AgentsModelResourceModel {
 	return AgentsModelResourceModel{
 		ID:                   UUIDValue(config.ID),
 		OrganizationID:       UUIDValue(config.OrganizationID),
@@ -526,6 +555,7 @@ func stateFromModelConfig(config codersdk.ChatModel, providerType string, diags 
 		ContextLimit:         types.Int64Value(config.ContextLimit),
 		CompressionThreshold: types.Int64Value(int64(config.CompressionThreshold)),
 		ModelConfig:          agentsModelConfigToState(config.ModelConfig, diags),
+		ACL:                  acl,
 		CreatedAt:            types.Int64Value(config.CreatedAt.Unix()),
 		UpdatedAt:            types.Int64Value(config.UpdatedAt.Unix()),
 	}

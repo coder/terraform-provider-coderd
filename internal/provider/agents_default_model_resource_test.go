@@ -523,8 +523,8 @@ func TestAgentsDefaultModelMovedBlockMigration(t *testing.T) {
 		UpdatedAt:            ts,
 	}
 
-	var modelPatched, defaultPatched atomic.Bool
-	srv := fakeAgentsDefaultModelMigrationServer(t, orgID, model, &modelPatched, &defaultPatched)
+	var defaultPatched atomic.Bool
+	srv := fakeAgentsDefaultModelMigrationServer(t, orgID, model, &defaultPatched)
 
 	providerBlock := `provider "coderd" {
   url   = "` + srv.URL + `"
@@ -595,16 +595,15 @@ resource "coderd_agents_default_model" "this" {
 		},
 	})
 
-	require.True(t, modelPatched.Load(), "expected the model adoption apply to PATCH the organization-scoped route")
 	require.True(t, defaultPatched.Load(), "expected the moved default model apply to PATCH is_default on the organization-scoped route")
 }
 
 // fakeAgentsDefaultModelMigrationServer serves everything the moved-block
 // migration exercises: provider Configure, the coderd_organization data
-// source, and the organization-scoped chat model routes. PATCHes carrying
-// is_default are recorded separately from model updates because both
-// resources share the same route.
-func fakeAgentsDefaultModelMigrationServer(t *testing.T, orgID uuid.UUID, model codersdk.ChatModel, modelPatched, defaultPatched *atomic.Bool) *httptest.Server {
+// source, and the organization-scoped chat model routes. Only PATCHes
+// carrying is_default are recorded, because both resources share the same
+// route.
+func fakeAgentsDefaultModelMigrationServer(t *testing.T, orgID uuid.UUID, model codersdk.ChatModel, defaultPatched *atomic.Bool) *httptest.Server {
 	t.Helper()
 
 	defaultModel := model
@@ -640,7 +639,6 @@ func fakeAgentsDefaultModelMigrationServer(t *testing.T, orgID uuid.UUID, model 
 			writeJSON(w, http.StatusOK, defaultModel)
 			return
 		}
-		modelPatched.Store(true)
 		writeJSON(w, http.StatusOK, model)
 	})
 	mux.HandleFunc("DELETE "+modelPath, func(w http.ResponseWriter, _ *http.Request) {
