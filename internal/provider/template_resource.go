@@ -594,6 +594,8 @@ func (r *TemplateResource) Create(ctx context.Context, req resource.CreateReques
 
 	client := r.data.Client
 	orgID := data.OrganizationID.ValueUUID()
+	// TODO(ethanndickson): Remove with the classic parameter flow update call below.
+	// readResponse overwrites the planned value, so save it first.
 	useClassicParameterFlow := data.UseClassicParameterFlow
 	var templateResp codersdk.Template
 	for idx, version := range data.Versions {
