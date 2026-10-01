@@ -1391,9 +1391,8 @@ func convertResponseToACL(acl codersdk.TemplateACL) ACL {
 	}
 }
 
-// reconcileVersionedMetadata overwrites metadata fields that a Coder server can
-// ignore, for example because it predates them, so an apply that sets one
-// against such a server fails instead of drifting.
+// Preserve server values for version-dependent fields rather than recording
+// unsupported configuration as successfully applied.
 func (r *TemplateResourceModel) reconcileVersionedMetadata(template *codersdk.Template) {
 	r.MaxPortShareLevel = types.StringValue(string(template.MaxPortShareLevel))
 	r.CORSBehavior = stringValueOrNull(string(template.CORSBehavior))
