@@ -57,6 +57,9 @@ func TestAccAIProviderResource(t *testing.T) {
 	// Changing base_url to a different region must re-derive settings.bedrock.region.
 	cfg3 := cfg2
 	cfg3.BedrockBaseURL = "https://bedrock-runtime.us-west-2.amazonaws.com"
+	cfg4 := cfg3
+	cfg4.OpenAIKey = ""
+	cfg4.OpenAIKeyVersion = 3
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -91,6 +94,13 @@ func TestAccAIProviderResource(t *testing.T) {
 				Config: cfg3.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
+				),
+			},
+			{
+				Config: cfg4.String(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_wo_version", "3"),
+					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_masked"),
 				),
 			},
 		},
@@ -253,17 +263,6 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 }
 `,
 			wantError: `api_key_wo_version`,
-		},
-		"api key cannot be empty": {
-			body: `resource "coderd_ai_provider" "test" {
-  type               = "openai"
-  name               = "openai-test"
-  base_url           = "https://api.openai.com/v1"
-  api_key_wo         = ""
-  api_key_wo_version = 1
-}
-`,
-			wantError: `(?s)string length must be at\s+least\s+1`,
 		},
 		"bedrock known config requires region or credentials": {
 			body: `resource "coderd_ai_provider" "test" {
@@ -760,6 +759,26 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 	require.Nil(t, req.Settings.Bedrock.AccessKeySecret)
 }
 
+func TestAIProviderCreateRequestEmptyAPIKey(t *testing.T) {
+	t.Parallel()
+
+	plan := AIProviderResourceModel{
+		Type:            types.StringValue(string(codersdk.AIProviderTypeOpenAI)),
+		Name:            types.StringValue("openai"),
+		Enabled:         types.BoolValue(true),
+		BaseURL:         types.StringValue("https://api.openai.com/v1"),
+		APIKeyWOVersion: types.Int64Value(1),
+	}
+	config := plan
+	config.APIKeyWO = types.StringValue("")
+
+	var diags diag.Diagnostics
+	req := plan.createRequest(config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.Empty(t, req.APIKeys)
+	require.Empty(t, req.Validate())
+}
+
 func TestAIProviderCreateRequestBedrockMantleProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -885,6 +904,19 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 		require.Len(t, *patch.APIKeys, 1)
 		require.Nil(t, (*patch.APIKeys)[0].ID)
 		require.Equal(t, "sk-rotated", *(*patch.APIKeys)[0].APIKey)
+	})
+
+	t.Run("version bumped with empty key", func(t *testing.T) {
+		plan := state
+		plan.APIKeyWOVersion = types.Int64Value(2)
+		config := plan
+		config.APIKeyWO = types.StringValue("")
+
+		var diags diag.Diagnostics
+		patch := plan.updateRequest(state, config, &diags)
+		require.False(t, diags.HasError(), diags.Errors())
+		require.NotNil(t, patch.APIKeys)
+		require.Empty(t, *patch.APIKeys, "an empty key list deletes every stored key")
 	})
 
 	t.Run("version removed", func(t *testing.T) {

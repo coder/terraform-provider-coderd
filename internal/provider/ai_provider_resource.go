@@ -159,12 +159,11 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Required:            true,
 			},
 			"api_key_wo": schema.StringAttribute{
-				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration does not delete a stored key; replace the resource to delete it. Bump `api_key_wo_version` to rotate it.",
+				MarkdownDescription: "Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration keeps the stored key. Bump `api_key_wo_version` to rotate it, or set it to `\"\"` and bump the version to delete the stored key.",
 				Optional:            true,
 				Sensitive:           true,
 				WriteOnly:           true,
 				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
 					stringvalidator.AlsoRequires(path.MatchRoot("api_key_wo_version")),
 				},
 			},
@@ -581,8 +580,8 @@ func (r *AIProviderResource) ImportState(ctx context.Context, req resource.Impor
 
 func (m AIProviderResourceModel) createRequest(config AIProviderResourceModel, diags *diag.Diagnostics) codersdk.CreateAIProviderRequest {
 	var apiKeys []string
-	if !config.APIKeyWO.IsNull() && !config.APIKeyWO.IsUnknown() {
-		apiKeys = []string{config.APIKeyWO.ValueString()}
+	if key := config.APIKeyWO.ValueString(); key != "" {
+		apiKeys = []string{key}
 	}
 	return codersdk.CreateAIProviderRequest{
 		Type:        codersdk.AIProviderType(m.Type.ValueString()),
@@ -618,11 +617,15 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 	}
 
 	// Rotate the API key only when its version changes to a concrete value. A
-	// null version preserves the stored key rather than clearing it.
+	// null version preserves the stored key rather than clearing it; an empty
+	// key deletes it.
 	if !m.APIKeyWOVersion.IsNull() && !m.APIKeyWOVersion.Equal(state.APIKeyWOVersion) {
-		if config.APIKeyWO.IsNull() || config.APIKeyWO.IsUnknown() {
-			diags.AddAttributeError(path.Root("api_key_wo"), "Missing API Key", "`api_key_wo` must be configured when `api_key_wo_version` changes.")
-		} else {
+		switch {
+		case config.APIKeyWO.IsNull() || config.APIKeyWO.IsUnknown():
+			diags.AddAttributeError(path.Root("api_key_wo"), "Missing API Key", "`api_key_wo` must be configured when `api_key_wo_version` changes. Set it to `\"\"` to delete the stored key.")
+		case config.APIKeyWO.ValueString() == "":
+			patch.APIKeys = &[]codersdk.AIProviderKeyMutation{}
+		default:
 			patch.APIKeys = &[]codersdk.AIProviderKeyMutation{{APIKey: stringPtrOrNil(config.APIKeyWO)}}
 		}
 	}
