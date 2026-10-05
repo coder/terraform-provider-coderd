@@ -102,7 +102,7 @@ resource "coderd_ai_provider" "openai" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration does not delete a stored key; replace the resource to delete it. Bump `api_key_wo_version` to rotate it.
+- `api_key_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Plaintext API key for the provider. Not valid for `bedrock` or `copilot`, or when `settings.bedrock` is set. Optional with `settings.claude_platform_aws`; see that attribute. Removing it from configuration keeps the stored key. Bump `api_key_wo_version` to rotate it, or set it to `""` and bump the version to delete the stored key.
 - `api_key_wo_version` (Number) Version for the write-only API key. Required when `api_key_wo` is set; bump it whenever `api_key_wo` changes to rotate the stored key.
 - `display_name` (String) Display name shown in Coder. If omitted, defaults to the provider name.
 - `enabled` (Boolean) Whether this AI provider is enabled. Defaults to true.

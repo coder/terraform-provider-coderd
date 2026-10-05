@@ -57,6 +57,9 @@ func TestAccAIProviderResource(t *testing.T) {
 	// Changing base_url to a different region must re-derive settings.bedrock.region.
 	cfg3 := cfg2
 	cfg3.BedrockBaseURL = "https://bedrock-runtime.us-west-2.amazonaws.com"
+	cfg4 := cfg3
+	cfg4.OpenAIKey = ""
+	cfg4.OpenAIKeyVersion = 3
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -92,6 +95,10 @@ func TestAccAIProviderResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-west-2"),
 				),
+			},
+			{
+				Config: cfg4.String(t),
+				Check:  resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_masked"),
 			},
 		},
 	})
@@ -253,17 +260,6 @@ func TestAIProviderResourceSchemaValidation(t *testing.T) {
 }
 `,
 			wantError: `api_key_wo_version`,
-		},
-		"api key cannot be empty": {
-			body: `resource "coderd_ai_provider" "test" {
-  type               = "openai"
-  name               = "openai-test"
-  base_url           = "https://api.openai.com/v1"
-  api_key_wo         = ""
-  api_key_wo_version = 1
-}
-`,
-			wantError: `(?s)string length must be at\s+least\s+1`,
 		},
 		"bedrock known config requires region or credentials": {
 			body: `resource "coderd_ai_provider" "test" {
@@ -760,6 +756,26 @@ func TestAIProviderCreateRequestBedrockWithoutCredentials(t *testing.T) {
 	require.Nil(t, req.Settings.Bedrock.AccessKeySecret)
 }
 
+func TestAIProviderCreateRequestEmptyAPIKey(t *testing.T) {
+	t.Parallel()
+
+	plan := AIProviderResourceModel{
+		Type:            types.StringValue(string(codersdk.AIProviderTypeOpenAI)),
+		Name:            types.StringValue("openai"),
+		Enabled:         types.BoolValue(true),
+		BaseURL:         types.StringValue("https://api.openai.com/v1"),
+		APIKeyWOVersion: types.Int64Value(1),
+	}
+	config := plan
+	config.APIKeyWO = types.StringValue("")
+
+	var diags diag.Diagnostics
+	req := plan.createRequest(config, &diags)
+	require.False(t, diags.HasError(), diags.Errors())
+	require.Empty(t, req.APIKeys)
+	require.Empty(t, req.Validate())
+}
+
 func TestAIProviderCreateRequestBedrockMantleProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -905,6 +921,67 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 		require.Contains(t, diags.Errors()[0].Summary(), "Missing API Key")
 		require.Nil(t, patch.APIKeys)
 	})
+}
+
+func TestAIProviderModifyPlanAPIKey(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	r := &AIProviderResource{}
+	schemaResp := &fwresource.SchemaResponse{}
+	r.Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.Empty(t, schemaResp.Diagnostics)
+	s := schemaResp.Schema
+
+	raw := func(t *testing.T, m *AIProviderResourceModel) tftypes.Value {
+		state := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+		if m != nil {
+			require.Empty(t, state.Set(ctx, m))
+		}
+		return state.Raw
+	}
+	model := func(version types.Int64, key types.String) *AIProviderResourceModel {
+		return &AIProviderResourceModel{APIKeyWOVersion: version, APIKeyWO: key}
+	}
+	prior := model(types.Int64Value(1), types.StringNull())
+
+	for _, tc := range []struct {
+		name         string
+		state        *AIProviderResourceModel
+		config       *AIProviderResourceModel
+		wantErrors   []string
+		wantWarnings []string
+	}{
+		{name: "version bumped without key", state: prior, config: model(types.Int64Value(2), types.StringNull()), wantErrors: []string{"Missing API Key"}},
+		{name: "version bumped with empty key", state: prior, config: model(types.Int64Value(2), types.StringValue("")), wantWarnings: []string{"Deleting Stored API Key"}},
+		{name: "version bumped with key", state: prior, config: model(types.Int64Value(2), types.StringValue("sk-rotated"))},
+		{name: "version unchanged without key", state: prior, config: model(types.Int64Value(1), types.StringNull())},
+		{name: "version unknown without key", state: prior, config: model(types.Int64Unknown(), types.StringNull())},
+		{name: "create with empty key", config: model(types.Int64Value(1), types.StringValue(""))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Write-only values are null in the plan; ModifyPlan must read them from config.
+			planned := *tc.config
+			planned.APIKeyWO = types.StringNull()
+			plan := tfsdk.Plan{Schema: s, Raw: raw(t, &planned)}
+			resp := &fwresource.ModifyPlanResponse{Plan: plan}
+			r.ModifyPlan(ctx, fwresource.ModifyPlanRequest{
+				Config: tfsdk.Config{Schema: s, Raw: raw(t, tc.config)},
+				Plan:   plan,
+				State:  tfsdk.State{Schema: s, Raw: raw(t, tc.state)},
+			}, resp)
+
+			var errs, warnings []string
+			for _, d := range resp.Diagnostics.Errors() {
+				errs = append(errs, d.Summary())
+			}
+			for _, d := range resp.Diagnostics.Warnings() {
+				warnings = append(warnings, d.Summary())
+			}
+			require.Equal(t, tc.wantErrors, errs)
+			require.Equal(t, append([]string{"Experimental Resource"}, tc.wantWarnings...), warnings)
+		})
+	}
 }
 
 func TestAIProviderUpdateRejectsBedrockCredentialBumpWithoutCredentials(t *testing.T) {
