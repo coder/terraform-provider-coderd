@@ -91,6 +91,33 @@ func (r *AIProviderResource) ModifyPlan(ctx context.Context, req resource.Modify
 		"Experimental Resource",
 		"coderd_ai_provider is experimental. Changes are expected, and it is not recommended for production use.",
 	)
+	if req.State.Raw.IsNull() {
+		return
+	}
+
+	var version, priorVersion types.Int64
+	var key types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("api_key_wo_version"), &version)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("api_key_wo_version"), &priorVersion)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("api_key_wo"), &key)...)
+	if resp.Diagnostics.HasError() || version.IsNull() || version.IsUnknown() || version.Equal(priorVersion) || key.IsUnknown() {
+		return
+	}
+	if key.IsNull() {
+		addMissingAPIKeyError(&resp.Diagnostics)
+		return
+	}
+	if key.ValueString() == "" {
+		resp.Diagnostics.AddAttributeWarning(
+			path.Root("api_key_wo"),
+			"Deleting Stored API Key",
+			"`api_key_wo` is `\"\"` and `api_key_wo_version` changed, so this apply deletes the stored API key. The plan shows this only as a version change.",
+		)
+	}
+}
+
+func addMissingAPIKeyError(diags *diag.Diagnostics) {
+	diags.AddAttributeError(path.Root("api_key_wo"), "Missing API Key", "`api_key_wo` must be configured when `api_key_wo_version` changes. Set it to `\"\"` to delete the stored key.")
 }
 
 func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -622,7 +649,8 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 	if !m.APIKeyWOVersion.IsNull() && !m.APIKeyWOVersion.Equal(state.APIKeyWOVersion) {
 		switch {
 		case config.APIKeyWO.IsNull() || config.APIKeyWO.IsUnknown():
-			diags.AddAttributeError(path.Root("api_key_wo"), "Missing API Key", "`api_key_wo` must be configured when `api_key_wo_version` changes. Set it to `\"\"` to delete the stored key.")
+			// ModifyPlan reports this at plan time unless the version was unknown then.
+			addMissingAPIKeyError(diags)
 		case config.APIKeyWO.ValueString() == "":
 			patch.APIKeys = &[]codersdk.AIProviderKeyMutation{}
 		default:

@@ -98,10 +98,7 @@ func TestAccAIProviderResource(t *testing.T) {
 			},
 			{
 				Config: cfg4.String(t),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_wo_version", "3"),
-					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_masked"),
-				),
+				Check:  resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_masked"),
 			},
 		},
 	})
@@ -906,19 +903,6 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 		require.Equal(t, "sk-rotated", *(*patch.APIKeys)[0].APIKey)
 	})
 
-	t.Run("version bumped with empty key", func(t *testing.T) {
-		plan := state
-		plan.APIKeyWOVersion = types.Int64Value(2)
-		config := plan
-		config.APIKeyWO = types.StringValue("")
-
-		var diags diag.Diagnostics
-		patch := plan.updateRequest(state, config, &diags)
-		require.False(t, diags.HasError(), diags.Errors())
-		require.NotNil(t, patch.APIKeys)
-		require.Empty(t, *patch.APIKeys, "an empty key list deletes every stored key")
-	})
-
 	t.Run("version removed", func(t *testing.T) {
 		removed := state
 		removed.APIKeyWOVersion = types.Int64Null()
@@ -937,6 +921,67 @@ func TestAIProviderUpdateRequestAPIKeyRotation(t *testing.T) {
 		require.Contains(t, diags.Errors()[0].Summary(), "Missing API Key")
 		require.Nil(t, patch.APIKeys)
 	})
+}
+
+func TestAIProviderModifyPlanAPIKey(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	r := &AIProviderResource{}
+	schemaResp := &fwresource.SchemaResponse{}
+	r.Schema(ctx, fwresource.SchemaRequest{}, schemaResp)
+	require.Empty(t, schemaResp.Diagnostics)
+	s := schemaResp.Schema
+
+	raw := func(t *testing.T, m *AIProviderResourceModel) tftypes.Value {
+		state := tfsdk.State{Schema: s, Raw: tftypes.NewValue(s.Type().TerraformType(ctx), nil)}
+		if m != nil {
+			require.Empty(t, state.Set(ctx, m))
+		}
+		return state.Raw
+	}
+	model := func(version types.Int64, key types.String) *AIProviderResourceModel {
+		return &AIProviderResourceModel{APIKeyWOVersion: version, APIKeyWO: key}
+	}
+	prior := model(types.Int64Value(1), types.StringNull())
+
+	for _, tc := range []struct {
+		name         string
+		state        *AIProviderResourceModel
+		config       *AIProviderResourceModel
+		wantErrors   []string
+		wantWarnings []string
+	}{
+		{name: "version bumped without key", state: prior, config: model(types.Int64Value(2), types.StringNull()), wantErrors: []string{"Missing API Key"}},
+		{name: "version bumped with empty key", state: prior, config: model(types.Int64Value(2), types.StringValue("")), wantWarnings: []string{"Deleting Stored API Key"}},
+		{name: "version bumped with key", state: prior, config: model(types.Int64Value(2), types.StringValue("sk-rotated"))},
+		{name: "version unchanged without key", state: prior, config: model(types.Int64Value(1), types.StringNull())},
+		{name: "version unknown without key", state: prior, config: model(types.Int64Unknown(), types.StringNull())},
+		{name: "create with empty key", config: model(types.Int64Value(1), types.StringValue(""))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Write-only values are null in the plan; ModifyPlan must read them from config.
+			planned := *tc.config
+			planned.APIKeyWO = types.StringNull()
+			plan := tfsdk.Plan{Schema: s, Raw: raw(t, &planned)}
+			resp := &fwresource.ModifyPlanResponse{Plan: plan}
+			r.ModifyPlan(ctx, fwresource.ModifyPlanRequest{
+				Config: tfsdk.Config{Schema: s, Raw: raw(t, tc.config)},
+				Plan:   plan,
+				State:  tfsdk.State{Schema: s, Raw: raw(t, tc.state)},
+			}, resp)
+
+			var errs, warnings []string
+			for _, d := range resp.Diagnostics.Errors() {
+				errs = append(errs, d.Summary())
+			}
+			for _, d := range resp.Diagnostics.Warnings() {
+				warnings = append(warnings, d.Summary())
+			}
+			require.Equal(t, tc.wantErrors, errs)
+			require.Equal(t, append([]string{"Experimental Resource"}, tc.wantWarnings...), warnings)
+		})
+	}
 }
 
 func TestAIProviderUpdateRejectsBedrockCredentialBumpWithoutCredentials(t *testing.T) {
