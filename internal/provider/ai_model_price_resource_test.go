@@ -247,7 +247,6 @@ resource "coderd_ai_model_price" "conflict" {
 		Steps: []resource.TestStep{
 			{
 				Config: cfg(100, 200, "null"),
-				Check:  resource.TestCheckResourceAttr("coderd_ai_model_price.slash", "id", "openrouter/"+slashModel),
 			},
 			{
 				Config: cfg(150, 250, "0"),
@@ -262,16 +261,18 @@ resource "coderd_ai_model_price" "conflict" {
 				},
 			},
 			{
-				ResourceName:      "coderd_ai_model_price.test",
-				ImportState:       true,
-				ImportStateId:     "anthropic/" + model,
-				ImportStateVerify: true,
+				ResourceName:                         "coderd_ai_model_price.test",
+				ImportState:                          true,
+				ImportStateId:                        "anthropic/" + model,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "model",
 			},
 			{
-				ResourceName:      "coderd_ai_model_price.slash",
-				ImportState:       true,
-				ImportStateId:     "openrouter/" + slashModel,
-				ImportStateVerify: true,
+				ResourceName:                         "coderd_ai_model_price.slash",
+				ImportState:                          true,
+				ImportStateId:                        "openrouter/" + slashModel,
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "model",
 			},
 			{
 				PreConfig:   func() { upsert("openai", conflictModel, 1000000) },

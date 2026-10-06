@@ -69,10 +69,6 @@ resource "coderd_ai_model_price" "sonnet" {
 - `input_price` (Number) Price per 1M input tokens, in integer micro-units: `1000000` is $1.00 per 1M tokens. Omit it if the price is not known, which AI Gateway counts as zero cost. Set `0` to declare the tokens free of charge.
 - `output_price` (Number) Price per 1M output tokens, in integer micro-units: `1000000` is $1.00 per 1M tokens. Omit it if the price is not known, which AI Gateway counts as zero cost. Set `0` to declare the tokens free of charge.
 
-### Read-Only
-
-- `id` (String) Model price ID, in the form `<provider_type>/<model>`.
-
 ## Import
 
 Import is supported using the following syntax:

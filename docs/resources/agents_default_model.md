@@ -65,10 +65,6 @@ resource "coderd_agents_default_model" "default" {
 - `model_id` (String) ID of the `coderd_agents_model` to mark as the organization's default. Usually this is `coderd_agents_model.<name>.id`.
 - `organization_id` (String) Organization ID whose default Agents model is managed.
 
-### Read-Only
-
-- `id` (String) Organization ID that identifies this organization's default Agents model selection.
-
 ## Import
 
 Import is supported using the following syntax:

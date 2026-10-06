@@ -44,7 +44,6 @@ func (r *AgentsDefaultModelResource) experimentalClient() *codersdk.Experimental
 }
 
 type AgentsDefaultModelResourceModel struct {
-	ID             UUID `tfsdk:"id"`
 	OrganizationID UUID `tfsdk:"organization_id"`
 	ModelID        UUID `tfsdk:"model_id"`
 }
@@ -52,7 +51,6 @@ type AgentsDefaultModelResourceModel struct {
 // legacyDefaultAgentsModelResourceModel is the v0 state shape published by
 // coderd_default_agents_model in provider v0.0.23.
 type legacyDefaultAgentsModelResourceModel struct {
-	ID      types.String `tfsdk:"id"`
 	ModelID types.String `tfsdk:"model_id"`
 }
 
@@ -86,14 +84,6 @@ func (r *AgentsDefaultModelResource) Schema(ctx context.Context, req resource.Sc
 			"and promotes a replacement when the current default is removed, so deleting this resource only stops " +
 			"Terraform from managing which model is default.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				MarkdownDescription: "Organization ID that identifies this organization's default Agents model selection.",
-				CustomType:          UUIDType,
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					useStateForUnknownUnlessChanged("organization_id"),
-				},
-			},
 			"organization_id": schema.StringAttribute{
 				MarkdownDescription: "Organization ID whose default Agents model is managed.",
 				CustomType:          UUIDType,
@@ -120,9 +110,6 @@ func (r *AgentsDefaultModelResource) MoveState(ctx context.Context) []resource.S
 		{
 			SourceSchema: &schema.Schema{
 				Attributes: map[string]schema.Attribute{
-					"id": schema.StringAttribute{
-						Computed: true,
-					},
 					"model_id": schema.StringAttribute{
 						Required: true,
 					},
@@ -161,7 +148,6 @@ func (r *AgentsDefaultModelResource) MoveState(ctx context.Context) []resource.S
 				// default organization cannot be resolved here. Leave it null and
 				// let the subsequent apply adopt the configured organization_id.
 				resp.Diagnostics.Append(resp.TargetState.Set(ctx, AgentsDefaultModelResourceModel{
-					ID:             NewUUIDNull(),
 					OrganizationID: NewUUIDNull(),
 					ModelID:        UUIDValue(modelID),
 				})...)
@@ -284,7 +270,6 @@ func (r *AgentsDefaultModelResource) ImportState(ctx context.Context, req resour
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to get organization %q: %s", req.ID, err))
 		return
 	}
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), org.ID.String())...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization_id"), org.ID.String())...)
 }
 
@@ -303,11 +288,9 @@ func (r *AgentsDefaultModelResource) setDefault(ctx context.Context, organizatio
 }
 
 // stateFromAgentsDefaultModelConfig maps the model config that Coder reports as the
-// default into resource state. The organization UUID is the natural identity
-// because each organization has at most one default model.
+// default into resource state.
 func stateFromAgentsDefaultModelConfig(config codersdk.ChatModel) AgentsDefaultModelResourceModel {
 	return AgentsDefaultModelResourceModel{
-		ID:             UUIDValue(config.OrganizationID),
 		OrganizationID: UUIDValue(config.OrganizationID),
 		ModelID:        UUIDValue(config.ID),
 	}

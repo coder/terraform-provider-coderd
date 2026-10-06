@@ -41,7 +41,6 @@ type AIModelPriceResource struct {
 }
 
 type AIModelPriceResourceModel struct {
-	ID              types.String `tfsdk:"id"`
 	ProviderType    types.String `tfsdk:"provider_type"`
 	Model           types.String `tfsdk:"model"`
 	InputPrice      types.Int64  `tfsdk:"input_price"`
@@ -188,13 +187,6 @@ func (r *AIModelPriceResource) Schema(ctx context.Context, req resource.SchemaRe
 			"-> If Coder already has a different custom price for the same model, the plan fails. Import that price to manage it with Terraform.\n\n" +
 			"~> **Warning**\nDestroying this resource only removes it from the Terraform state. The price stays in effect, because Coder has no API to delete a custom price.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				MarkdownDescription: "Model price ID, in the form `<provider_type>/<model>`.",
-				Computed:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			"provider_type": schema.StringAttribute{
 				MarkdownDescription: "AI provider type the price applies to. Valid values are `openai`, `anthropic`, `azure`, `bedrock`, `google`, `openrouter`, `vercel`, and `copilot`. " +
 					"`openai-compat` is not currently supported. " +
@@ -314,8 +306,6 @@ func (r *AIModelPriceResource) Create(ctx context.Context, req resource.CreateRe
 		resp.Diagnostics.Append(aiModelPriceDiag("set", id, err)...)
 		return
 	}
-
-	plan.ID = types.StringValue(id)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -340,7 +330,6 @@ func (r *AIModelPriceResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	state.ID = types.StringValue(id)
 	state.InputPrice = types.Int64PointerValue(price.InputPrice)
 	state.OutputPrice = types.Int64PointerValue(price.OutputPrice)
 	state.CacheReadPrice = types.Int64PointerValue(price.CacheReadPrice)
@@ -364,8 +353,6 @@ func (r *AIModelPriceResource) Update(ctx context.Context, req resource.UpdateRe
 		resp.Diagnostics.Append(aiModelPriceDiag("update", id, err)...)
 		return
 	}
-
-	plan.ID = types.StringValue(id)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -394,7 +381,6 @@ func (r *AIModelPriceResource) ImportState(ctx context.Context, req resource.Imp
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("provider_type"), providerType)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("model"), model)...)
 }

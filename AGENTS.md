@@ -50,7 +50,7 @@ make testacc               # TF_ACC=1 go test ./... -timeout 120m
 
 **Naming.** Terraform resource types are prefixed with the Coder feature area they belong to so related resources cluster together in configs and docs. Prefer an existing prefix over inventing a new one:
 
-- `coderd_agents_*` — Coder Agents feature area (`coderd_agents_mcp_server`, `coderd_agents_model`, `coderd_agents_system_prompt`, `coderd_default_agents_model`).
+- `coderd_agents_*` — Coder Agents feature area (`coderd_agents_default_model`, `coderd_agents_mcp_server`, `coderd_agents_model`, `coderd_agents_system_prompt`).
 - `coderd_organization_*` — organization-scoped settings (`coderd_organization_group_sync`, `coderd_organization_sync_settings`).
 - `coderd_oauth2_*`, `coderd_workspace_*`, etc. follow the same rule.
 
