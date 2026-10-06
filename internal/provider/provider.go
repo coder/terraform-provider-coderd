@@ -236,6 +236,7 @@ func (p *CoderdProvider) Resources(ctx context.Context) []func() resource.Resour
 		NewAgentsModelResource,
 		NewAgentsDefaultModelResource,
 		NewAgentsSystemPromptResource,
+		NewAgentsOrganizationSystemPromptResource,
 		NewOAuth2ProviderSettingsResource,
 	}
 }
