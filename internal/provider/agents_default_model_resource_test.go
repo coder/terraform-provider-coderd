@@ -18,8 +18,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -34,24 +32,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	"github.com/stretchr/testify/require"
 )
-
-func TestAgentsDefaultModelStateFromModelConfig(t *testing.T) {
-	t.Parallel()
-
-	organizationID := uuid.New()
-	modelID := uuid.New()
-	state := stateFromAgentsDefaultModelConfig(codersdk.ChatModel{
-		ID:             modelID,
-		OrganizationID: organizationID,
-		IsDefault:      true,
-	})
-	require.Equal(t, organizationID, state.ID.ValueUUID())
-	require.Equal(t, organizationID.String(), state.ID.ValueString())
-	require.Equal(t, organizationID, state.OrganizationID.ValueUUID())
-	require.Equal(t, organizationID.String(), state.OrganizationID.ValueString())
-	require.Equal(t, modelID, state.ModelID.ValueUUID())
-	require.Equal(t, modelID.String(), state.ModelID.ValueString())
-}
 
 func TestAgentsDefaultModelMoveState(t *testing.T) {
 	t.Parallel()
@@ -69,7 +49,6 @@ func TestAgentsDefaultModelMoveState(t *testing.T) {
 		Raw:    tftypes.NewValue(sourceSchema.Type().TerraformType(ctx), nil),
 	}
 	require.False(t, sourceState.Set(ctx, legacyDefaultAgentsModelResourceModel{
-		ID:      types.StringValue("default"),
 		ModelID: types.StringValue(modelID.String()),
 	}).HasError())
 
@@ -93,7 +72,6 @@ func TestAgentsDefaultModelMoveState(t *testing.T) {
 
 	var got AgentsDefaultModelResourceModel
 	require.False(t, resp.TargetState.Get(ctx, &got).HasError())
-	require.True(t, got.ID.IsNull())
 	require.True(t, got.OrganizationID.IsNull())
 	require.Equal(t, modelID, got.ModelID.ValueUUID())
 
@@ -141,74 +119,6 @@ func TestAgentsDefaultModelMoveState(t *testing.T) {
 			movers[0].StateMover(ctx, tc.req, resp)
 			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
 			require.True(t, resp.TargetState.Raw.IsNull())
-		})
-	}
-}
-
-func TestAgentsDefaultModelIDPlanModifier(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	oldOrganizationID := uuid.New()
-	newOrganizationID := uuid.New()
-	modelID := uuid.New()
-
-	r := &AgentsDefaultModelResource{}
-	var schemaResp fwresource.SchemaResponse
-	r.Schema(ctx, fwresource.SchemaRequest{}, &schemaResp)
-	require.False(t, schemaResp.Diagnostics.HasError(), schemaResp.Diagnostics)
-
-	idAttribute, ok := schemaResp.Schema.Attributes["id"].(schema.StringAttribute)
-	require.True(t, ok)
-	require.Len(t, idAttribute.PlanModifiers, 1)
-	modifier := idAttribute.PlanModifiers[0]
-
-	raw := func(id tftypes.Value, organizationID uuid.UUID) tftypes.Value {
-		return tftypes.NewValue(schemaResp.Schema.Type().TerraformType(ctx), map[string]tftypes.Value{
-			"id":              id,
-			"organization_id": tftypes.NewValue(tftypes.String, organizationID.String()),
-			"model_id":        tftypes.NewValue(tftypes.String, modelID.String()),
-		})
-	}
-	state := tfsdk.State{
-		Schema: schemaResp.Schema,
-		Raw:    raw(tftypes.NewValue(tftypes.String, oldOrganizationID.String()), oldOrganizationID),
-	}
-
-	for _, tc := range []struct {
-		name                string
-		plannedOrganization uuid.UUID
-		want                types.String
-	}{
-		{
-			name:                "retains id when organization is unchanged",
-			plannedOrganization: oldOrganizationID,
-			want:                types.StringValue(oldOrganizationID.String()),
-		},
-		{
-			name:                "leaves id unknown when organization changes",
-			plannedOrganization: newOrganizationID,
-			want:                types.StringUnknown(),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			plan := tfsdk.Plan{
-				Schema: schemaResp.Schema,
-				Raw:    raw(tftypes.NewValue(tftypes.String, tftypes.UnknownValue), tc.plannedOrganization),
-			}
-			resp := &planmodifier.StringResponse{PlanValue: types.StringUnknown()}
-			modifier.PlanModifyString(ctx, planmodifier.StringRequest{
-				ConfigValue: types.StringNull(),
-				PlanValue:   types.StringUnknown(),
-				StateValue:  types.StringValue(oldOrganizationID.String()),
-				Plan:        plan,
-				State:       state,
-			}, resp)
-
-			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
-			require.Equal(t, tc.want, resp.PlanValue)
 		})
 	}
 }
@@ -351,7 +261,6 @@ func TestAgentsDefaultModelReadCollection404(t *testing.T) {
 
 			r := newAgentsDefaultModelTestResource(t, srv.URL, defaultOrganizationID)
 			state := agentsDefaultModelTestState(t, r, AgentsDefaultModelResourceModel{
-				ID:             UUIDValue(targetOrganizationID),
 				OrganizationID: UUIDValue(targetOrganizationID),
 				ModelID:        UUIDValue(modelID),
 			})
@@ -586,7 +495,6 @@ resource "coderd_agents_default_model" "this" {
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("coderd_agents_default_model.this", tfjsonpath.New("id"), knownvalue.StringExact(orgID.String())),
 					statecheck.ExpectKnownValue("coderd_agents_default_model.this", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgID.String())),
 					statecheck.ExpectKnownValue("coderd_agents_default_model.this", tfjsonpath.New("model_id"), knownvalue.StringExact(model.ID.String())),
 					statecheck.ExpectKnownValue("coderd_agents_model.test", tfjsonpath.New("organization_id"), knownvalue.StringExact(orgID.String())),
@@ -699,7 +607,6 @@ resource "coderd_agents_default_model" "default" {
 			{
 				Config: cfg("sonnet"),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_agents_default_model.default", "id", organizationID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_default_model.default", "organization_id", organizationID.String()),
 					resource.TestCheckResourceAttrPair("coderd_agents_default_model.default", "model_id", "coderd_agents_model.sonnet", "id"),
 					checkServerDefaultMatchesResource(ctx, t, client, organizationID, "coderd_agents_default_model.default"),
@@ -721,10 +628,11 @@ resource "coderd_agents_default_model" "default" {
 			},
 			{
 				// Import by organization name; Read resolves its current default.
-				ResourceName:      "coderd_agents_default_model.default",
-				ImportState:       true,
-				ImportStateVerify: true,
-				ImportStateId:     organization.Name,
+				ResourceName:                         "coderd_agents_default_model.default",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        organization.Name,
+				ImportStateVerifyIdentifierAttribute: "organization_id",
 			},
 		},
 	})
@@ -864,10 +772,8 @@ resource "coderd_agents_default_model" "other_org" {
 			{
 				Config: cfg,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("coderd_agents_default_model.default_org", "id", defaultOrganizationID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_default_model.default_org", "organization_id", defaultOrganizationID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_default_model.default_org", "model_id", defaultOrgSecond.ID.String()),
-					resource.TestCheckResourceAttr("coderd_agents_default_model.other_org", "id", otherOrganization.ID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_default_model.other_org", "organization_id", otherOrganization.ID.String()),
 					resource.TestCheckResourceAttr("coderd_agents_default_model.other_org", "model_id", otherOrgFirst.ID.String()),
 					checkServerDefaultMatchesResource(ctx, t, client, defaultOrganizationID, "coderd_agents_default_model.default_org"),
