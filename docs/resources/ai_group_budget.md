@@ -6,7 +6,7 @@ description: |-
   ~> Warning
   This resource is only compatible with Coder version 2.36.0 and later.
   Manages the AI spend limit that AI Gateway applies to each member of a group. Requires a Premium license with the AI Gateway feature, and the Owner or User Admin role, or the Organization Admin or Organization User Admin role in the group's organization.
-  Each member of the group can spend up to the limit in each budget period https://coder.com/docs/ai-coder/ai-gateway/cost-controls#deployment-settings. When a user belongs to several groups with a budget, the deployment's budget policy https://coder.com/docs/ai-coder/ai-gateway/cost-controls#effective-group-resolution selects the group that applies.
+  Each member of the group can spend up to the limit in each budget period https://coder.com/docs/ai-coder/ai-gateway/cost-controls#deployment-settings. When a user belongs to several groups with a budget, the deployment's budget policy https://coder.com/docs/ai-coder/ai-gateway/cost-controls#effective-group-resolution selects the group that applies. Use coderd_ai_user_budget_override to set a different limit for a single user.
   -> If Coder already has a different budget for the group, the plan fails. Import that budget to manage it with Terraform.
   Destroying this resource removes the budget. Future requests from members of the group use their next effective group https://coder.com/docs/ai-coder/ai-gateway/cost-controls#effective-group-resolution, and spend already recorded stays attributed to this group. Coder also removes the budget when the group is deleted.
 ---
@@ -18,7 +18,7 @@ This resource is only compatible with Coder version 2.36.0 and later.
 
 Manages the AI spend limit that AI Gateway applies to each member of a group. Requires a Premium license with the AI Gateway feature, and the Owner or User Admin role, or the Organization Admin or Organization User Admin role in the group's organization.
 
-Each member of the group can spend up to the limit in each [budget period](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#deployment-settings). When a user belongs to several groups with a budget, the deployment's [budget policy](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#effective-group-resolution) selects the group that applies.
+Each member of the group can spend up to the limit in each [budget period](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#deployment-settings). When a user belongs to several groups with a budget, the deployment's [budget policy](https://coder.com/docs/ai-coder/ai-gateway/cost-controls#effective-group-resolution) selects the group that applies. Use `coderd_ai_user_budget_override` to set a different limit for a single user.
 
 -> If Coder already has a different budget for the group, the plan fails. Import that budget to manage it with Terraform.
 
