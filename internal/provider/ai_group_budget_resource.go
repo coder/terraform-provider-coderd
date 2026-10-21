@@ -49,14 +49,15 @@ var aiSpendLimitValidators = []validator.Int64{
 }
 
 // aiGroupBudgetDiag converts an error from the group AI budget API into a
-// diagnostic. The upsert call returns 404 only when the group does not exist,
-// or when the deployment has no group AI budget API.
+// diagnostic. Coder returns 404 when the group does not exist, when the token
+// can read the group but cannot update it, or when the deployment has no group
+// AI budget API.
 func aiGroupBudgetDiag(action string, groupID uuid.UUID, err error) diag.Diagnostics {
 	var diags diag.Diagnostics
 	if isHTTPNotFound(err) {
-		diags.AddError("Group Not Found or Unsupported Coder Version", fmt.Sprintf(
+		diags.AddError("Group Not Found, Insufficient Permissions, or Unsupported Coder Version", fmt.Sprintf(
 			"Unable to %s AI budget for group %s: the deployment returned 404 for /api/v2/groups/%s/ai/budget. "+
-				"Either the group does not exist, or the deployment is older than Coder version %s, which this resource requires. "+
+				"This resource requires an existing group, Coder version %s or later, and a token with permission to update the group. "+
 				"Original error: %s",
 			action, groupID, groupID, aiGroupBudgetMinVersion, err))
 		return diags
