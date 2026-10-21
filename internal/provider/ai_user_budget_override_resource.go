@@ -42,14 +42,15 @@ type AIUserBudgetOverrideResourceModel struct {
 }
 
 // aiUserBudgetOverrideDiag converts an error from the user AI budget override
-// API into a diagnostic. The upsert call returns 404 only when the group does
-// not exist, or when the deployment has no user AI budget override API.
+// API into a diagnostic. Coder returns 404 when the group does not exist, when
+// the token cannot update the user or the group, or when the deployment has no
+// user AI budget override API.
 func aiUserBudgetOverrideDiag(action string, userID uuid.UUID, err error) diag.Diagnostics {
 	var diags diag.Diagnostics
 	if isHTTPNotFound(err) {
-		diags.AddError("Group Not Found or Unsupported Coder Version", fmt.Sprintf(
+		diags.AddError("Group Not Found, Insufficient Permissions, or Unsupported Coder Version", fmt.Sprintf(
 			"Unable to %s AI budget override for user %s: the deployment returned 404 for /api/v2/users/%s/ai/budget/override. "+
-				"Either the group does not exist, or the deployment is older than Coder version %s, which this resource requires. "+
+				"This resource requires an existing group, Coder version %s or later, and a token with permission to update the user and the group. "+
 				"Original error: %s",
 			action, userID, userID, aiUserBudgetOverrideMinVersion, err))
 		return diags
