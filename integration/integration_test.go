@@ -314,6 +314,29 @@ func TestIntegration(t *testing.T) {
 			},
 		},
 		{
+			name:       "ai-budget-test",
+			minVersion: "v2.36.0",
+			preF:       func(t testing.TB, c *codersdk.Client) {},
+			assertF: func(t testing.TB, c *codersdk.Client) {
+				me, err := c.User(ctx, codersdk.Me)
+				require.NoError(t, err)
+				group, err := c.GroupByOrgAndName(ctx, me.OrganizationIDs[0], "engineering")
+				require.NoError(t, err)
+				user, err := c.User(ctx, "alice")
+				require.NoError(t, err)
+
+				// The override takes precedence over the group budget.
+				status, err := c.UserAISpendStatus(ctx, user.ID)
+				require.NoError(t, err)
+				require.NotNil(t, status.EffectiveGroupID)
+				assert.Equal(t, group.ID, *status.EffectiveGroupID)
+				assert.Equal(t, &codersdk.AIBudgetLimit{
+					SpendLimitMicros: 200000000,
+					LimitSource:      codersdk.AIBudgetLimitSourceUserOverride,
+				}, status.EffectiveBudget)
+			},
+		},
+		{
 			name:       "bedrock-protocol-test",
 			minVersion: "v2.36.0",
 			preF:       func(t testing.TB, c *codersdk.Client) {},
