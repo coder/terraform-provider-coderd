@@ -8,8 +8,10 @@ terraform {
 }
 
 resource "coderd_user" "alice" {
-  username = "alice"
-  email    = "alice@example.com"
+  username   = "alice"
+  email      = "alice@example.com"
+  login_type = "password"
+  password   = "SomeSecurePassword!"
 }
 
 resource "coderd_group" "engineering" {
