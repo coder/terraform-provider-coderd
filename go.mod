@@ -1,10 +1,10 @@
 module github.com/coder/terraform-provider-coderd
 
-go 1.26.5
+go 1.26.9
 
 require (
 	cdr.dev/slog/v3 v3.2.0
-	github.com/coder/coder/v2 v2.38.0
+	github.com/coder/coder/v2 v2.38.1
 	github.com/coder/retry v1.5.1
 	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.15
@@ -218,7 +218,7 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
