@@ -81,6 +81,7 @@ resource "coderd_ai_provider" "openai" {
   type         = "openai"
   name         = "openai"
   display_name = "OpenAI"
+  icon         = "/icon/openai.svg"
   enabled      = true
   base_url     = "https://api.openai.com/v1"
 
@@ -106,6 +107,7 @@ resource "coderd_ai_provider" "openai" {
 - `api_key_wo_version` (Number) Version for the write-only API key. Required when `api_key_wo` is set; bump it whenever `api_key_wo` changes to rotate the stored key.
 - `display_name` (String) Display name shown in Coder. If omitted, defaults to the provider name.
 - `enabled` (Boolean) Whether this AI provider is enabled. Defaults to true.
+- `icon` (String) Relative path or external URL that specifies an icon to be displayed in the dashboard. If omitted, Coder shows the default icon for the provider type. Requires Coder v2.36.0 or later.
 - `settings` (Attributes) Type-specific provider settings. Removing them from an existing provider replaces the provider. (see [below for nested schema](#nestedatt--settings))
 
 ### Read-Only

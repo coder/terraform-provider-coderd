@@ -18,13 +18,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-const aiProviderClaudePlatformAWSMinVersion = "2.38.0"
+const (
+	aiProviderClaudePlatformAWSMinVersion = "2.38.0"
+	aiProviderIconMinVersion              = "2.36.0"
+)
 
 var (
 	bedrockCanonicalBaseURLRegex = regexp.MustCompile(`(?i)^https://bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com/?$`)
@@ -50,6 +54,7 @@ type AIProviderResourceModel struct {
 	Type            types.String             `tfsdk:"type"`
 	Name            types.String             `tfsdk:"name"`
 	DisplayName     types.String             `tfsdk:"display_name"`
+	Icon            types.String             `tfsdk:"icon"`
 	Enabled         types.Bool               `tfsdk:"enabled"`
 	BaseURL         types.String             `tfsdk:"base_url"`
 	APIKeyWO        types.String             `tfsdk:"api_key_wo"`
@@ -174,6 +179,12 @@ func (r *AIProviderResource) Schema(ctx context.Context, req resource.SchemaRequ
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+			},
+			"icon": schema.StringAttribute{
+				MarkdownDescription: "Relative path or external URL that specifies an icon to be displayed in the dashboard. If omitted, Coder shows the default icon for the provider type. Requires Coder v" + aiProviderIconMinVersion + " or later.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString(""),
 			},
 			"enabled": schema.BoolAttribute{
 				MarkdownDescription: "Whether this AI provider is enabled. Defaults to true.",
@@ -497,6 +508,7 @@ func (r *AIProviderResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
 	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
+	checkIconDropped(plan, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -573,6 +585,7 @@ func (r *AIProviderResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	checkBedrockRoleARNDropped(config, provider, &resp.Diagnostics)
 	checkBedrockProtocolDropped(config, provider, &resp.Diagnostics)
+	checkIconDropped(plan, provider, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -614,6 +627,7 @@ func (m AIProviderResourceModel) createRequest(config AIProviderResourceModel, d
 		Type:        codersdk.AIProviderType(m.Type.ValueString()),
 		Name:        m.Name.ValueString(),
 		DisplayName: config.DisplayName.ValueString(),
+		Icon:        m.Icon.ValueString(),
 		Enabled:     m.Enabled.ValueBool(),
 		BaseURL:     m.BaseURL.ValueString(),
 		APIKeys:     apiKeys,
@@ -626,6 +640,10 @@ func (m AIProviderResourceModel) updateRequest(state, config AIProviderResourceM
 	if !m.DisplayName.Equal(state.DisplayName) {
 		v := config.DisplayName.ValueString()
 		patch.DisplayName = &v
+	}
+	if !m.Icon.Equal(state.Icon) {
+		v := m.Icon.ValueString()
+		patch.Icon = &v
 	}
 	if !m.Enabled.Equal(state.Enabled) {
 		v := m.Enabled.ValueBool()
@@ -731,6 +749,7 @@ func (m AIProviderResourceModel) stateFromProvider(provider codersdk.AIProvider)
 		Type:         types.StringValue(string(provider.Type)),
 		Name:         types.StringValue(provider.Name),
 		DisplayName:  types.StringValue(provider.DisplayName),
+		Icon:         types.StringValue(provider.Icon),
 		Enabled:      types.BoolValue(provider.Enabled),
 		BaseURL:      types.StringValue(provider.BaseURL),
 		CreatedAt:    types.Int64Value(provider.CreatedAt.Unix()),
@@ -827,6 +846,20 @@ func checkBedrockProtocolDropped(config AIProviderResourceModel, provider coders
 		path.Root("settings").AtName("bedrock").AtName("protocol"),
 		"Bedrock protocol not supported by this Coder deployment",
 		"The Coder server accepted the request but did not persist `protocol`, which means it predates Bedrock protocol selection. Upgrade to Coder v2.36.0 or later, or remove `protocol`.",
+	)
+}
+
+// A Coder server older than v2.36.0 drops the unknown icon JSON key, so a
+// configured value round-trips to empty and Terraform reports an inconsistent
+// result. Fail loudly instead (mirrors checkBedrockRoleARNDropped).
+func checkIconDropped(plan AIProviderResourceModel, provider codersdk.AIProvider, diags *diag.Diagnostics) {
+	if plan.Icon.IsNull() || plan.Icon.IsUnknown() || plan.Icon.ValueString() == "" || provider.Icon != "" {
+		return
+	}
+	diags.AddAttributeError(
+		path.Root("icon"),
+		"AI provider icon not supported by this Coder deployment",
+		"The Coder server accepted the request but did not persist `icon`, which means it predates AI provider icons. Upgrade to Coder v"+aiProviderIconMinVersion+" or later, or remove `icon`.",
 	)
 }
 

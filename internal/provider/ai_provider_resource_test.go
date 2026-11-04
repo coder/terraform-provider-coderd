@@ -49,17 +49,21 @@ func TestAccAIProviderResource(t *testing.T) {
 		Token:            client.SessionToken(),
 		OpenAIKey:        "sk-test-primary-000000",
 		OpenAIKeyVersion: 1,
+		OpenAIIcon:       "/icon/openai.svg",
 		BedrockBaseURL:   "https://bedrock-runtime.us-east-1.amazonaws.com",
 	}
 	cfg2 := cfg1
 	cfg2.OpenAIKey = "sk-test-primary-111111"
 	cfg2.OpenAIKeyVersion = 2
+	cfg2.OpenAIIcon = "/emojis/1f916.png"
 	// Changing base_url to a different region must re-derive settings.bedrock.region.
 	cfg3 := cfg2
 	cfg3.BedrockBaseURL = "https://bedrock-runtime.us-west-2.amazonaws.com"
 	cfg4 := cfg3
 	cfg4.OpenAIKey = ""
 	cfg4.OpenAIKeyVersion = 3
+	// Removing icon from configuration clears it.
+	cfg4.OpenAIIcon = ""
 
 	resource.Test(t, resource.TestCase{
 		IsUnitTest:               true,
@@ -71,6 +75,8 @@ func TestAccAIProviderResource(t *testing.T) {
 				Config: cfg1.String(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "name", "openai-acc"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "icon", cfg1.OpenAIIcon),
+					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "icon", ""),
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg1.OpenAIKey)),
 					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_wo"),
 					resource.TestCheckResourceAttr("coderd_ai_provider.bedrock", "settings.bedrock.region", "us-east-1"),
@@ -88,6 +94,7 @@ func TestAccAIProviderResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_wo_version", "2"),
 					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "api_key_masked", aibridgeutils.MaskSecret(cfg2.OpenAIKey)),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "icon", cfg2.OpenAIIcon),
 				),
 			},
 			{
@@ -98,7 +105,10 @@ func TestAccAIProviderResource(t *testing.T) {
 			},
 			{
 				Config: cfg4.String(t),
-				Check:  resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_masked"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("coderd_ai_provider.openai", "api_key_masked"),
+					resource.TestCheckResourceAttr("coderd_ai_provider.openai", "icon", ""),
+				),
 			},
 		},
 	})
@@ -109,6 +119,7 @@ type testAccAIProviderResourceConfig struct {
 	Token            string
 	OpenAIKey        string
 	OpenAIKeyVersion int
+	OpenAIIcon       string
 	BedrockBaseURL   string
 }
 
@@ -124,6 +135,9 @@ resource "coderd_ai_provider" "openai" {
   type         = "openai"
   name         = "openai-acc"
   display_name = "OpenAI Acceptance"
+{{- if .OpenAIIcon}}
+  icon         = "{{.OpenAIIcon}}"
+{{- end}}
   enabled      = true
   base_url     = "https://api.openai.com/v1"
 
@@ -1209,6 +1223,34 @@ func TestAIProviderStateFromProviderMapsEmptyBedrockStringsToNull(t *testing.T) 
 	require.True(t, b.RoleARN.IsNull())
 }
 
+func TestAIProviderCheckIconDropped(t *testing.T) {
+	t.Parallel()
+
+	const icon = "/icon/openai.svg"
+	for name, tc := range map[string]struct {
+		plan      types.String
+		response  string
+		wantError bool
+	}{
+		"icon stripped by old server": {plan: types.StringValue(icon), response: "", wantError: true},
+		"icon persisted":              {plan: types.StringValue(icon), response: icon},
+		"icon not configured":         {plan: types.StringValue(""), response: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var diags diag.Diagnostics
+			checkIconDropped(AIProviderResourceModel{Icon: tc.plan}, codersdk.AIProvider{Icon: tc.response}, &diags)
+			if tc.wantError {
+				require.True(t, diags.HasError(), "expected a diagnostic")
+				require.Contains(t, diags.Errors()[0].Summary(), "AI provider icon not supported by this Coder deployment")
+			} else {
+				require.False(t, diags.HasError(), diags.Errors())
+			}
+		})
+	}
+}
+
 func TestAIProviderCheckBedrockRoleARNDropped(t *testing.T) {
 	t.Parallel()
 
@@ -1398,6 +1440,38 @@ func TestAIProviderCreateRequestClaudePlatformAWS(t *testing.T) {
 		Region:      "us-east-1",
 		WorkspaceID: "wrkspc_test",
 	}, req.Settings.ClaudePlatformAWS)
+}
+
+func TestAIProviderUpdateRequestIcon(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		state, plan string
+		want        *string
+	}{
+		"unchanged": {state: "/icon/openai.svg", plan: "/icon/openai.svg", want: nil},
+		"changed":   {state: "/icon/openai.svg", plan: "/emojis/1f916.png", want: new("/emojis/1f916.png")},
+		"cleared":   {state: "/icon/openai.svg", plan: "", want: new("")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			state := AIProviderResourceModel{
+				Type:        types.StringValue(string(codersdk.AIProviderTypeOpenAI)),
+				DisplayName: types.StringValue("OpenAI"),
+				Icon:        types.StringValue(tc.state),
+				Enabled:     types.BoolValue(true),
+				BaseURL:     types.StringValue("https://api.openai.com/v1"),
+			}
+			plan := state
+			plan.Icon = types.StringValue(tc.plan)
+
+			var diags diag.Diagnostics
+			patch := plan.updateRequest(state, plan, &diags)
+			require.False(t, diags.HasError(), diags.Errors())
+			require.Equal(t, tc.want, patch.Icon)
+		})
+	}
 }
 
 func TestAIProviderUpdateRequestClaudePlatformAWS(t *testing.T) {
