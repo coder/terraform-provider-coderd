@@ -54,6 +54,7 @@ resource "coderd_ai_provider" "openai" {
   type         = "openai"
   name         = "openai"
   display_name = "OpenAI"
+  icon         = "/icon/openai.svg"
   enabled      = true
   base_url     = "https://api.openai.com/v1"
 
