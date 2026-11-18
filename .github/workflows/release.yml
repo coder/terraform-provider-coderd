@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  goreleaser:
+  release:
     # coder/terraform-provider-coder holds the one copy of the steps that sign a Coder provider
     # release. coder/gcp only lets main's copy act as the signer, so a tag chooses the commit to
     # release, but not the steps that sign it. It refuses to release unless the Cloud KMS key
