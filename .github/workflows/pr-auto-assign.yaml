@@ -3,6 +3,7 @@
 name: PR Auto Assign
 
 on:
+  # zizmor: ignore[dangerous-triggers] Assigning the author of a fork PR needs a write token, and this job never checks out PR code.
   pull_request_target:
     types: [opened]
 
