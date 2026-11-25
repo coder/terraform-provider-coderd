@@ -17,7 +17,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/config"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -2649,4 +2651,62 @@ func TestUnknownTFVarsDeserialization(t *testing.T) {
 		require.False(t, d.HasError())
 		require.Empty(t, vars)
 	})
+}
+
+func TestTemplateResourceModifyPlanClassicFlowWarning(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	schemaResp := &frameworkresource.SchemaResponse{}
+	(&TemplateResource{}).Schema(ctx, frameworkresource.SchemaRequest{}, schemaResp)
+	require.False(t, schemaResp.Diagnostics.HasError())
+	s := schemaResp.Schema
+	objType, ok := s.Type().TerraformType(ctx).(tftypes.Object)
+	require.True(t, ok)
+
+	templateObject := func(classic any) tftypes.Value {
+		attrs := make(map[string]tftypes.Value, len(objType.AttributeTypes))
+		for name, typ := range objType.AttributeTypes {
+			attrs[name] = tftypes.NewValue(typ, nil)
+		}
+		attrs["use_classic_parameter_flow"] = tftypes.NewValue(tftypes.Bool, classic)
+		return tftypes.NewValue(objType, attrs)
+	}
+	nullObject := tftypes.NewValue(objType, nil)
+
+	for _, tc := range []struct {
+		name         string
+		config       tftypes.Value
+		plan         tftypes.Value
+		state        tftypes.Value
+		wantWarnings int
+	}{
+		{name: "WarnsWhenTrue", config: templateObject(true), plan: templateObject(true), state: nullObject, wantWarnings: 1},
+		{name: "WarnsWhenTrueCarriedFromState", config: templateObject(nil), plan: templateObject(true), state: templateObject(true), wantWarnings: 1},
+		{name: "SilentWhenFalse", config: templateObject(false), plan: templateObject(false), state: nullObject},
+		{name: "SilentWhenNull", config: templateObject(nil), plan: templateObject(nil), state: nullObject},
+		{name: "SilentWhenUnknown", config: templateObject(nil), plan: templateObject(tftypes.UnknownValue), state: nullObject},
+		{name: "SilentOnDestroyPlan", config: nullObject, plan: nullObject, state: templateObject(true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			resp := &frameworkresource.ModifyPlanResponse{Plan: tfsdk.Plan{Schema: s, Raw: tc.plan}}
+			(&TemplateResource{}).ModifyPlan(ctx, frameworkresource.ModifyPlanRequest{
+				Config: tfsdk.Config{Schema: s, Raw: tc.config},
+				Plan:   tfsdk.Plan{Schema: s, Raw: tc.plan},
+				State:  tfsdk.State{Schema: s, Raw: tc.state},
+			}, resp)
+
+			require.False(t, resp.Diagnostics.HasError(), resp.Diagnostics)
+			warnings := resp.Diagnostics.Warnings()
+			require.Len(t, warnings, tc.wantWarnings)
+			for _, w := range warnings {
+				withPath, ok := w.(diag.DiagnosticWithPath)
+				require.True(t, ok)
+				require.True(t, withPath.Path().Equal(pathUseClassicParameterFlow))
+			}
+		})
+	}
 }

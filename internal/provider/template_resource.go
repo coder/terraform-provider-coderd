@@ -43,9 +43,14 @@ var (
 	_ resource.Resource                     = &TemplateResource{}
 	_ resource.ResourceWithImportState      = &TemplateResource{}
 	_ resource.ResourceWithConfigValidators = &TemplateResource{}
+	_ resource.ResourceWithModifyPlan       = &TemplateResource{}
 )
 
-const templateAgentsAllowedMinVersion = "2.37.0"
+const (
+	templateAgentsAllowedMinVersion = "2.37.0"
+)
+
+var pathUseClassicParameterFlow = path.Root("use_classic_parameter_flow")
 
 func NewTemplateResource() resource.Resource {
 	return &TemplateResource{}
@@ -463,7 +468,7 @@ func (r *TemplateResource) Schema(ctx context.Context, req resource.SchemaReques
 				},
 			},
 			"use_classic_parameter_flow": schema.BoolAttribute{
-				MarkdownDescription: "If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.",
+				MarkdownDescription: "**Deprecated:** the classic parameter flow will be removed in a future release. If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to `false`. Set to false to use dynamic parameters.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.Bool{
@@ -939,6 +944,23 @@ func (r *TemplateResource) ImportState(ctx context.Context, req resource.ImportS
 		resp.Diagnostics.AddError("Client Error", "Invalid import ID format, expected a single UUID or `<organization-name>/<template-name>`")
 		return
 	}
+}
+
+func (r *TemplateResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var classic types.Bool
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, pathUseClassicParameterFlow, &classic)...)
+	if resp.Diagnostics.HasError() || classic.IsUnknown() || classic.IsNull() || !classic.ValueBool() {
+		return
+	}
+	resp.Diagnostics.AddAttributeWarning(
+		pathUseClassicParameterFlow,
+		"Classic parameter flow is deprecated",
+		"This template uses the classic parameter flow, which will be removed in a future release. "+
+			"Set `use_classic_parameter_flow = false` to migrate to dynamic parameters; after that apply, the attribute can be removed.",
+	)
 }
 
 // ConfigValidators implements resource.ResourceWithConfigValidators.

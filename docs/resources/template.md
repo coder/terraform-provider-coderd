@@ -84,7 +84,7 @@ resource "coderd_template" "ubuntu-main" {
 - `require_active_version` (Boolean) (Enterprise) Whether workspaces must be created from the active version of this template. Defaults to false.
 - `time_til_dormant_autodelete_ms` (Number) (Enterprise) The max lifetime before Coder permanently deletes dormant workspaces created from this template.
 - `time_til_dormant_ms` (Number) (Enterprise) The max lifetime before Coder locks inactive workspaces created from this template, in milliseconds.
-- `use_classic_parameter_flow` (Boolean) If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to false.
+- `use_classic_parameter_flow` (Boolean) **Deprecated:** the classic parameter flow will be removed in a future release. If true, the classic parameter flow will be used when creating workspaces from this template. Defaults to `false`. Set to false to use dynamic parameters.
 - `versions` (Attributes List) The template versions to manage. If null, Terraform will not create, update, or read template versions, and will only manage the template's other settings. At least one version (with `active = true`) is required when creating a new template, since Coder templates cannot exist without a version. (see [below for nested schema](#nestedatt--versions))
 
 ### Read-Only
